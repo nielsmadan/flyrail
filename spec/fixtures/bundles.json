@@ -1,0 +1,173 @@
+{
+  "format": 1,
+  "cases": [
+    {
+      "name": "empty-skill",
+      "manifest": {
+        "schema_version": 1,
+        "id": "tiny",
+        "version": "1",
+        "skills": [
+          {
+            "name": "a",
+            "path": "a",
+            "executables": []
+          }
+        ]
+      },
+      "directories": [
+        "a"
+      ],
+      "files": [
+        {
+          "path": "a/SKILL.md",
+          "data_hex": ""
+        }
+      ],
+      "entries": [
+        {
+          "path": "a",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "a/SKILL.md",
+          "data_hex": "",
+          "executable": false
+        }
+      ],
+      "framing_hex": "666c797261696c2d636f6e74656e742d76310000000000000000024400000000000000016146000000000000000a612f534b494c4c2e6d64000000000000000000",
+      "content_digest": "f614cdad442379913268af2f5ae845915ad12ff99086dc91e65f2a7e5b73fdb6"
+    },
+    {
+      "name": "one-byte-executable",
+      "manifest": {
+        "schema_version": 1,
+        "id": "tiny",
+        "version": "1",
+        "skills": [
+          {
+            "name": "a",
+            "path": "a",
+            "executables": [
+              "SKILL.md"
+            ]
+          }
+        ]
+      },
+      "directories": [
+        "a"
+      ],
+      "files": [
+        {
+          "path": "a/SKILL.md",
+          "data_hex": "78"
+        }
+      ],
+      "entries": [
+        {
+          "path": "a",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "a/SKILL.md",
+          "data_hex": "78",
+          "executable": true
+        }
+      ],
+      "framing_hex": "666c797261696c2d636f6e74656e742d76310000000000000000024400000000000000016146000000000000000a612f534b494c4c2e6d6401000000000000000178",
+      "content_digest": "60d218025231888d31be0470022d0b23de7c1565720e02a2b7d28cdf503bbb97"
+    },
+    {
+      "name": "binary-unicode-empty-directories",
+      "manifest": {
+        "schema_version": 1,
+        "id": "team-tools",
+        "version": "  Autumn 二  ",
+        "skills": [
+          {
+            "name": "notes",
+            "path": "notes"
+          },
+          {
+            "name": "code-review",
+            "path": "content/code-review",
+            "executables": [
+              "tools/run.sh"
+            ]
+          }
+        ]
+      },
+      "directories": [
+        "content/code-review/empty"
+      ],
+      "files": [
+        {
+          "path": "content/code-review/SKILL.md",
+          "data_hex": "2d2d2d0d0a6e616d653a207072657365727665640d0a756e6b6e6f776e3a205b756e7465726d696e617465640d0a2d2d2d0d0a"
+        },
+        {
+          "path": "content/code-review/assets/café.bin",
+          "data_hex": "00ff800d0a"
+        },
+        {
+          "path": "content/code-review/tools/run.sh",
+          "data_hex": "23212f62696e2f73680a6578697420300a"
+        },
+        {
+          "path": "notes/SKILL.md",
+          "data_hex": "23204e6f7465730a"
+        }
+      ],
+      "entries": [
+        {
+          "path": "code-review",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "code-review/SKILL.md",
+          "data_hex": "2d2d2d0d0a6e616d653a207072657365727665640d0a756e6b6e6f776e3a205b756e7465726d696e617465640d0a2d2d2d0d0a",
+          "executable": false
+        },
+        {
+          "path": "code-review/assets",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "code-review/assets/café.bin",
+          "data_hex": "00ff800d0a",
+          "executable": false
+        },
+        {
+          "path": "code-review/empty",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "code-review/tools",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "code-review/tools/run.sh",
+          "data_hex": "23212f62696e2f73680a6578697420300a",
+          "executable": true
+        },
+        {
+          "path": "notes",
+          "data_hex": null,
+          "executable": false
+        },
+        {
+          "path": "notes/SKILL.md",
+          "data_hex": "23204e6f7465730a",
+          "executable": false
+        }
+      ],
+      "content_digest": "0d8ce09b59f6f98cca7e748edeb35545cfd6192186883d1198d5b4c74d3fd7db"
+    }
+  ]
+}
