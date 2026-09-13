@@ -34,9 +34,9 @@ On Windows, virtual-environment executables are under `Scripts`:
 `Scripts/flyrail-checksum.exe`. Use those paths in the commands above. The example
 destinations stay inside the checkout's ignored cache.
 
-Run `just package-check` to exercise built distributions with the pinned tools.
+Run `just check-package` to exercise built distributions with the pinned tools.
 It retains its artifacts and disposable installation under
-`python/.cache/package-check/` and prints the run directory when it finishes.
+`python/.cache/check-package/` and prints the run directory when it finishes.
 
 ## Explicit configuration commands
 
@@ -98,7 +98,7 @@ restore directories omitted upstream. Include a visible placeholder such as
 and explicit-ZIP conformance tests separately cover genuinely empty directories.
 No additional manifest schema is needed for this packaging constraint.
 
-## What package-check verifies
+## What check-package verifies
 
 The shared `just check` also runs this gate. It compares wheel payloads and source
 archive members against expected source bytes, checks metadata and dependencies,

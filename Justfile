@@ -17,11 +17,11 @@ lock:
 build:
     {{python}} python/scripts/check.py build
 
-package-check:
-    {{python}} python/scripts/check.py package-check
+check-package:
+    {{python}} python/scripts/check.py check-package
 
-dependency-audit:
-    {{python}} python/scripts/check.py dependency-audit
+audit-dependencies:
+    {{python}} python/scripts/check.py audit-dependencies
 
-workflow-check:
-    {{python}} python/scripts/check.py workflow-check
+check-workflow:
+    {{python}} python/scripts/check.py check-workflow

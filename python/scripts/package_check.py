@@ -123,7 +123,7 @@ def main() -> int:
     require(uv is not None, "uv is required")
     if uv is None:
         return 1
-    workspace = ROOT / ".cache/package-check"
+    workspace = ROOT / ".cache/check-package"
     workspace.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="run-", dir=workspace)).resolve()
     consumer = work / "consumer"

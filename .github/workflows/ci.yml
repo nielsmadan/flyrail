@@ -34,7 +34,7 @@ jobs:
       - name: Shared checks and package QA
         run: python python/scripts/check.py check
 
-  dependency-audit:
+  audit-dependencies:
     name: Dependency audit
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -50,9 +50,9 @@ jobs:
           version: '0.12.13'
           enable-cache: false
       - name: Audit all locked dependency groups and platforms
-        run: python python/scripts/check.py dependency-audit
+        run: python python/scripts/check.py audit-dependencies
 
-  workflow-check:
+  check-workflow:
     name: Workflow validation
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -75,4 +75,4 @@ jobs:
             .cache/tools/actionlint/archive.tar.gz | sha256sum --check --strict
           tar -xzf .cache/tools/actionlint/archive.tar.gz -C .cache/tools/actionlint actionlint
       - name: Validate workflows
-        run: python python/scripts/check.py workflow-check
+        run: python python/scripts/check.py check-workflow

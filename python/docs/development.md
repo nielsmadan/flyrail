@@ -26,9 +26,9 @@ contains the Linux download and checksum command.
 | Command | Work performed |
 | --- | --- |
 | `just check` | Locked sync, Ruff format/lint/security checks, strict mypy, pytest with branch coverage, and package/consumer checks. |
-| `just dependency-audit` | Audit every locked registry package/version with pip-audit. |
-| `just workflow-check` | Validate all repository workflows with actionlint. |
-| `just package-check` | Build and verify distributions and installed example applications. |
+| `just audit-dependencies` | Audit every locked registry package/version with pip-audit. |
+| `just check-workflow` | Validate all repository workflows with actionlint. |
+| `just check-package` | Build and verify distributions and installed example applications. |
 | `just build` | Build the wheel and source archive into `python/dist/`. |
 | `just format` | Format Python code with Ruff. |
 | `just sync` | Synchronize `python/.venv` to the locked environment. |
@@ -51,15 +51,15 @@ interpreter checks sequentially because they share `python/.venv`.
 `check` fails on any failed command, no tests, or combined line/branch coverage
 below 95%. Platform-specific tests run on applicable hosts. Package checks verify
 exact payloads, metadata, source-archive rebuilds, installed typing and actual
-example CLI behavior; see [examples](examples.md#what-package-check-verifies).
+example CLI behavior; see [examples](examples.md#what-check-package-verifies).
 
-`dependency-audit` uses the live PyPI vulnerability service and every locked
+`audit-dependencies` uses the live PyPI vulnerability service and every locked
 registry version across all dependency groups and platform markers. It uses
 `--no-deps --disable-pip` to avoid a fresh resolution and `--strict` to fail
 incomplete lookups. Vulnerability findings and lookup failures fail the command.
 It does not assess native uv/actionlint binaries or GitHub Actions.
 
-`workflow-check` validates YAML, expressions, action inputs, matrices and job
+`check-workflow` validates YAML, expressions, action inputs, matrices and job
 dependencies. Optional shellcheck/pyflakes integrations are disabled so results
 do not depend on unpinned local tools. Dependency audit and workflow validation
 are separate commands and CI jobs.
@@ -72,7 +72,7 @@ review reports, handoffs and other session records in ignored cache directories.
 Do not paste machine-specific paths into tracked files.
 
 Tools, downloaded interpreters, dependency caches and temporary roots use the
-repository-root `.cache/`. Python reports, package-check installations and tool
+repository-root `.cache/`. Python reports, check-package installations and tool
 caches use `python/.cache/`; the environment uses `python/.venv/` and release
 artifacts use `python/dist/`. Scripts preserve HOME and tests use isolated targets.
 The root `lefthook.yml` configures `just check`; maintainers manage hook activation.
@@ -98,7 +98,7 @@ are embedded tool versions, separate from action versions.
 
 1. Set the package version in `pyproject.toml` and run `just lock`. Host application
    versions and skill bundle labels change independently.
-2. Run `just check`, `just dependency-audit` and `just workflow-check`, and obtain
+2. Run `just check`, `just audit-dependencies` and `just check-workflow`, and obtain
    passing native CI results for every OS/interpreter cell.
 3. Run `just build` and review the wheel and source archive in `python/dist/`.
 4. Publish the reviewed artifact filenames with `uv publish` when the release is

@@ -35,8 +35,8 @@ The root commands currently run the Python implementation:
 
 ```sh
 just check
-just dependency-audit
-just workflow-check
+just audit-dependencies
+just check-workflow
 ```
 
 Without just, run `python3 python/scripts/check.py check` from this directory

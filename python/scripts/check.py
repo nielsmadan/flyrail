@@ -48,16 +48,16 @@ def main() -> int:
             "sync",
             "lock",
             "build",
-            "package-check",
-            "dependency-audit",
-            "workflow-check",
+            "check-package",
+            "audit-dependencies",
+            "check-workflow",
         ),
         default="check",
         nargs="?",
     )
     arguments = parser.parse_args()
     environment = tool_environment()
-    if arguments.action == "workflow-check":
+    if arguments.action == "check-workflow":
         return subprocess.run(
             [sys.executable, "scripts/workflow_check.py"], cwd=ROOT, env=environment, check=False
         ).returncode
@@ -77,7 +77,7 @@ def main() -> int:
             [uv, "run", "--no-sync", "mypy"],
             [uv, "run", "--no-sync", "pytest"],
         ]
-    elif arguments.action == "dependency-audit":
+    elif arguments.action == "audit-dependencies":
         commands = [
             [uv, "sync", "--locked", "--all-groups"],
             [uv, "run", "--no-sync", "python", "scripts/dependency_audit.py"],
@@ -85,7 +85,7 @@ def main() -> int:
     elif arguments.action == "build":
         python = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         commands += [[uv, "build", "--no-build-isolation", "--python", str(python)]]
-    if arguments.action in {"check", "package-check"}:
+    if arguments.action in {"check", "check-package"}:
         commands += [[uv, "run", "--no-sync", "python", "scripts/package_check.py"]]
     for command in commands:
         print(f"+ {' '.join(command)}", flush=True)
