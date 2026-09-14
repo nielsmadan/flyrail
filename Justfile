@@ -2,6 +2,10 @@ python := if os() == "windows" { "python" } else { "python3" }
 
 default: check
 
+setup:
+    {{python}} python/scripts/check.py sync
+    lefthook install
+
 check:
     {{python}} python/scripts/check.py check
 

@@ -31,6 +31,7 @@ filesystem limits.
 
 ## Development
 
+`just setup` synchronizes the locked environment and installs the Git hooks.
 The root commands currently run the Python implementation:
 
 ```sh

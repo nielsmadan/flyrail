@@ -2,3 +2,8 @@ pre-commit:
   commands:
     check:
       run: just check
+
+pre-push:
+  commands:
+    check:
+      run: just check
