@@ -178,7 +178,17 @@ def test_windows_principal_binding(monkeypatch: pytest.MonkeyPatch, case: str) -
 
 @pytest.mark.parametrize(
     "case",
-    ["private", "deny", "foreign", "unknown-ace", "missing", "null", "dacl-fail", "ace-fail"],
+    [
+        "private",
+        "owner-rights",
+        "deny",
+        "foreign",
+        "unknown-ace",
+        "missing",
+        "null",
+        "dacl-fail",
+        "ace-fail",
+    ],
 )
 def test_private_backup_dacl_is_checked_on_the_payload_not_only_its_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
@@ -204,9 +214,13 @@ def test_private_backup_dacl_is_checked_on_the_payload_not_only_its_parent(
     monkeypatch.setattr(security, "security", lambda path: b"dacl")
     monkeypatch.setattr(security, "principals", lambda descriptor: ("owner", "group"))
     monkeypatch.setattr(
-        security, "_sid_text", lambda pointer: "world" if case == "foreign" else "owner"
+        security,
+        "_sid_text",
+        lambda pointer: (
+            "world" if case == "foreign" else "S-1-3-4" if case == "owner-rights" else "owner"
+        ),
     )
-    if case in {"private", "deny"}:
+    if case in {"private", "owner-rights", "deny"}:
         security.ensure_private(tmp_path / "backup")
     else:
         with pytest.raises(OSError):

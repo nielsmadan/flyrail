@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -30,10 +31,19 @@ release = load_script("release.py")
 workflow = load_script("release_workflow.py")
 
 
+def git_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in tuple(environment):
+        if name.startswith("GIT_"):
+            del environment[name]
+    return environment
+
+
 def git(root: Path, *args: str, input_text: str | None = None) -> str:
     result = subprocess.run(  # noqa: S603
         [GIT, *args],
         cwd=root,
+        env=git_environment(),
         input=input_text,
         text=True,
         capture_output=True,
@@ -54,6 +64,7 @@ def add_commit(
         result = subprocess.run(  # noqa: S603
             [GIT, "rev-parse", "--verify", ref],
             cwd=root,
+            env=git_environment(),
             text=True,
             capture_output=True,
             check=False,
@@ -89,6 +100,26 @@ def repository(tmp_path: Path, message: str = "feat: initial Python release") ->
     git(root, "remote", "add", "origin", str(remote))
     git(root, "fetch", "origin")
     return root, remote
+
+
+def test_git_fixtures_ignore_inherited_repository_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    git(caller, "init", "--initial-branch=main")
+    add_commit(caller, "refs/heads/main", "test: caller", "caller.txt", "caller\n")
+    git(caller, "reset", "--hard", "HEAD")
+    caller_index = caller / ".git/index"
+    before = caller_index.read_bytes()
+    monkeypatch.setenv("GIT_INDEX_FILE", str(caller_index))
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+
+    repository(fixture)
+
+    assert caller_index.read_bytes() == before
+    assert git(caller, "ls-files") == "caller.txt"
 
 
 def annotated_tag(root: Path, name: str, target: str | None = None) -> str:

@@ -305,6 +305,7 @@ def ensure_private(path: Path) -> None:
             continue
         if kind != 0 or _sid_text(ctypes.c_void_p(ace.value + 8)) not in {
             owner,
+            "S-1-3-4",
             "S-1-5-18",
             "S-1-5-32-544",
         }:
