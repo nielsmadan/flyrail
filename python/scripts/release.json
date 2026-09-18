@@ -1,0 +1,47 @@
+{
+  "branch": "main",
+  "initial_version": "0.1.0",
+  "tag_prefix": "python-v",
+  "paths": ["python", "spec"],
+  "checks": [
+    ["just", "check"],
+    ["just", "audit-dependencies"],
+    ["just", "check-workflow"]
+  ],
+  "tools": ["git", "gh", "just", "uvx"],
+  "stages": [
+    {
+      "files": [
+        "python/pyproject.toml",
+        "python/examples/filesystem/pyproject.toml",
+        "python/examples/packaged/pyproject.toml",
+        "python/uv.lock",
+        "python/CHANGELOG.md"
+      ],
+      "commands": [
+        ["{python}", "python/scripts/prepare_release.py", "{version}"],
+        ["{python}", "python/scripts/check.py", "lock"],
+        [
+          "uvx",
+          "git-cliff@2.13.1",
+          "--config",
+          "python/cliff.toml",
+          "--include-path",
+          "python/**",
+          "--include-path",
+          "spec/**",
+          "--tag",
+          "python-v{version}",
+          "-o",
+          "python/CHANGELOG.md"
+        ]
+      ],
+      "checks": [["just", "check-package"]],
+      "message": "chore: release Python {version}"
+    }
+  ],
+  "name": "Flyrail for Python",
+  "repository": "nielsmadan/flyrail",
+  "workflow": "release-python.yml",
+  "publication": "pyflyrail on PyPI and a Python GitHub release"
+}

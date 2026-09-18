@@ -9,7 +9,7 @@ receipt and transaction formats in `spec/`.
 
 | Implementation | Status | Documentation |
 | --- | --- | --- |
-| Python | Prototype; Python 3.11+ | [API and quickstart](python/README.md) |
+| Python | Alpha; Python 3.11+ | [API and quickstart](python/README.md) |
 
 Swift, Rust, Go and TypeScript implementations can use the same contracts and
 conformance fixtures. Their public APIs should be native to each language.
@@ -44,6 +44,9 @@ just check
 just audit-dependencies
 just check-workflow
 ```
+
+Install the published Python distribution with `python -m pip install pyflyrail`;
+the import package is `flyrail`.
 
 Without just, run `python3 python/scripts/check.py check` from this directory
 (Windows: `python`). See [Python development](python/docs/development.md) for tool

@@ -29,3 +29,10 @@ audit-dependencies:
 
 check-workflow:
     {{python}} python/scripts/check.py check-workflow
+
+[positional-arguments]
+release *args:
+    {{python}} python/scripts/release.py "$@"
+
+changelog:
+    uvx git-cliff@2.13.1 --config python/cliff.toml --include-path "python/**" --include-path "spec/**" -o python/CHANGELOG.md

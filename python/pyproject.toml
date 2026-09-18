@@ -3,7 +3,7 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "flyrail"
+name = "pyflyrail"
 version = "0.1.0"
 description = "A typed library for reversible coding-agent configuration bundles."
 readme = "README.md"
@@ -25,6 +25,11 @@ classifiers = [
 ]
 dependencies = ["tomlkit==0.15.1"]
 
+[project.urls]
+Documentation = "https://github.com/nielsmadan/flyrail/tree/main/python/docs"
+Issues = "https://github.com/nielsmadan/flyrail/issues"
+Repository = "https://github.com/nielsmadan/flyrail"
+
 [dependency-groups]
 audit = ["pip-audit==2.10.1"]
 dev = [
@@ -42,7 +47,7 @@ required-version = ">=0.12.13"
 packages = ["src/flyrail"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/runtime-tooling", "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/hatch_build.py", "/.gitignore"]
+include = ["/src", "/tests", "/runtime-tooling", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/hatch_build.py", "/.gitignore"]
 exclude = ["**/.git", "**/.cache", "**/.venv", "**/__pycache__", "**/*.py[cod]", "**/*.egg-info", "**/build", "**/dist", "**/.DS_Store", "**/*.log"]
 
 [tool.hatch.build.targets.sdist.hooks.custom]

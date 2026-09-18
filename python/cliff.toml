@@ -1,0 +1,81 @@
+[changelog]
+header = """
+# Changelog
+
+All notable user-facing changes to Flyrail for Python. Package versions are independent from
+configuration bundle labels and shared format schema versions.
+
+"""
+body = """
+{% if version -%}
+    ## [{{ version | trim_start_matches(pat="python-v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+    ## [Unreleased]
+{% endif -%}
+{% set breaking = commits | filter(attribute="breaking", value=true) -%}
+{% if breaking | length > 0 %}
+    ### Breaking Changes
+    {% for commit in breaking %}
+        - {{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+    {% endfor %}
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+    {% set grouped = commits | filter(attribute="breaking", value=false) -%}
+    {% if grouped | length > 0 %}
+        ### {{ group | striptags | trim | upper_first }}
+        {% for commit in grouped %}
+            - {{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+        {% endfor %}
+    {% endif -%}
+{% endfor %}\n
+"""
+footer = """
+{% for release in releases -%}
+    {% if release.version -%}
+        {% if release.previous and release.previous.version -%}
+            [{{ release.version | trim_start_matches(pat="python-v") }}]: \
+                https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+                    /compare/{{ release.previous.version }}..{{ release.version }}
+        {% else -%}
+            [{{ release.version | trim_start_matches(pat="python-v") }}]: \
+                https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+                    /tree/{{ release.version }}
+        {% endif -%}
+    {% else -%}
+        {% if release.previous and release.previous.version -%}
+            [unreleased]: https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+                /compare/{{ release.previous.version }}..HEAD
+        {% else -%}
+            [unreleased]: https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
+                /tree/HEAD
+        {% endif -%}
+    {% endif -%}
+{% endfor %}
+"""
+trim = true
+
+[remote.github]
+owner = "nielsmadan"
+repo = "flyrail"
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+filter_commits = true
+tag_pattern = "^python-v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+protect_breaking_commits = false
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^docs", skip = true },
+  { message = "^test", skip = true },
+  { message = "^refactor", skip = true },
+  { message = ".*", skip = true },
+]
+
+[bump]
+breaking_always_bump_major = false

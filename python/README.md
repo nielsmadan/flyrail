@@ -7,14 +7,14 @@ Python 3.11.10+, 3.12.4+, or 3.13+ for private directory creation.
 
 ## Install and use
 
-From this repository's `python/` directory, install into your application's virtual
-environment:
+Install the `pyflyrail` distribution from PyPI. The import package remains `flyrail`:
 
 ```sh
-python -m pip install .
+python -m pip install pyflyrail
 ```
 
-Run this example from `python/`:
+To install the current checkout instead, run `python -m pip install .` from `python/`.
+The following example uses the same public import in either installation:
 
 ```python
 from flyrail import Bundle, Target, inspect, install, uninstall, update

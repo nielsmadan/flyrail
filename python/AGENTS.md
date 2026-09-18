@@ -14,6 +14,8 @@ pytest branch-coverage checks. `just format` formats Python code. The same comma
 are available through `python3 scripts/check.py` (Windows: `python`). Set
 `UV_PYTHON` to check another supported interpreter; checks default to Python 3.11.
 Keep dependencies pinned in pyproject.toml and regenerate uv.lock with `just lock`.
+`just release --dry-run` previews a Python release. Creating a release commit or
+tag, pushing, and publishing require explicit user authorization.
 
 Keep caches, temporary files, downloaded tools, and test installations inside this
 checkout. The shared check script uses repository-root `.cache` for tools and temporary

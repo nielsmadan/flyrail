@@ -1,6 +1,6 @@
 # Python development
 
-[Tool setup](#tool-setup) · [Hook runtimes and shell probes](#hook-runtimes-and-shell-probes) · [Commands](#commands) · [Repository files and generated output](#repository-files-and-generated-output) · [CI and maintenance](#ci-and-maintenance) · [Preparing a release](#preparing-a-release)
+[Tool setup](#tool-setup) · [Hook runtimes and shell probes](#hook-runtimes-and-shell-probes) · [Commands](#commands) · [Repository files and generated output](#repository-files-and-generated-output) · [CI and maintenance](#ci-and-maintenance) · [Releasing Python](#releasing-python)
 
 Run the commands below from `python/`. The repository-root Justfile forwards the
 same commands here. Python 3.11+ and uv 0.12.13+ are required; just is optional.
@@ -129,12 +129,51 @@ under `/python` and GitHub Actions updates separately. Keep Hatchling's build an
 dev pins consistent. Update uv/actionlint versions and checksums explicitly; they
 are embedded tool versions, separate from action versions.
 
-## Preparing a release
+## Releasing Python
 
-1. Set the package version in `pyproject.toml` and run `just lock`. Host application
-   versions and configuration bundle labels change independently.
-2. Run `just check`, `just audit-dependencies` and `just check-workflow`, and obtain
-   passing native CI results for every OS/interpreter cell.
-3. Run `just build` and review the wheel and source archive in `python/dist/`.
-4. Publish the reviewed artifact filenames with `uv publish` when the release is
-   authorized. Check/build commands do not publish.
+Flyrail publishes the `pyflyrail` distribution while retaining the `flyrail`
+import package. Python package versions, configuration bundle labels and shared
+format schema versions are independent.
+
+Before the first release, add a pending PyPI Trusted Publisher for project
+`pyflyrail`, owner `nielsmadan`, repository `flyrail` and workflow
+`release-python.yml`, with no environment. The release workflow requests a
+short-lived OIDC identity and stores no PyPI token.
+
+Run releases from a clean, complete `main` checkout whose origin and local Python
+tags match:
+
+```sh
+just release --dry-run
+just release
+just release patch
+just release 0.2.0
+```
+
+The helper considers commits touching `python/` or `spec/`, proposes a semantic
+version from conventional commit subjects, then runs the complete check,
+dependency audit and workflow validation. After confirmation it updates the
+project and example dependency versions, refreshes `uv.lock` and
+[`CHANGELOG.md`](../CHANGELOG.md), creates one release commit, creates an annotated
+`python-vVERSION` tag and atomically pushes `main` with that tag. Package QA runs
+again against the prepared version before the release commit is created.
+
+CI validates that the immutable tag belongs to `main` and matches the project
+version. A read-only job reruns all release gates, builds and installs the sdist
+and wheel, and saves one verified artifact bundle. A separate OIDC-only job
+publishes the bundle to PyPI. Only after PyPI succeeds does a `contents: write`
+job create the GitHub Release and attach the same artifacts. The local helper
+reports the workflow and waits for publication.
+
+If publication fails after the tag is pushed, fix the workflow on `main` and
+retry the existing tag. Never move or replace a published tag:
+
+```sh
+gh workflow run release-python.yml --ref main -f tag=python-v0.1.0
+```
+
+Future implementations use independent ecosystem-aware tags: Python
+`python-vX.Y.Z`, Go under `go/` uses `go/vX.Y.Z`, Swift uses bare `X.Y.Z`, Rust
+uses `rust-vX.Y.Z` and TypeScript uses `typescript-vX.Y.Z`. A shared `spec/`
+change must pass every available implementation's conformance tests, but it does
+not force simultaneous registry publication.
