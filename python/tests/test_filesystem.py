@@ -68,11 +68,11 @@ def test_private_directory_platform_guard_accepts_supported_versions(
 
     with filesystem.target_lock(state, 0):
         assert (state / "lock").is_file()
-        assert (state / "lock").read_bytes() == (b"\0" if platform == "win32" else b"")
         assert lock.call_count == 1
 
     assert lock.call_count == 2
     assert lock.call_args.kwargs == {"release": True}
+    assert (state / "lock").read_bytes() == (b"\0" if platform == "win32" else b"")
 
 
 @pytest.mark.parametrize("kind", ["empty", "nonempty", "file"])
@@ -130,7 +130,7 @@ def test_windows_adapter_uses_os_rename(tmp_path: Path, monkeypatch: pytest.Monk
     rename.assert_called_once_with(tmp_path / "a", tmp_path / "b")
 
 
-def test_windows_lock_seeks_byte_zero_and_never_uses_blocking_mode(
+def test_windows_lock_uses_non_payload_byte_and_never_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[tuple[int, int, int]] = []
@@ -149,7 +149,7 @@ def test_windows_lock_seeks_byte_zero_and_never_uses_blocking_mode(
             filesystem._lock(stream.fileno())
             stream.seek(3)
             filesystem._lock(stream.fileno(), release=True)
-    assert calls == [(0, 2, 1), (0, 0, 1)]
+    assert calls == [(1 << 30, 2, 1), (1 << 30, 0, 1)]
 
 
 def test_lock_io_error_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

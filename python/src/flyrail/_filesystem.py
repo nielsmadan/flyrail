@@ -10,6 +10,8 @@ from pathlib import Path
 from flyrail._observation import ObservationFailure, Observer
 from flyrail.observations import ErrorCode
 
+_LOCK_OFFSET = 1 << 30
+
 
 def rename_exclusive(source: Path, destination: Path) -> None:
     if sys.platform == "win32" or os.name == "nt":
@@ -44,7 +46,7 @@ def _lock(fd: int, *, release: bool = False) -> None:
     if sys.platform == "win32":
         import msvcrt
 
-        os.lseek(fd, 0, os.SEEK_SET)
+        os.lseek(fd, _LOCK_OFFSET, os.SEEK_SET)
         msvcrt.locking(fd, msvcrt.LK_UNLCK if release else msvcrt.LK_NBLCK, 1)
     else:
         import fcntl
