@@ -68,6 +68,7 @@ def test_private_directory_platform_guard_accepts_supported_versions(
 
     with filesystem.target_lock(state, 0):
         assert (state / "lock").is_file()
+        assert (state / "lock").read_bytes() == (b"\0" if platform == "win32" else b"")
         assert lock.call_count == 1
 
     assert lock.call_count == 2

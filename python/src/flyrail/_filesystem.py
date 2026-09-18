@@ -82,6 +82,9 @@ def target_lock(
             on_created(path)
     ensure_private(state)
     with (state / "lock").open("a+b") as stream:
+        if sys.platform == "win32" and os.fstat(stream.fileno()).st_size == 0:
+            stream.write(b"\0")
+            stream.flush()
         metadata = Observer().metadata(state / "lock")
         opened = os.fstat(stream.fileno())
         if metadata is None or (metadata.st_dev, metadata.st_ino) != (opened.st_dev, opened.st_ino):
