@@ -11,5 +11,11 @@ class CustomBuildHook(BuildHookInterface[SdistBuilderConfig]):
         fixtures = root / "spec/fixtures"
         if not fixtures.is_dir():
             fixtures = root.parent / "spec/fixtures"
-        for name in ("bundles.json", "receipts.json", "transactions.json"):
+        for name in (
+            "bundles.json",
+            "configurations.json",
+            "edits.json",
+            "translations.json",
+            "hooks.json",
+        ):
             build_data["force_include"][str(fixtures / name)] = f"spec/fixtures/{name}"

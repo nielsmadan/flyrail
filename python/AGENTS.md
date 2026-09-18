@@ -1,12 +1,13 @@
 # Flyrail
 
-Flyrail is a synchronous Python 3.11+ library for installing skill bundles into
-explicit local agent directories. Keep runtime dependencies small and public
-values immutable. Library code must never print, prompt, exit, execute skill
-scripts, make network requests, or select installed agents automatically.
+Flyrail is a synchronous Python 3.11+ library for reversible skills, instructions,
+MCP registrations and hooks at explicit local destinations. Keep dependencies small
+and public values immutable. Python library calls must never print, prompt, exit, execute
+bundled commands, make network requests, or select installed agents automatically.
 
-Read README.md and the relevant docs before changing an interface. Public prose
-belongs in documentation. Prefer clear names over comments and docstrings.
+Read README.md and the relevant docs before changing an interface. Keep public
+API, lifecycle, translation and example docs consistent with behavioral changes.
+Public prose belongs in documentation. Prefer clear names over comments and docstrings.
 
 Use `just check` for the shared Ruff formatting/lint/security, strict mypy, and
 pytest branch-coverage checks. `just format` formats Python code. The same commands
@@ -27,3 +28,6 @@ shared check and read its exit status and full test summary before reporting.
 
 Shared conformance fixtures live in `../spec/fixtures`; packaging includes exact
 copies for tests in a standalone source distribution. Keep fixture bytes portable.
+
+Hook development checks require Node, npm and Bun; Python-only builds do not.
+See docs/development.md for runtime pins and optional Codex login-shell coverage.

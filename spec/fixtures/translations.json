@@ -1,0 +1,1114 @@
+{
+  "fixture_schema": 1,
+  "verified": "2026-09-12",
+  "cases": [
+    {
+      "name": "claude-cli-stdio",
+      "agent": "claude",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "codex-cli-stdio",
+      "agent": "codex",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".codex/config.toml",
+        "format": "toml",
+        "key": "mcp_servers",
+        "value": {
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "opencode-cli-stdio",
+      "agent": "opencode",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": "opencode.json",
+        "format": "jsonc",
+        "key": "mcp",
+        "value": {
+          "type": "local",
+          "command": [
+            "server",
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "environment": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "pi-cli-stdio",
+      "agent": "pi",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".pi/mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          },
+          "literalEnv": true
+        }
+      }
+    },
+    {
+      "name": "cursor-cli-stdio",
+      "agent": "cursor",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".cursor/mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "type": "stdio",
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "cursor-ide-stdio",
+      "agent": "cursor",
+      "surface": "ide",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".cursor/mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "type": "stdio",
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "copilot-cli-stdio",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "copilot-vscode-stdio",
+      "agent": "copilot",
+      "surface": "vscode",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server",
+              "--label",
+              "a b;\"quoted\""
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "destination": ".vscode/mcp.json",
+        "format": "jsonc",
+        "key": "servers",
+        "value": {
+          "type": "stdio",
+          "command": "server",
+          "args": [
+            "--label",
+            "a b;\"quoted\""
+          ],
+          "env": {
+            "MODE": "local"
+          }
+        }
+      }
+    },
+    {
+      "name": "claude-cli-http-bearer",
+      "agent": "claude",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "destination": ".claude.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "type": "http",
+          "headers": {
+            "Authorization": "Bearer ${TOOLS_TOKEN}"
+          }
+        }
+      }
+    },
+    {
+      "name": "codex-cli-http-bearer",
+      "agent": "codex",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "destination": ".codex/config.toml",
+        "format": "toml",
+        "key": "mcp_servers",
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env_var": "TOOLS_TOKEN"
+        }
+      }
+    },
+    {
+      "name": "opencode-cli-http-bearer",
+      "agent": "opencode",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "destination": ".config/opencode/opencode.json",
+        "format": "jsonc",
+        "key": "mcp",
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "type": "remote",
+          "headers": {
+            "Authorization": "Bearer {env:TOOLS_TOKEN}"
+          }
+        }
+      }
+    },
+    {
+      "name": "pi-cli-http-bearer",
+      "agent": "pi",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "destination": ".pi/agent/mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "auth": "bearer",
+          "bearerTokenEnv": "TOOLS_TOKEN"
+        }
+      }
+    },
+    {
+      "name": "cursor-ide-http-bearer",
+      "agent": "cursor",
+      "surface": "ide",
+      "scope": "user",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "destination": ".cursor/mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "type": "http",
+          "headers": {
+            "Authorization": "Bearer ${env:TOOLS_TOKEN}"
+          }
+        }
+      }
+    },
+    {
+      "name": "copilot-vscode-http-bearer",
+      "agent": "copilot",
+      "surface": "vscode",
+      "scope": "user",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "destination": "profile/mcp.json",
+        "format": "jsonc",
+        "key": "servers",
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "type": "http",
+          "headers": {
+            "Authorization": "Bearer ${env:TOOLS_TOKEN}"
+          }
+        }
+      },
+      "mcp_path": "profile/mcp.json"
+    },
+    {
+      "name": "claude-cli-project-instructions",
+      "agent": "claude",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": "CLAUDE.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "claude-cli-user-instructions",
+      "agent": "claude",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".claude/CLAUDE.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "codex-cli-project-instructions",
+      "agent": "codex",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": "AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "codex-cli-user-instructions",
+      "agent": "codex",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".codex/AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "opencode-cli-project-instructions",
+      "agent": "opencode",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": "AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "opencode-cli-user-instructions",
+      "agent": "opencode",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".config/opencode/AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "pi-cli-project-instructions",
+      "agent": "pi",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": "AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "pi-cli-user-instructions",
+      "agent": "pi",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".pi/agent/AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "cursor-cli-project-instructions",
+      "agent": "cursor",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": "AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "cursor-cli-user-instructions",
+      "agent": "cursor",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "unsupported": "instruction-destination"
+      }
+    },
+    {
+      "name": "cursor-ide-project-instructions",
+      "agent": "cursor",
+      "surface": "ide",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": "AGENTS.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "cursor-ide-user-instructions",
+      "agent": "cursor",
+      "surface": "ide",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "unsupported": "instruction-destination"
+      }
+    },
+    {
+      "name": "copilot-cli-project-instructions",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".github/copilot-instructions.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "copilot-cli-user-instructions",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".copilot/copilot-instructions.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "copilot-vscode-project-instructions",
+      "agent": "copilot",
+      "surface": "vscode",
+      "scope": "project",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "destination": ".github/copilot-instructions.md",
+        "text": "Run the checks.\n"
+      }
+    },
+    {
+      "name": "copilot-vscode-user-instructions",
+      "agent": "copilot",
+      "surface": "vscode",
+      "scope": "user",
+      "artifact": {
+        "id": "guide",
+        "kind": "instruction",
+        "text": "Run the checks.\n"
+      },
+      "expected": {
+        "directory": ".copilot/instructions",
+        "suffix": ".instructions.md",
+        "text": "---\napplyTo: \"**\"\n---\n\nRun the checks.\n"
+      }
+    },
+    {
+      "name": "copilot-cli-auth-unverified",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "unsupported": "portable-auth-env-unverified"
+      }
+    },
+    {
+      "name": "copilot-cli-env-reference-and-cwd",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server"
+            ],
+            "env": {
+              "TOKEN": {
+                "env": "SOURCE_TOKEN"
+              },
+              "MODE": "local"
+            },
+            "cwd": "nested/work"
+          }
+        }
+      },
+      "expected": {
+        "destination": ".mcp.json",
+        "format": "json",
+        "key": "mcpServers",
+        "value": {
+          "command": "server",
+          "args": [],
+          "env": {
+            "TOKEN": "${SOURCE_TOKEN}",
+            "MODE": "local"
+          }
+        },
+        "cwd_from_root": "run-root/nested/work"
+      },
+      "execution_root": "run-root"
+    },
+    {
+      "name": "copilot-cli-literal-env-unbraced",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server"
+            ],
+            "env": {
+              "MODE": "$FLYRAIL_EXAMPLE"
+            }
+          }
+        }
+      },
+      "expected": {
+        "unsupported": "literal-interpolation"
+      }
+    },
+    {
+      "name": "copilot-cli-literal-env-braced",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server"
+            ],
+            "env": {
+              "MODE": "${FLYRAIL_EXAMPLE}"
+            }
+          }
+        }
+      },
+      "expected": {
+        "unsupported": "literal-interpolation"
+      }
+    },
+    {
+      "name": "copilot-cli-literal-env-default",
+      "agent": "copilot",
+      "surface": "cli",
+      "scope": "project",
+      "artifact": {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "server"
+            ],
+            "env": {
+              "MODE": "${FLYRAIL_EXAMPLE:-default}"
+            }
+          }
+        }
+      },
+      "expected": {
+        "unsupported": "literal-interpolation"
+      }
+    }
+  ],
+  "asset_manifest": {
+    "schema_version": 2,
+    "id": "support-demo",
+    "version": "same-label",
+    "artifacts": [
+      {
+        "id": "tools",
+        "kind": "mcp",
+        "name": "tools",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "node",
+              {
+                "asset": "runtime",
+                "path": "server.js"
+              }
+            ],
+            "cwd": {
+              "asset": "runtime",
+              "path": "data"
+            }
+          }
+        }
+      }
+    ],
+    "assets": [
+      {
+        "id": "runtime",
+        "family": "mcp",
+        "path": "runtime"
+      }
+    ],
+    "dependencies": [
+      {
+        "dependent": "tools",
+        "required": "runtime"
+      }
+    ]
+  },
+  "combined_cases": [
+    {
+      "name": "claude-copilot-common-stdio",
+      "artifacts": [
+        {
+          "id": "tools",
+          "kind": "mcp",
+          "name": "tools",
+          "transport": {
+            "kind": "stdio",
+            "command": {
+              "argv": [
+                "server"
+              ],
+              "env": {
+                "MODE": "local"
+              }
+            }
+          }
+        }
+      ],
+      "contexts": [
+        {
+          "agent": "claude"
+        },
+        {
+          "agent": "copilot"
+        }
+      ],
+      "expected": {
+        "documents": {
+          ".mcp.json": {
+            "mcpServers": {
+              "tools": {
+                "command": "server",
+                "args": [],
+                "env": {
+                  "MODE": "local"
+                }
+              }
+            }
+          }
+        },
+        "claims": 1
+      }
+    },
+    {
+      "name": "copilot-shadowed-native-server",
+      "artifacts": [
+        {
+          "id": "claude-tools",
+          "kind": "native",
+          "family": "mcp",
+          "audience": {
+            "agent": "claude",
+            "scope": "project"
+          },
+          "destination": ".mcp.json",
+          "content": {
+            "kind": "structured",
+            "format": "json",
+            "selector": [
+              "mcpServers",
+              "tools"
+            ],
+            "value": {
+              "command": "claude-tools",
+              "args": []
+            }
+          }
+        },
+        {
+          "id": "copilot-tools",
+          "kind": "native",
+          "family": "mcp",
+          "audience": {
+            "agent": "copilot",
+            "scope": "project"
+          },
+          "destination": ".github/mcp.json",
+          "content": {
+            "kind": "structured",
+            "format": "json",
+            "selector": [
+              "mcpServers",
+              "tools"
+            ],
+            "value": {
+              "command": "copilot-tools",
+              "args": []
+            }
+          }
+        }
+      ],
+      "contexts": [
+        {
+          "agent": "claude"
+        },
+        {
+          "agent": "copilot"
+        }
+      ],
+      "expected": {
+        "unsupported": "copilot-mcp-precedence-collision"
+      }
+    },
+    {
+      "name": "codex-disjoint-json-toml-document",
+      "artifacts": [
+        {
+          "id": "tools",
+          "kind": "mcp",
+          "name": "tools",
+          "transport": {
+            "kind": "stdio",
+            "command": {
+              "argv": [
+                "server"
+              ],
+              "env": {
+                "MODE": "local"
+              }
+            }
+          }
+        },
+        {
+          "id": "native-tools",
+          "kind": "native",
+          "family": "mcp",
+          "audience": {
+            "agent": "codex",
+            "scope": "project"
+          },
+          "destination": ".codex/config.toml",
+          "content": {
+            "kind": "structured",
+            "format": "json",
+            "selector": [
+              "other"
+            ],
+            "value": {
+              "enabled": true
+            }
+          }
+        }
+      ],
+      "contexts": [
+        {
+          "agent": "codex"
+        }
+      ],
+      "expected": {
+        "unsupported": "document-format-collision"
+      }
+    },
+    {
+      "name": "disjoint-json-jsonc-document",
+      "artifacts": [
+        {
+          "id": "json-tools",
+          "kind": "native",
+          "family": "mcp",
+          "audience": {
+            "agent": "claude",
+            "scope": "project"
+          },
+          "destination": "shared.json",
+          "content": {
+            "kind": "structured",
+            "format": "json",
+            "selector": [
+              "one"
+            ],
+            "value": {
+              "enabled": true
+            }
+          }
+        },
+        {
+          "id": "jsonc-tools",
+          "kind": "native",
+          "family": "mcp",
+          "audience": {
+            "agent": "copilot",
+            "scope": "project"
+          },
+          "destination": "shared.json",
+          "content": {
+            "kind": "structured",
+            "format": "jsonc",
+            "selector": [
+              "two"
+            ],
+            "value": {
+              "enabled": true
+            }
+          }
+        }
+      ],
+      "contexts": [
+        {
+          "agent": "claude"
+        },
+        {
+          "agent": "copilot"
+        }
+      ],
+      "expected": {
+        "unsupported": "document-format-collision"
+      }
+    }
+  ]
+}

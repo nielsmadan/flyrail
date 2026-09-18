@@ -1,115 +1,133 @@
 # Installation, update and removal
 
-```python
-from flyrail import Bundle, OperationStatus, Target, install, uninstall, update
+Flyrail synchronizes an immutable bundle and explicit rendering into a logical
+`InstallationTarget`. One resource receipt owns a physical document, tree or
+skill container across callers and bundles. A separate private index locates the
+resources belonging to one installation, including interrupted or retired claims.
 
-bundle = Bundle.from_directory("./my-bundle")
-targets = [Target.directory("./agent-skills")]
-installed = install(bundle, targets)
-updated = update(bundle, targets, lock_timeout=0.25)
-removed = uninstall(bundle.id, targets)
+## Planning and applying
 
-for result in updated:
-    if result.status is OperationStatus.APPLIED:
-        installation = result.observation.installed
-```
+`preview` and `preview_removal` are read-only. They capture desired content,
+context, complete resource bytes, identities, security metadata, ancestors,
+receipts, index and recovery state. `applicable` reports whether the proposal has
+known errors or pending recovery.
 
-All three calls are synchronous and return a tuple of immutable `TargetResult`
-values, one per requested target in request order. Targets are explicit; Flyrail
-does not select agents, prompt, print, exit, access the network, or execute skill
-scripts. Bundle snapshots supply all installation bytes, even after their source
-has been removed. Uninstall only needs the bundle ID and targets.
+`apply_preview` rejects any changed precondition, including an edit outside an
+owned section. It never silently refreshes an old proposal. `sync` and `remove`
+instead recover recognized interrupted transactions under locks, then plan afresh.
 
-## Behavior and arguments
+Applications that need to select content from observed files can call source-free
+`recover_installation(bundle_id, target, *, lock_timeout=0)` first. It recovers
+recognized resource transactions and prepared index metadata without publishing
+new desired content or removing healthy claims. Re-read file existence, imports
+and other selection conditions afterward, then construct and apply a new preview.
+Successful recovery can leave pending/residual logical membership for that next
+mutation to reconcile. It reports `APPLIED` for recovery work or `UNCHANGED` when
+none was needed; an absent index creates no metadata. Unknown preparations retain
+their evidence and return an error.
 
-| Call | Behavior |
-| --- | --- |
-| `install(bundle, targets, *, lock_timeout=0)` | Installs an absent bundle; an intact current revision is unchanged. Another owned revision requires `update`. |
-| `update(bundle, targets, *, replace_modified=False, lock_timeout=0)` | Synchronizes the supplied version label and complete skill content; may install an absent bundle. Removes retired owned skills. |
-| `uninstall(bundle_id, targets, *, replace_modified=False, lock_timeout=0)` | Removes the recorded bundle's owned skills and publishes a removal receipt. An absent bundle is unchanged. |
+All known conflicts in a logical target are checked before content publication.
+Physical resources commit independently. Once publication starts, a failure stops
+the remaining resource sequence and retains pending membership for retry or
+source-free removal. Successful resource commits are preserved.
 
-Version labels are opaque equality values. An explicit update can move from `"9"`
-to `"1"`, or change content while retaining a label. A label-only update publishes
-a new receipt without rewriting intact skills. Skills whose observed inventory
-already matches the requested content also retain their files and directory
-identity; the receipt still changes when its label or recorded content differs.
+`RenderedArtifact.require_existing` prevents an absent destination from being
+created and binds the observed file through publication. It closes the gap
+between an application's existence check and the later write.
 
-Targets must be a nonempty iterable of `Target` values. The entire iterable,
-argument types, canonical destinations, aliases and source/state/target overlap
-are validated before the first write. Incorrect types raise `TypeError`; invalid
-values raise `ValueError`. `replace_modified` must be a boolean. `lock_timeout`
-must be a finite, nonnegative number of seconds; booleans are rejected. Default
-zero attempts acquisition once. A positive timeout bounds explicit lock waiting;
-it does not impose a deadline on file copying, inspection or recovery.
+## Ownership and replacement
 
-Physical aliases are processed once and retain the original request attribution.
-Independent targets continue after a conflict, busy lock or filesystem failure.
-Successful targets stay applied when another fails. Removing a shared target
-removes the physical installation for every consumer of that directory.
+| Acquisition | Existing unowned selection | Removal while intact |
+| --- | --- | --- |
+| `CONFLICT` (default) | Refuse even a matching selection. | Remove content created by this installation. |
+| `TAKEOVER` | Record the original selected content and position. | Restore that first baseline. |
+| `ADOPT` | Require the desired selection to match. | Remove adopted content without restoring it. |
 
-## Ownership and local edits
+Acquisition cannot take another bundle's claim. Sections use exact boundary lines;
+structured selections use keys or unambiguous stable array members. The
+[editor contract](../../spec/document-editing.md) defines matching and restoration.
 
-Untracked skill roots and other bundles' owned roots are conflicts, including
-byte-identical or currently missing foreign-owned content. All receipts are read
-and reconciled before ownership is trusted. Malformed or contradictory receipts,
-unsafe paths, symlinks, reparse points and special files fail closed.
+A changed or missing owned unit blocks its resource by default, including a
+retired unit. `replace_modified=True` authorizes replacement of the safely
+observed same-owner unit; it retains the first takeover baseline. It cannot repair
+malformed boundaries, follow unsafe links or override another owner's claim.
 
-Changed, missing, added or type-changed content in any owned skill blocks the
-requested bundle's entire operation in that target. This includes retired skills.
-`replace_modified=True` permits update/removal of the exact safe same-owner
-revision observed for this call, including added files. It cannot acquire foreign
-ownership or authorize following a symlink. The observed inventory is checked
-again during preparation and publication. Ordinary edits in another bundle do
-not block a disjoint operation; unsafe paths and contradictory ownership do.
+An artifact rename at the same physical selector retains ownership and baseline.
+Moving to another destination or selector acquires a new claim and retires the
+old one. Unresolved retirements remain indexed and owned. Dependencies publish
+support assets before references and retire references before their assets;
+partially updated references keep their old required resources discoverable.
+Changing the bytes of a referenced asset requires a distinct revision destination,
+so the old reference can continue to use its original bytes after a partial update.
 
-Whole skill directories are published using exclusive moves. Unrelated content,
-other bundles, the shared skill container and permanent lock are retained. POSIX
-files receive executable mode `0755` or nonexecutable mode `0644` according to the
-bundle. Other permission bits and timestamps are outside content identity.
-Windows retains logical executable intent in receipts.
+Compatible artifact aliases at one physical claim share ownership. Dependencies
+on several aliases of the same required claim are recorded once, including
+stable references. Aliases of a dependent claim must agree on which physical
+requirements are stable references.
 
-New management directories are private: mode `0700` on POSIX, with each fresh
-staging and backup root protecting its contents even under permissive existing
-management parents. Existing directory permissions and the lock inode are retained.
-Windows mutations require Python 3.11.10+, 3.12.4+, or 3.13+ for native private
-directory creation; earlier patches return `UNSUPPORTED` before creating state.
-See [platform support](support.md) for the standard-library contracts.
+## Version and current state
+
+Version labels are compared for equality, without ordering. A new label with the
+same content can update metadata without rewriting a resource; changed generated
+or rendered bytes under the same label still require synchronization.
+
+Source-free inspection reports whether actual owned content agrees with the
+completed index generation. `observation.matches(bundle, rendered)` additionally
+checks bundle identity, version, bundle/render digests and supported rendering.
+Current state requires all desired
+claims and retirements to reconcile, with no pending membership or recovery.
+It does not assert that an agent has loaded the configuration.
 
 ## Results
 
-| Field | Meaning |
+| Status | Meaning |
 | --- | --- |
-| `target`, `root`, `state_root`, `alias_of` | Same attribution and physical-target semantics as [inspection](inspection.md). |
-| `status` | `APPLIED`, `UNCHANGED`, `FAILED`, or `INCOMPLETE`. |
-| `observation` | Best-effort observation after the operation/recovery attempt; contains installed revision, content comparisons, modifications and conflicts. |
-| `error` | Operation-level `TargetError`, or `None`. Distinct from `observation.error`. |
-| `recovery_paths` | Pending transaction/staging/backup paths to retain, or an empty tuple. |
+| `APPLIED` | The requested change committed. Check resource cleanup and observation errors too. |
+| `UNCHANGED` | The requested state already holds, possibly after recovery. |
+| `PARTIAL` | Some resource commits succeeded but another resource or index step failed. |
+| `FAILED` | The requested operation failed without a successful resource commit or reported incomplete resource recovery. |
+| `INCOMPLETE` | Recovery data remains unresolved; retain the reported paths. |
 
-`APPLIED` means this call published its new receipt, including an uninstall
-tombstone. Cleanup can remain pending: check both `error` and `recovery_paths`,
-and retain those paths. Failures in cleanup, final observation or lock release
-preserve this committed status. A committed operation is never rolled back because
-cleanup failed. A later mutation recovers pending cleanup under the lock before
-starting its own requested work. If that cleanup remains unsafe, the later call
-returns `INCOMPLETE` without claiming it applied the earlier operation.
+Inspect the aggregate error, final observation and each resource result. A resource
+whose receipt committed stays `APPLIED` if cleanup later fails. A subsequent
+mutation performs cleanup only for that committed transaction.
 
-`UNCHANGED` means the requested state already holds; recovery may have finished
-before reaching that conclusion. `FAILED` means this call did not commit and has
-no unresolved transaction work. `INCOMPLETE` means recovery/preparation data
-remains and the requested call could not complete. Target aliases share the same
-status, observation, error and recovery paths.
+Removal is source-free. Intact created/adopted claims are deleted and intact
+takeovers restored; foreign content survives. Empty resource receipts and permanent
+authority/lock directories may remain. Applications must keep state/index paths
+ignored independently of their disposable configuration files.
 
-An uninstall observation has no desired bundle snapshot: `version_matches`,
-`recorded_content_matches` and `content_matches` are `None`, and `is_current` is
-false. Its `installed` and `state` describe whether an active receipt remains.
+A resource referenced by a committed current or previous generation, including a
+recognized prepared completion of the pending generation, requires its ownership
+receipt. A missing receipt reports `INVALID_STATE` and blocks update,
+removal and recovery while preserving the index and payload. An index cannot
+reconstruct lost ownership or baselines. A pending first-install resource may
+legitimately have no receipt before its first commit. Valid retained receipts with
+no matching claims also remain usable, including after another index completed
+retirement at the shared authority.
 
-Operation error codes include `CONFLICT`, `MODIFIED`, `UPDATE_REQUIRED`, `BUSY`,
-`UNSUPPORTED`, and the inspection codes `IO_ERROR`, `UNSAFE_PATH`, `INVALID_STATE`,
-`CONCURRENT_CHANGE`, `RECOVERY_NEEDED`. Errors retain available OS errno and path.
-If a new operation fails and its recovery also fails, the original error code is
-retained and the message includes the recovery failure. Observation can succeed
-while the operation fails, for example when an update is required.
+## Filesystem boundary
 
-Read the [transaction protocol](../../spec/transaction-protocol.md) before interpreting or
-moving pending data. Inspection reports pending work without locking or recovery;
-it may be observing an active writer.
+Full bytes, identity, mode/security evidence and ancestors are rechecked around
+publication, including moved backups and staged data. A partial section/key claim
+preserves the current file security metadata, including later restrictive chmod
+changes; its original content baseline does not own file-wide permissions.
+Whole file/tree modes follow their explicit content contract.
+
+Private state, baselines and recovery payloads stay on the resource volume.
+Supported Windows document publication journals its temporary private-DACL
+transition; interruption can leave the public file restricted until recovery
+restores its original descriptor. Unsupported metadata fails without a weaker
+in-place fallback. See [platform support](support.md).
+
+Rollback requires complete recognized public revisions. Private cleanup can
+resume partway through deleting a tree when every remaining node matches the
+recorded deletion order, bytes, identity and security metadata. Unexpected owned
+or foreign edits retain the journal and backups with `INCOMPLETE`; there is no
+automatic selective inverse edit or force-recovery API. After the caller
+reconciles the resource to a recognized revision, a source-free retry can recover. The
+[transaction protocol](../../spec/transaction-protocol.md) defines the states.
+
+Locks coordinate Flyrail writers, not hostile same-user processes. There is no
+cross-resource atomicity, simultaneous multi-file visibility or power-loss
+durability guarantee.

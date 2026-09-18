@@ -92,7 +92,7 @@ def main() -> int:
         )
         return int(
             any(
-                result.status in {OperationStatus.FAILED, OperationStatus.INCOMPLETE}
+                result.status not in {OperationStatus.APPLIED, OperationStatus.UNCHANGED}
                 or result.error is not None
                 or result.observation.error is not None
                 or result.recovery_paths

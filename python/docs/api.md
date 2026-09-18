@@ -1,133 +1,157 @@
 # Public Python API
 
-Import supported names from `flyrail`. Public values and returned collections are
-immutable: tuples, frozen value objects and bytes. Flyrail is synchronous; the
-host application chooses destinations, schedules calls, presents results and
-decides whether to authorize replacement. There is no Flyrail console command.
-The [example CLIs](examples.md) show that host integration using the public API.
+[Bundles and rendered content](#bundles-and-rendered-content) · [Configuration lifecycle](#configuration-lifecycle) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
 
-## Loading and selecting
+Import supported names from `flyrail`. Bundles, previews, observations and results
+are immutable snapshots. The library is synchronous; the application chooses
+destinations, presents results and decides when to request replacement.
 
-| API | Result and use |
+## Bundles and rendered content
+
+`Bundle.from_directory`, `from_package`, `from_zip`, `from_memory` and
+`from_artifacts` detach content from its source. Package loading follows normal
+Python import semantics. Bundle labels are opaque and independent of application
+and library versions. Content digests detect changes under the same label.
+
+[Configuration](configuration.md) describes skills, instructions, MCP, hooks,
+support assets and native payloads. The general lifecycle consumes explicit
+`RenderedBundle` values containing absolute destinations and file, tree, section
+or structured content. [Agent-specific translation](translation.md) is a pure layer: `render` accepts an
+explicit `RenderContext`; `render_many` combines several contexts for one logical
+installation. `capabilities` distinguishes portable semantics and native routing.
+Unsupported notices block lifecycle mutation before lock/recovery admission.
+
+`InstallationTarget` names a private logical index and snapshots string context
+pairs. Reuse the same index and context for future inspection, updates and removal.
+Choose one index per bundle installation. It records resource membership; each
+physical resource has its own shared ownership authority.
+
+The optional keyword-only `routing_context` captures additional routing pairs in
+an immutable preview. It does not change the persistent index identity. Use
+`context` for installation identity and `routing_context` for the route selected
+for a particular call.
+
+## Configuration lifecycle
+
+| API | Purpose |
 | --- | --- |
-| `Bundle.from_directory(root)` | Snapshot a filesystem bundle containing `flyrail.json`. |
-| `Bundle.from_package(package, resource="flyrail")` | Snapshot an importable package's resources, including supported ZIP resources. `package` is an import name or module. Normal package import semantics apply. |
-| `Target.directory(root)` | Select the skill container itself. |
-| `Target.project(agent, root)` | Select a documented project-relative skill container. |
-| `Target.user(agent, *, home=None, env=None)` | Select a documented user skill container with optional isolated overrides. |
+| `preview` | Observe a bundle/rendering/target and return an immutable proposed change. |
+| `preview_removal` | Propose removal using only bundle ID and index. |
+| `apply_preview` | Apply exactly those preconditions; reject stale input. |
+| `recover_installation` | Recover recognized interrupted work using only bundle ID and index, then re-observe before planning. |
+| `sync` | Recover recognized interrupted work, plan afresh under locks and synchronize. |
+| `inspect_installation` | Read recorded membership and actual owned content without source bytes or mutation. |
+| `remove` | Recover and remove recorded ownership without the bundle source. |
 
-`Bundle` exposes `id`, `version`, `identity`, `skills`, `entries`, `content_digest`,
-and `source_roots`. `BundleIdentity(id, version)` and
-`SkillSpec(name, path, executables=())` describe validated metadata.
-`BundleEntry(path, data=None, executable=False)` represents an installed-relative
-directory or file; `data=None` is a directory and `data=b""` is an empty file.
-Its `is_directory` property makes that distinction explicit. Use the loaders to
-construct a complete validated bundle; these metadata classes alone do not read
-or package a source. The [bundle specification](../../spec/bundle-format.md) defines exact
-validation, snapshot and digest behavior.
-
-`Agent` contains `CLAUDE`, `CODEX`, `OPENCODE`, `PI`, `CURSOR` and `COPILOT`;
-constructors also accept their lowercase string values. `TargetScope` identifies
-`USER`, `PROJECT` or `DIRECTORY`. Targets expose `root`, `agent`, and `scope`.
-The [destination reference](inspection.md) covers exact paths, environment
-precedence, aliases, canonicalization and overlap rejection.
-
-## Inspecting and changing installations
-
-| Call | Return type |
-| --- | --- |
-| `inspect(bundle, targets)` | `tuple[TargetInspection, ...]` |
-| `install(bundle, targets, *, lock_timeout=0)` | `tuple[TargetResult, ...]` |
-| `update(bundle, targets, *, replace_modified=False, lock_timeout=0)` | `tuple[TargetResult, ...]` |
-| `uninstall(bundle_id, targets, *, replace_modified=False, lock_timeout=0)` | `tuple[TargetResult, ...]` |
-
-Pass a nonempty iterable of `Target` values. The whole request is validated before
-writes. Results preserve request order. Physical aliases share an operation and
-observation, with `alias_of` pointing to the first request's zero-based index.
-There is no rollback of successful destinations when another destination fails.
-Lock waiting defaults to a single nonblocking attempt; a positive finite timeout
-bounds lock acquisition, not the duration of the complete operation.
-
-Inspection observes without creating directories, acquiring locks or recovering
-state. Use `result.observation.is_current` for the common update check. It requires
-intact ownership and matching version, recorded content and actual content, with
-no relevant conflict or recovery error. An uninstall result has no desired bundle
-to compare against, so its `is_current` is false even after successful removal.
-
-Installation is idempotent for a current revision. Another owned revision needs
-an explicit update, which can also install an absent bundle and remove retired
-skills. Uninstall reads receipts, so the source package or bundle directory is
-unnecessary. Same-owner local modifications block a target by default.
-`replace_modified=True` permits replacement/deletion of the observed same-owner
-revision, including added files, subject to revalidation. It never permits taking
-foreign ownership or following managed symlinks.
-
-## Results and errors
-
-`TargetInspection` and `TargetResult` carry the requested `target`, resolved
-`root`, sibling `state_root`, `alias_of`, and an `Observation`. `TargetResult`
-also carries `status: OperationStatus`, operation-level `error`, and `recovery_paths`.
-
-| Status | Meaning |
-| --- | --- |
-| `APPLIED` | This call published its receipt, including a removal tombstone. Cleanup or final observation can still report an error. |
-| `UNCHANGED` | The requested state already holds; prior recovery may have completed first. |
-| `FAILED` | This call did not commit and has no unresolved transaction work. |
-| `INCOMPLETE` | The requested call could not finish and recovery/preparation data remains. |
-
-For example, a host can retain every result for presentation and separately decide
-whether the operation needs attention:
+Full signatures and public result types are in
+[configuration.py](../src/flyrail/configuration.py) and
+[lifecycle.py](../src/flyrail/lifecycle.py). A generated instruction example:
 
 ```python
-from flyrail import Bundle, OperationStatus, Target, TargetResult, update
+from pathlib import Path
 
+from flyrail import (
+    Bundle,
+    BundleIdentity,
+    Family,
+    InstallationTarget,
+    InstructionArtifact,
+    RenderedArtifact,
+    RenderedBundle,
+    SectionContent,
+    inspect_installation,
+    preview,
+    apply_preview,
+    remove,
+)
 
-def needs_attention(result: TargetResult) -> bool:
-    return (
-        result.status in {OperationStatus.FAILED, OperationStatus.INCOMPLETE}
-        or result.error is not None
-        or result.observation.error is not None
-        or bool(result.recovery_paths)
-    )
-
-
-bundle = Bundle.from_directory("examples/filesystem/bundle")
-results = update(bundle, [Target.directory(".cache/demo-skills")])
-attention = tuple(result for result in results if needs_attention(result))
+root = Path("project").resolve()
+bundle = Bundle.from_artifacts(
+    BundleIdentity("project-guide", "autumn"),
+    [InstructionArtifact("guide", "Run the project checks.\n")],
+)
+rendered = RenderedBundle(
+    [
+        RenderedArtifact(
+            "guide",
+            Family.INSTRUCTIONS,
+            root / "AGENTS.md",
+            SectionContent("project-guide", "Run the project checks.\n"),
+        ),
+    ]
+)
+target = InstallationTarget(root / ".cache" / "project-guide")
+proposal = preview(bundle, rendered, target)
+result = apply_preview(proposal)
+observation = inspect_installation(bundle.id, target)
+configured_current = observation.matches(bundle, rendered)
+removed = remove(bundle.id, target)
 ```
 
-Do not interpret `APPLIED` as proof that cleanup finished or immediately retry it
-as a new install. Preserve reported paths and present the committed result. A
-later explicit mutation first attempts safe recovery under the lock. Unknown
-preparation debris or edited backup data can require manual examination; there
-is no public force-recovery or garbage-collection operation.
+The example can create AGENTS.md. Set `require_existing=True` on its rendered
+artifact when an application must only modify an existing document.
 
-An `Observation` separates installation state, requested-version equality,
-recorded-content equality, actual-content equality, modifications, conflicts,
-observation errors and recovery paths. `ObservationState` is `ABSENT`,
-`INSTALLED`, `RECOVERY_NEEDED` or `UNKNOWN`. `Installation` describes a receipt and
-its `InventoryEntry` tuple. `Modification` identifies a bundle/path and a
-`ModificationKind`; `Conflict` identifies a path and optional owning bundle ID.
-Their complete fields and enum meanings are in [inspection](inspection.md).
-Operation outcomes and recovery semantics are detailed in [lifecycle](lifecycle.md).
+`recover_installation(bundle_id, target, *, lock_timeout=0)` returns an
+`InstallationResult`. It recovers resource transactions and recognized index
+preparations under the same locks as `sync`, without applying a desired bundle or
+removing healthy ownership. `APPLIED` reports completed recovery work and
+`UNCHANGED` reports that no recovery was needed. An absent index is a no-op.
+Pending/residual logical membership can remain after successful recovery and is
+reconciled by the next update or removal. Check errors and recovery paths, re-read
+application selection conditions, and build a fresh `preview` or `preview_removal`
+before `apply_preview`. A preview captured before recovery remains stale.
 
-`TargetError` has an `ErrorCode`, readable `message`, optional absolute `path` and
-optional OS `errno`. Expected destination failures are reported per target:
+`inspect_installation(...).is_current` compares the installed generation with
+its recorded claims and actual content. `observation.matches(bundle, rendered)`
+also checks bundle identity, version, content digest and render digest, and requires
+supported rendering. This pure comparison uses the captured observation without
+reading files, resolving environment variables or checking host readiness.
+A preview checks proposed acquisitions and retirements
+as well. [Lifecycle](lifecycle.md) explains these distinctions and replacement.
 
-| Codes | Host response |
-| --- | --- |
-| `UPDATE_REQUIRED` | Offer an explicit update to the supplied revision. |
-| `MODIFIED` | Present local changes and obtain the host user's decision before using `replace_modified=True`. |
-| `CONFLICT` | Explain the foreign/untracked skill root; replacement authorization cannot acquire it. |
-| `BUSY` | Report lock contention or retry later with bounded waiting. |
-| `RECOVERY_NEEDED`, `INVALID_STATE` | Preserve state and recovery paths; inspect the protocol before any manual repair. |
-| `UNSAFE_PATH`, `UNSUPPORTED` | Choose a supported safe target/filesystem; no weaker fallback is performed. |
-| `CONCURRENT_CHANGE`, `IO_ERROR` | Present the path/error and re-observe after the external cause is resolved. |
+## Skill convenience API
 
-Programmer and source errors fail upfront rather than appearing as target
-outcomes. Incorrect argument types raise `TypeError`; invalid metadata, paths,
-values, manifests and unsupported source layouts raise `ValueError`. Source
-filesystem failures propagate their `OSError` subclasses; package-import and
-corrupt-ZIP errors retain their standard-library types. A host should catch and
-present these at its command boundary. Bundles can import application package
-initializers while loading resources; Flyrail never executes skill scripts.
+`Target.directory`, `Target.project` and `Target.user` select skill containers.
+`install`, `update`, `uninstall` and `inspect` adapt skill-only bundles to the
+same resource lifecycle. They accept a nonempty target iterable and return ordered
+tuples, retaining alias attribution. They do not translate non-skill artifacts.
+Expected filesystem failures produce results for the affected targets; independent
+targets continue in request order. Invalid arguments and unsupported skill bundle
+contents are validated before mutation.
+Bundles with support assets or dependencies raise `ValueError` before mutation.
+Use `render` with an explicit `RenderContext` and the configuration lifecycle for
+those bundles so every dependency has a destination.
+
+`install` requires `update` when an existing bundle has another version or digest.
+`update` can also install an absent bundle. `uninstall` needs only its ID and
+targets. See [destinations and observations](inspection.md).
+
+## Errors and host handling
+
+An `InstallationResult` has aggregate status, final observation, per-resource
+results, notices and an optional operation error. Check all of them:
+`PARTIAL` means resources committed before another step failed;
+`INCOMPLETE` means unresolved recovery work remains. An individual resource can
+be committed while its cleanup still reports an error.
+
+`TargetError` carries a code, message, optional path and OS errno. Expected
+filesystem/conflict/recovery failures become results. Invalid public arguments
+raise `TypeError` or `ValueError`; source I/O, import and archive errors retain
+their normal exceptions. A finite nonnegative `lock_timeout` bounds lock waiting,
+not the duration of the operation.
+
+`preview` and `preview_removal` return a non-applicable `LifecyclePreview` with a
+`TargetError` when filesystem or index observation fails. If observation of the
+overall preview fails, `preview.error` carries the failure and there is no
+`index_revision` or resource plan; absent evidence does not mean an empty index.
+Resource-specific planning failures retain their observed plans and per-resource
+errors. `apply_preview` returns an overall preview error without mutation, even if
+the filesystem has since been repaired. Create a fresh preview after resolving the error.
+
+`sync` also returns a failed result when initial destination resolution encounters
+an expected filesystem error, including an unsafe link. Invalid request types and
+destination/source overlaps still raise their normal exceptions.
+
+Ordinary observations expose claim attribution, versions, digests and diagnostics.
+Full foreign bytes and restoration baselines are reserved for explicit previews
+and private state. Do not serialize a preview as ordinary CLI status output.

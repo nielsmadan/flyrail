@@ -3,7 +3,7 @@ import errno
 import os
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -12,10 +12,11 @@ from flyrail.observations import ErrorCode
 
 
 def rename_exclusive(source: Path, destination: Path) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32" or os.name == "nt":
         os.rename(source, destination)
         return
     library = ctypes.CDLL(None, use_errno=True)
+    arguments: tuple[bytes | int, ...]
     if sys.platform == "darwin" and hasattr(library, "renamex_np"):
         function = library.renamex_np
         function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
@@ -52,7 +53,9 @@ def _lock(fd: int, *, release: bool = False) -> None:
 
 
 @contextmanager
-def target_lock(state: Path, timeout: float) -> Iterator[None]:
+def target_lock(
+    state: Path, timeout: float, *, on_created: Callable[[Path], None] | None = None
+) -> Iterator[None]:
     if sys.platform == "win32" and (
         sys.version_info < (3, 11, 10) or (3, 12) <= sys.version_info < (3, 12, 4)
     ):
@@ -65,7 +68,19 @@ def target_lock(state: Path, timeout: float) -> Iterator[None]:
     observer.managed_directory(state)
     observer.metadata(state / "lock")
     observer.finish()
-    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    from flyrail._security import ensure_private
+
+    missing = []
+    parent = state
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    for path in reversed(missing):
+        path.mkdir(mode=0o700)
+        ensure_private(path)
+        if on_created is not None:
+            on_created(path)
+    ensure_private(state)
     with (state / "lock").open("a+b") as stream:
         metadata = Observer().metadata(state / "lock")
         opened = os.fstat(stream.fileno())

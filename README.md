@@ -1,8 +1,8 @@
 # Flyrail
 
-Libraries for applications that ship coding-agent skills. Flyrail installs bundled
-skills into explicit agent directories, checks independently versioned bundles,
-updates owned content, and removes it without needing the original source.
+Libraries for applications that ship coding-agent configuration. Flyrail manages
+skills, instructions, MCP registrations, hooks and supporting assets through
+independently versioned bundles and reversible local resource ownership.
 
 Each language implementation lives in its own directory and shares the bundle,
 receipt and transaction formats in `spec/`.
@@ -22,12 +22,17 @@ conformance fixtures. Their public APIs should be native to each language.
 
 Application versions and bundle labels are independent. Flyrail compares bundle
 labels for equality and checks content separately. Local edits are preserved
-unless the host explicitly authorizes replacement; foreign and untracked skills
-remain conflicts. Installation results are independent per destination.
+unless the host explicitly authorizes replacement. Unowned content conflicts by
+default; explicit takeover records a baseline for restoration. Resource commits
+are independent, and source-free removal retains unresolved ownership.
 
 See the [shared specifications](spec/README.md) and
 [implementation guidance](spec/porting.md) for ownership, interoperability and
 filesystem limits.
+
+The [combined checksum example](python/examples/packaged/README.md) ships all four
+families through real agent presets. Its status compares the bundled generation
+with installed content and reports host prerequisites and activation separately.
 
 ## Development
 

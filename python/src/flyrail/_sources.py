@@ -73,10 +73,18 @@ class DirectorySource:
     def read_manifest(self) -> bytes:
         return self._read(self._find("flyrail.json"))
 
+    def read_file(self, path: str) -> bytes:
+        return self._read(self._find(path))
+
     def skill_entries(self, spec: SkillSpec) -> tuple[BundleEntry, ...]:
-        root = self._find(spec.path)
+        return self.tree_entries(spec.path, spec.name, spec.executables)
+
+    def tree_entries(
+        self, path: str, name: str, executables: tuple[str, ...]
+    ) -> tuple[BundleEntry, ...]:
+        root = self._find(path)
         if not stat.S_ISDIR(self._observe(root).st_mode):
-            raise ValueError(f"skill source must be a directory: {spec.path}")
+            raise ValueError(f"skill source must be a directory: {path}")
         entries: list[BundleEntry] = []
 
         def walk(directory: Path, relative: str) -> None:
@@ -93,11 +101,11 @@ class DirectorySource:
                 if stat.S_ISDIR(self._observe(child).st_mode):
                     walk(child, path)
                 else:
-                    executable = child.relative_to(root).as_posix() in spec.executables
+                    executable = child.relative_to(root).as_posix() in executables
                     entries.append(BundleEntry(path, self._read(child), executable))
             self._observe(directory)
 
-        walk(root, spec.name)
+        walk(root, name)
         return tuple(entries)
 
     def finish(self) -> None:
@@ -164,17 +172,26 @@ class ZipSource:
         return self.archive.read(info)
 
     def skill_entries(self, spec: SkillSpec) -> tuple[BundleEntry, ...]:
-        root = self.root + "/" + spec.path
+        return self.tree_entries(spec.path, spec.name, spec.executables)
+
+    def read_file(self, path: str) -> bytes:
+        info = self.entries.get(self.root + "/" + path)
+        if info is None:
+            raise ValueError(f"expected a source file: {path}")
+        return self.archive.read(info)
+
+    def tree_entries(
+        self, path: str, name: str, executables: tuple[str, ...]
+    ) -> tuple[BundleEntry, ...]:
+        root = self.root + "/" + path
         if root not in self.entries or self.entries[root] is not None:
-            raise ValueError(f"skill source must be an existing directory: {spec.path}")
+            raise ValueError(f"skill source must be an existing directory: {path}")
         result: list[BundleEntry] = []
         for path, info in self.entries.items():
             if path == root:
-                result.append(BundleEntry(spec.name))
+                result.append(BundleEntry(name))
             elif path.startswith(root + "/"):
                 relative = path[len(root) + 1 :]
                 data = None if info is None else self.archive.read(info)
-                result.append(
-                    BundleEntry(spec.name + "/" + relative, data, relative in spec.executables)
-                )
+                result.append(BundleEntry(name + "/" + relative, data, relative in executables))
         return tuple(result)

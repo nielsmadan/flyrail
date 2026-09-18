@@ -1,80 +1,78 @@
 # Supported destinations and limits
 
-Flyrail requires Python 3.11 or newer. Its platform adapters target macOS, Linux
-and Windows. CI runs the shared gate for Python 3.11 and 3.14 on all three; native
-runner results are required before claiming support for a release.
+Flyrail requires Python 3.11 or newer. Its native adapters target macOS, Linux and
+Windows. Native runner results are required before claiming support for a release;
+a simulated native call is not a substitute.
 
-On Windows, mutations require Python **3.11.10+**, **3.12.4+**, or **3.13+**.
-These releases apply a current-user/administrator access-control list when
-creating a directory with mode `0700`; see the official
-[3.11 `os.mkdir` documentation](https://docs.python.org/3.11/library/os.html#os.mkdir)
-and [3.12 documentation](https://docs.python.org/3.12/library/os.html#os.mkdir).
-Earlier Windows patches return `UNSUPPORTED` for each mutation target before
-creating management state. Bundle loading and read-only inspection remain usable.
+Windows mutations require Python **3.11.10+**, **3.12.4+**, or **3.13+** for private
+directory creation. See the documented
+[3.11 os.mkdir behavior](https://docs.python.org/3.11/library/os.html#os.mkdir) and
+[3.12 behavior](https://docs.python.org/3.12/library/os.html#os.mkdir).
+Earlier patches refuse mutations; source loading and read-only observation remain
+available.
 
-Use local filesystems that support the required advisory locks, exclusive
-directory renames and same-volume staging/backup moves. Unsupported operations
-report `UNSUPPORTED`; there is no network-filesystem, cloud-sync-folder or
-power-loss guarantee. Symlinks, junctions, known reparse points, special files,
-ambiguous portable names and overlapping managed roots are rejected. Ordinary
-system symlinks above explicit roots can be canonicalized once.
+## Content and destinations
 
-## Agent scopes
+Bundle inputs describe skills, instructions, MCP registrations, hooks and their
+supporting assets. The general lifecycle accepts explicit rendered files, trees,
+sections and structured selections. Skill convenience presets select documented
+containers for six agents; see [destinations](inspection.md).
 
-User and project presets are provided for Claude Code, Codex, OpenCode, Pi,
-Cursor, and Copilot CLI/VS Code. Every preset resolves a documented local skill
-container; [destinations](inspection.md) lists exact paths, environment overrides
-and source links. `Target.directory` supports explicit custom containers.
-There is no automatic installed-agent selection or cloud-agent compatibility claim.
+Flyrail does not select installed agents or manage cloud configuration. Configuration
+current does not prove host discovery, activation, trust or runtime prerequisites.
+The pure `InstallationObservation.matches(bundle, rendered)` check compares the
+app's bundled generation with recorded integrity. It does not perform remote
+update discovery or determine version ordering.
+Shared agent discovery does not create logical reference counts: removing a bundle
+from a shared physical destination affects every consumer of that destination.
 
-Presets do not imply exclusive discovery. Several agents read `.agents` or Claude
-directories in addition to their own conventions. A host must choose the physical
-installation it intends to manage and explain shared visibility to its user.
-Flyrail deduplicates aliases within a request but does not track logical consumers
-across applications or calls. Uninstalling a shared directory's bundle affects
-every agent that reads it.
+Skill Markdown/frontmatter, binary bytes and explicit executable intent remain
+authored content. The library does not infer executable intent from source modes.
 
-Bundles contain whole skill directories with exact `SKILL.md` files. Flyrail
-preserves Markdown, YAML extensions, line endings and binary bytes; it does not
-validate each agent's frontmatter semantics or rewrite content for an agent.
-The author must supply a skill the intended consumers understand. POSIX executable
-intent is applied and checked; Windows records the logical intent in receipts.
+## Security metadata
 
-## Filesystem and recovery boundary
+Partial section/key updates preserve current file mode and supported security
+metadata, including a later restrictive chmod. They restore selected content from
+the first takeover baseline without rolling back unrelated file-wide permissions.
+Whole file/tree claims use their explicit mode contract.
 
-Each mutation is independently committed per target. Other targets continue when
-one is conflicted, modified, busy or unreadable. Skills publish one directory at a
-time, so readers can observe a partially published set before receipt commit.
-Read-only inspection can encounter a live writer and reports pending work without
-claiming that writer is abandoned.
+| Platform | Supported metadata and refusal boundary |
+| --- | --- |
+| POSIX | Mode and owner/group are bound and preserved. Special mode bits, unsupported flags, extended ACLs or xattrs on managed resources refuse mutation. |
+| macOS | Opaque `com.apple.provenance` bytes are captured and must match staged/publication evidence. Other resource xattrs and extended ACLs refuse. |
+| Windows | Owner/group/DACL snapshots and supported native document replacement; read-only, encrypted, compressed, sparse or alternate-stream resources refuse. Tree/container metadata must satisfy the supported private-descriptor contract. |
 
-New management directories use mode `0700`. On POSIX, each fresh transaction's
-staging and backup roots exclude group/other access before receiving skill bytes,
-including when existing management parents are permissive. Existing directory
-permissions and the permanent lock inode are preserved. Installed file modes
-remain `0755` for executable intent and `0644` otherwise.
+Ancestor snapshots include identity, mode/ownership and security evidence.
+Existing state, staging and backup directories must pass private-access checks;
+Flyrail refuses unsafe directories without changing their permissions. New
+payload files are private before their first write. On Windows, state files and
+backup payloads also require private access themselves; placing a broadly readable
+file under a private parent is insufficient.
+See Microsoft's [traverse-checking behavior](https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/bypass-traverse-checking).
 
-Local edits in the requested bundle block the entire target operation unless
-explicit replacement is authorized. Foreign ownership and untracked roots remain
-conflicts. Malformed or contradictory management state fails closed. Ordinary edits
-to a different, disjoint bundle do not block this bundle, while unsafe managed
-paths and ownership contradictions still do.
+Existing Windows documents use
+[ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)
+without ignore-ACL/merge flags. The journal binds a temporary private-DACL transition
+so its backup is private from creation. A crash can leave the public destination
+restricted until recovery restores its original descriptor. Unsupported access or
+metadata has no weaker in-place fallback.
 
-Locks coordinate cooperating Flyrail writers. Inventory checks detect common
-concurrent edits; they cannot defend against a hostile same-user process changing
-paths between a check and a syscall. Receipts and hashes are integrity records,
-not authenticated claims. Source and inspection reads are best effort against
-external writers.
+## Filesystem and recovery
 
-The [transaction protocol](../../spec/transaction-protocol.md) handles process interruption
-where immutable intent and recorded inventories establish safe rollback/cleanup.
-Unrecognized preparation data left before a complete intent was published stays
-on disk with `INCOMPLETE` and recovery paths. There is no age-based deletion or
-force-clean operation. Edited backups and ambiguous recovery layouts are retained
-for examination. Source bytes are unnecessary for recognized recovery or removal.
+Use local filesystems with the required advisory locks, exclusive moves and
+same-volume state. Symlinks, junctions/reparse points, hard links, special files,
+ambiguous names and incompatible ancestor/descendant authorities are rejected.
+Permanent authority fences remain after failed admission and uninstall.
 
-An `APPLIED` result can still carry cleanup errors. Preserve its recovery paths;
-the next mutation attempts safe cleanup before proceeding. Uninstall retains
-unrelated data, the shared skill container, and small management/lock metadata.
-There is no cross-target atomicity or power-loss durability promise: the protocol
-does not implement an fsync ordering scheme.
+Whole-target known-conflict preflight precedes publication. Resources commit
+independently; readers can observe intermediate resource states. Read-only
+inspection can encounter a live transaction.
+
+Full revisions detect ordinary concurrent content/metadata changes. They do not
+authenticate receipts or defend against hostile same-user writes between checks
+and syscalls. Unknown preparation data, edited backups and unrecognized revisions
+are retained with diagnostics. There is no age-based cleanup or force-recovery API.
+
+The [transaction protocol](../../spec/transaction-protocol.md) handles process
+interruption. It provides no cross-resource atomicity, simultaneous multi-file
+visibility, network-filesystem/cloud-sync guarantee or power-loss durability.

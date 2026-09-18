@@ -1,13 +1,18 @@
-import stat
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from flyrail._inventory import InventoryEntry, inventory
-from flyrail._observation import ObservationFailure, Observer
-from flyrail._receipts import Receipt, read_receipt, reconcile_receipts
-from flyrail._validation import portable_path_key, validate_identifier
-from flyrail.bundle import Bundle, _content_digest
+from flyrail._inventory import inventory
+from flyrail._lifecycle import _references, error_detail, inspect_installation, preview
+from flyrail._observation import ObservationFailure
+from flyrail._resource_io import read
+from flyrail._resource_models import Receipt
+from flyrail.artifacts import Family, SkillArtifact
+from flyrail.authority import ResourceAuthority, _UnsafeDestination, state_path
+from flyrail.bundle import Bundle
+from flyrail.configuration import InstallationObservation, InstallationTarget
+from flyrail.content import TreeContent
+from flyrail.editors import EditStatus
 from flyrail.models import BundleEntry
 from flyrail.observations import (
     Conflict,
@@ -20,309 +25,246 @@ from flyrail.observations import (
     TargetError,
     TargetInspection,
 )
+from flyrail.rendered import RenderedArtifact, RenderedBundle
 from flyrail.targets import Target
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedTarget:
+class SkillTarget:
     target: Target
+    installation: InstallationTarget | TargetError
     root: Path
-    state_root: Path
-    anchor: Path
-    alias_of: int | None = None
-    error: TargetError | None = None
+    alias_of: int | None
+
+    @property
+    def state_root(self) -> Path:
+        return state_path(self.root)
 
 
-def _io_error(error: OSError) -> TargetError:
-    return TargetError(
-        ErrorCode.IO_ERROR,
-        str(error),
-        None if error.filename is None else Path(error.filename),
-        error.errno,
-    )
-
-
-def _overlaps(left: Path, right: Path) -> bool:
-    first = tuple(portable_path_key(part) for part in left.parts)
-    second = tuple(portable_path_key(part) for part in right.parts)
-    length = min(len(first), len(second))
-    return first[:length] == second[:length]
-
-
-def prepare_targets(
-    targets: Iterable[Target], source_roots: tuple[Path, ...] = ()
-) -> tuple[ResolvedTarget, ...]:
-    requested = tuple(targets)
-    if any(not isinstance(target, Target) for target in requested):
-        raise TypeError("targets must contain only Target values")
-    if not requested:
+def skill_targets(identifier: str, targets: Iterable[Target]) -> tuple[SkillTarget, ...]:
+    values = tuple(targets)
+    if not values:
         raise ValueError("at least one target is required")
-    result: list[ResolvedTarget] = []
-    identities: dict[tuple[int, int], int] = {}
-    roots: dict[Path, int] = {}
-    for target in requested:
-        error = None
-        identity = None
-        anchor, root = target._anchor, target.root
+    if any(type(target) is not Target for target in values):
+        raise TypeError("targets must contain Target values")
+    result: list[SkillTarget] = []
+    known: dict[Path, int] = {}
+    for target in values:
+        root = target.root
         try:
-            observer = Observer()
-            observer.metadata(anchor)
-            try:
-                anchor = anchor.resolve(strict=False)
-            except RuntimeError as failure:
-                if not str(failure).startswith("Symlink loop from "):
-                    raise
-                raise ObservationFailure(
-                    ErrorCode.UNSAFE_PATH, "symlink loop while resolving target", anchor
-                ) from failure
-            if anchor != anchor.parent:
-                matches = observer.directory(anchor.parent, matching=anchor.name)
-                metadata = observer.metadata(anchor)
-                if matches and metadata is not None:
-                    physical = observer.metadata(matches[0])
-                    if physical is not None and (metadata.st_dev, metadata.st_ino) == (
-                        physical.st_dev,
-                        physical.st_ino,
-                    ):
-                        anchor = matches[0]
-            root = anchor.joinpath(*target._suffix)
-            if root == root.parent:
-                raise ValueError("a filesystem root cannot be a skill container")
-            # Managed components are checked before stat can follow them for alias detection.
-            for path in (
-                anchor,
-                *[anchor.joinpath(*target._suffix[:n]) for n in range(1, len(target._suffix) + 1)],
-            ):
-                metadata = observer.metadata(path)
-                if metadata is not None and not stat.S_ISDIR(metadata.st_mode):
-                    raise ObservationFailure(ErrorCode.UNSAFE_PATH, "expected a directory", path)
-                if path != anchor:
-                    observer.managed_directory(path)
-            metadata = observer.metadata(root)
-            if metadata is not None:
-                identity = (metadata.st_dev, metadata.st_ino)
-            observer.finish()
-        except OSError as failure:
-            error = _io_error(failure)
-        except ObservationFailure as failure:
-            error = failure.error
-        state = root.with_name(f".{root.name}.flyrail")
-        alias = roots.get(root)
-        if alias is None and identity is not None:
-            alias = identities.get(identity)
-        item = ResolvedTarget(target, root, state, anchor, alias, error)
-        for source in source_roots:
-            if _overlaps(source, root) or _overlaps(source, state):
-                raise ValueError("bundle source, target and state roots must not overlap")
-        if alias is None:
-            for previous in result:
-                if any(
-                    _overlaps(left, right)
-                    for left in (root, state)
-                    for right in (previous.root, previous.state_root)
-                ):
-                    raise ValueError("target and state roots must not overlap other destinations")
-            roots[root] = len(result)
-            if identity is not None:
-                identities[identity] = len(result)
-        result.append(item)
+            root = ResourceAuthority(root).destination
+            index = root.with_name(f".{root.name}.flyrail-index-{identifier}")
+            context = (
+                ("destination", str(root)),
+                ("agent", target.agent.value if target.agent else ""),
+                ("scope", target.scope.value),
+                ("home", str(target.home) if target.home else ""),
+                *(("env:" + key, value) for key, value in target.environment),
+            )
+            installation = InstallationTarget(
+                index, (("destination", str(root)),), routing_context=context
+            )
+        except (OSError, ObservationFailure, _UnsafeDestination) as error:
+            result.append(SkillTarget(target, error_detail(error), root, None))
+            continue
+        result.append(SkillTarget(target, installation, root, known.get(root)))
+        known.setdefault(root, len(result) - 1)
     return tuple(result)
 
 
-def _state(observer: Observer, root: Path) -> tuple[tuple[Receipt, ...], tuple[Path, ...]]:
-    observer.managed_directory(root)
-    children = observer.directory(root)
-    recovery: list[Path] = []
-    receipts: list[Receipt] = []
-    for child in children:
-        if child.name == "receipts":
-            for file in observer.directory(child):
-                try:
-                    if file.suffix != ".json":
-                        raise ValueError("receipt filenames must end in .json")
-                    validate_identifier(file.stem, "receipt filename")
-                    receipts.append(read_receipt(observer.file(file), file.stem))
-                except ValueError as error:
-                    raise ObservationFailure(ErrorCode.INVALID_STATE, str(error), file) from error
-        elif child.name == "lock":
-            metadata = observer.metadata(child)
-            if metadata is None or not stat.S_ISREG(metadata.st_mode):
-                raise ObservationFailure(
-                    ErrorCode.INVALID_STATE, "lock must be a regular file", child
-                )
-        elif child.name == "transaction.json":
-            metadata = observer.metadata(child)
-            if metadata is None or not stat.S_ISREG(metadata.st_mode):
-                raise ObservationFailure(
-                    ErrorCode.INVALID_STATE, "transaction.json must be a regular file", child
-                )
-            recovery.append(child)
-        elif child.name in {"staging", "backup"}:
-            if observer.directory(child):
-                recovery.append(child)
-        else:
-            raise ObservationFailure(
-                ErrorCode.INVALID_STATE, "unknown management state entry", child
-            )
-    result = tuple(receipts)
-    try:
-        reconcile_receipts(result)
-    except ValueError as error:
-        raise ObservationFailure(ErrorCode.INVALID_STATE, str(error), root) from error
-    return result, tuple(recovery)
+def _validate_skill_bundle(bundle: Bundle) -> None:
+    if any(not isinstance(artifact, SkillArtifact) for artifact in bundle.artifacts):
+        raise ValueError("use explicit rendering for non-skill artifacts")
+    if bundle.assets or bundle.dependencies:
+        raise ValueError("use explicit rendering for skill bundles with assets or dependencies")
 
 
-def _changes(
-    bundle_id: str, expected: tuple[InventoryEntry, ...], actual: tuple[InventoryEntry, ...]
-) -> tuple[Modification, ...]:
-    before = {entry.path: entry for entry in expected}
-    after = {entry.path: entry for entry in actual}
-    result: list[Modification] = []
-    for path in sorted(before.keys() | after.keys(), key=lambda value: value.encode("utf-8")):
-        old, new = before.get(path), after.get(path)
-        kinds: list[ModificationKind] = []
-        if old is None:
-            kinds.append(ModificationKind.ADDED)
-        elif new is None:
-            kinds.append(ModificationKind.MISSING)
-        elif old.is_directory != new.is_directory:
-            kinds.append(ModificationKind.TYPE_CHANGED)
-        else:
-            if old.size != new.size or old.sha256 != new.sha256:
-                kinds.append(ModificationKind.CONTENT_CHANGED)
-            if old.executable != new.executable:
-                kinds.append(ModificationKind.EXECUTABLE_CHANGED)
-        result.extend(Modification(bundle_id, path, kind) for kind in kinds)
-    return tuple(result)
-
-
-def _installation(receipt: Receipt) -> Installation:
-    if receipt.version is None or receipt.content_digest is None:
-        raise ValueError("removed receipt has no installation")
-    return Installation(
-        receipt.bundle_id,
-        receipt.version,
-        receipt.content_digest,
-        receipt.transaction_id,
-        receipt.entries,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class TargetSnapshot:
-    observation: Observation
-    receipts: tuple[Receipt, ...]
-    entries: tuple[InventoryEntry, ...]
-
-
-def scan_identity(
-    bundle_id: str, target: ResolvedTarget, bundle: Bundle | None = None
-) -> TargetSnapshot:
-    observer = Observer()
-    for path in (
-        target.anchor,
-        *[
-            target.anchor.joinpath(*target.target._suffix[:n])
-            for n in range(1, len(target.target._suffix) + 1)
-        ],
-    ):
-        metadata = observer.metadata(path)
-        if metadata is not None and not stat.S_ISDIR(metadata.st_mode):
-            raise ObservationFailure(ErrorCode.UNSAFE_PATH, "expected a directory", path)
-        if path != target.anchor:
-            observer.managed_directory(path)
-    root_children = observer.directory(target.root)
-    by_key = {portable_path_key(path.name): path.name for path in root_children}
-    receipts, recovery_paths = _state(observer, target.state_root)
-    owners = reconcile_receipts(receipts)
-    active = tuple(receipt for receipt in receipts if not receipt.removed)
-    own = next((receipt for receipt in active if receipt.bundle_id == bundle_id), None)
-    desired = set() if bundle is None else {skill.name for skill in bundle.skills}
-    names = desired | owners.keys()
-    actual: dict[str, tuple[BundleEntry, ...]] = {}
-    conflicts: list[Conflict] = []
-    intent = frozenset(
-        entry.path for receipt in active for entry in receipt.entries if entry.executable
-    )
-    for name in sorted(names):
-        spelling = by_key.get(name, name)
-        actual[name] = observer.tree(target.root, spelling, intent)
-        if name in desired and (
-            (name in owners and owners[name] != bundle_id)
-            or (name not in owners and name in by_key)
-            or spelling != name
-        ):
-            conflicts.append(Conflict(spelling, owners.get(name)))
-    modifications: list[Modification] = []
-    installations: list[Installation] = []
-    for receipt in active:
-        entries = tuple(entry for name in receipt.skills for entry in actual[name])
-        changes = _changes(receipt.bundle_id, receipt.entries, inventory(entries))
-        modifications.extend(changes)
-        if not changes and _content_digest(entries) != receipt.content_digest:
-            raise ObservationFailure(
-                ErrorCode.INVALID_STATE,
-                "receipt content digest disagrees with its intact inventory",
-                target.state_root / "receipts" / f"{receipt.bundle_id}.json",
-            )
-        installations.append(_installation(receipt))
-    selected = desired | (set() if own is None else set(own.skills))
-    entries = tuple(entry for name in sorted(selected) for entry in actual[name])
-    observer.finish()
-    observation = Observation(
-        ObservationState.RECOVERY_NEEDED
-        if recovery_paths
-        else (ObservationState.INSTALLED if own is not None else ObservationState.ABSENT),
-        None if own is None else _installation(own),
-        tuple(installations),
-        None if own is None or bundle is None else own.version == bundle.version,
-        None if own is None or bundle is None else own.content_digest == bundle.content_digest,
-        None if bundle is None else _content_digest(entries) == bundle.content_digest,
-        tuple(modifications),
-        tuple(conflicts),
-        TargetError(
-            ErrorCode.RECOVERY_NEEDED,
-            "management state requires mutation-time recovery",
-            recovery_paths[0],
+def render_skills(bundle: Bundle, target: Target) -> RenderedBundle:
+    if not isinstance(bundle, Bundle) or type(target) is not Target:
+        raise TypeError("skill rendering requires a Bundle and Target")
+    _validate_skill_bundle(bundle)
+    destination = ResourceAuthority(target.root).destination
+    rendered = []
+    for skill in bundle.skills:
+        prefix = skill.name + "/"
+        content = TreeContent(
+            BundleEntry(entry.path[len(prefix) :], entry.data, entry.executable)
+            for entry in bundle.entries
+            if entry.path.startswith(prefix)
         )
-        if recovery_paths
-        else None,
-        recovery_paths,
-    )
+        rendered.append(
+            RenderedArtifact(skill.name, Family.SKILLS, destination, content, subtree=skill.name)
+        )
+    if not rendered:
+        for artifact in bundle.artifacts:
+            if isinstance(artifact, SkillArtifact):
+                rendered.append(
+                    RenderedArtifact(
+                        artifact.id,
+                        Family.SKILLS,
+                        destination,
+                        artifact.content,
+                        subtree=artifact.name,
+                    )
+                )
+    return RenderedBundle(rendered)
 
-    return TargetSnapshot(observation, receipts, inventory(entries))
+
+def prepare_skills(
+    bundle: Bundle | None, identifier: str, targets: Iterable[Target]
+) -> tuple[tuple[SkillTarget, RenderedBundle | None], ...]:
+    if bundle is not None:
+        _validate_skill_bundle(bundle)
+    selected = skill_targets(identifier, targets)
+    result: list[tuple[SkillTarget, RenderedBundle | None]] = []
+    for item in selected:
+        if item.alias_of is not None:
+            result.append((item, result[item.alias_of][1]))
+            continue
+        rendered = None
+        if bundle is not None and isinstance(item.installation, InstallationTarget):
+            try:
+                rendered = render_skills(bundle, item.target)
+                _references(rendered, None, item.installation, bundle)
+            except (OSError, ObservationFailure, _UnsafeDestination) as error:
+                item = replace(item, installation=error_detail(error))
+        result.append((item, rendered))
+    return tuple(result)
 
 
-def observe_identity(
-    bundle_id: str, target: ResolvedTarget, bundle: Bundle | None = None
+def skill_observation(
+    observation: InstallationObservation,
+    bundle: Bundle | None,
+    rendered: RenderedBundle | None = None,
 ) -> Observation:
-    return scan_identity(bundle_id, target, bundle).observation
-
-
-def observe(bundle: Bundle, target: ResolvedTarget) -> Observation:
-    return observe_identity(bundle.id, target, bundle)
+    installations = []
+    metadata_error = None
+    for observed in observation.resources:
+        try:
+            stored = read(observed.state_root / "receipt.json", Receipt)
+        except (OSError, ObservationFailure, ValueError) as caught:
+            metadata_error = error_detail(caught)
+            continue
+        if stored is None:
+            continue
+        for identifier in sorted({claim.bundle_id for claim in stored.claims}):
+            claims = [claim for claim in stored.claims if claim.bundle_id == identifier]
+            entries = []
+            for claim in claims:
+                if claim.installed is not None and isinstance(claim.claim.selector, str):
+                    for node in claim.installed.nodes:
+                        name = claim.claim.selector + ("/" + node.path if node.path else "")
+                        entries.append(
+                            BundleEntry(
+                                name, node.data, node.data is not None and bool(node.mode & 0o111)
+                            )
+                        )
+            installations.append(
+                Installation(
+                    identifier,
+                    claims[0].version,
+                    claims[0].bundle_digest,
+                    stored.transaction_id,
+                    inventory(entries),
+                )
+            )
+    installed = next(
+        (item for item in installations if item.bundle_id == observation.bundle_id), None
+    )
+    modifications = tuple(
+        Modification(claim.bundle_id, claim.artifact_id, ModificationKind.CONTENT_CHANGED)
+        for resource in observation.resources
+        for claim in resource.claims
+        if claim.status is not EditStatus.CURRENT
+    )
+    recovery = tuple(path for resource in observation.resources for path in resource.recovery_paths)
+    error = (
+        observation.error
+        or metadata_error
+        or next((resource.error for resource in observation.resources if resource.error), None)
+    )
+    state = (
+        ObservationState.RECOVERY_NEEDED
+        if recovery
+        else (
+            ObservationState.UNKNOWN
+            if error
+            else ObservationState.INSTALLED
+            if installed
+            else ObservationState.ABSENT
+        )
+    )
+    return Observation(
+        state,
+        installed,
+        tuple(installations),
+        None if bundle is None or installed is None else installed.version == bundle.version,
+        None
+        if bundle is None or installed is None
+        else installed.content_digest == bundle.content_digest,
+        None
+        if bundle is None
+        else observation.is_current
+        and observation.bundle_digest == bundle.content_digest
+        and (rendered is None or observation.render_digest == rendered.content_digest),
+        modifications,
+        (),
+        error,
+        recovery,
+    )
 
 
 def inspect(bundle: Bundle, targets: Iterable[Target]) -> tuple[TargetInspection, ...]:
     if not isinstance(bundle, Bundle):
         raise TypeError("bundle must be a Bundle snapshot")
-    resolved = prepare_targets(targets, bundle.source_roots)
-    results: list[TargetInspection] = []
-    for target in resolved:
-        if target.alias_of is not None:
-            observation = results[target.alias_of].observation
-        elif target.error is not None:
-            observation = Observation(ObservationState.UNKNOWN, error=target.error)
+    result: list[TargetInspection] = []
+    for item, rendered in prepare_skills(bundle, bundle.id, targets):
+        if item.alias_of is not None:
+            result.append(
+                replace(result[item.alias_of], target=item.target, alias_of=item.alias_of)
+            )
+            continue
+        if isinstance(item.installation, TargetError):
+            observation = Observation(ObservationState.UNKNOWN, error=item.installation)
         else:
-            try:
-                observation = observe(bundle, target)
-            except OSError as error:
-                observation = Observation(ObservationState.UNKNOWN, error=_io_error(error))
-            except ObservationFailure as error:
-                observation = Observation(ObservationState.UNKNOWN, error=error.error)
-        results.append(
+            observation = skill_observation(
+                inspect_installation(bundle.id, item.installation), bundle, rendered
+            )
+            if rendered is None:
+                raise AssertionError("skill inspection requires rendered content")
+            planned = preview(bundle, rendered, item.installation)
+            conflicts = tuple(
+                Conflict(str(plan.resource.destination), None)
+                for plan in planned.resources
+                if plan.error and plan.error.code is ErrorCode.CONFLICT
+            )
+            error = (
+                observation.error
+                or planned.error
+                or next(
+                    (
+                        plan.error
+                        for plan in planned.resources
+                        if plan.error and plan.error.code is not ErrorCode.CONFLICT
+                    ),
+                    None,
+                )
+            )
+            observation = replace(
+                observation,
+                state=ObservationState.UNKNOWN
+                if error and observation.state is not ObservationState.RECOVERY_NEEDED
+                else observation.state,
+                error=error,
+                conflicts=conflicts,
+            )
+        result.append(
             TargetInspection(
-                target.target, target.root, target.state_root, target.alias_of, observation
+                item.target,
+                item.root,
+                item.state_root,
+                item.alias_of,
+                observation,
             )
         )
-    return tuple(results)
+    return tuple(result)

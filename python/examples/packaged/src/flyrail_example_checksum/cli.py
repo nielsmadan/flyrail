@@ -17,6 +17,7 @@ from flyrail import (
     uninstall,
     update,
 )
+from flyrail_example_checksum import configuration
 
 BUNDLE_ID = "example-checksum"
 
@@ -40,6 +41,9 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     digest = commands.add_parser("digest", help="print a file's SHA-256 digest")
     digest.add_argument("file", type=Path)
+    configuration.configure_parser(
+        commands.add_parser("config", help="manage the combined agent configuration")
+    )
     ai = commands.add_parser("ai", help="manage the bundled checksum skill")
     actions = ai.add_subparsers(dest="action", required=True)
     for action in ("status", "install", "update", "uninstall"):
@@ -53,6 +57,8 @@ def main() -> int:
             with arguments.file.open("rb") as stream:
                 print(hashlib.file_digest(stream, "sha256").hexdigest())
             return 0
+        if arguments.command == "config":
+            return configuration.main(arguments, app_version)
         targets = [Target.directory(path) for path in arguments.target]
         bundle_version = None
         if arguments.action == "uninstall":
@@ -93,7 +99,7 @@ def main() -> int:
         )
         return int(
             any(
-                result.status in {OperationStatus.FAILED, OperationStatus.INCOMPLETE}
+                result.status not in {OperationStatus.APPLIED, OperationStatus.UNCHANGED}
                 or result.error is not None
                 or result.observation.error is not None
                 or result.recovery_paths

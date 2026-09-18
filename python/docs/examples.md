@@ -1,8 +1,12 @@
 # Embedding Flyrail in a host CLI
 
+[Build and try the examples](#build-and-try-the-examples) · [Explicit configuration commands](#explicit-configuration-commands) · [Resource packaging](#resource-packaging) · [What check-package verifies](#what-check-package-verifies)
+
 The examples are independent installable applications. Each exposes a useful
 host command and four explicit `ai` subcommands. They use only Flyrail's public
 API and standard-library argument parsing, reporting and exit handling.
+Checksum also offers a [combined `config` interface](../examples/packaged/README.md#combined-configuration)
+for all four families, with explicit project/agent routing and source-free removal.
 
 | Distribution | Installed command | Bundle source | Host version | Bundle label |
 | --- | --- | --- | --- | --- |
@@ -105,9 +109,15 @@ archive members against expected source bytes, checks metadata and dependencies,
 and rebuilds every wheel from its source archive with byte-identical results.
 The Flyrail source archive contains library source, tests, shared conformance
 fixtures, package metadata and license. Each example has its own distribution.
-Runtime Flyrail has zero third-party dependencies.
+Runtime Flyrail depends only on pinned `tomlkit`, imported lazily for TOML editing.
+The package check downloads that exact wheel, verifies its lockfile hash and
+metadata, and rejects unexpected transitive runtime dependencies.
 
-The gate installs the three rebuilt wheels with `--no-index --link-mode copy`
+Builds and byte-identical rebuilds run with an empty PATH, so they cannot use
+Node, npm, Bun or a JavaScript compiler. All three authored runtime modules ship
+as source assets.
+
+The gate installs the three rebuilt wheels and the verified runtime dependency with `--no-index --link-mode copy`
 into a fresh environment outside source directories. Console scripts run from
 a separate consumer directory with no source `PYTHONPATH`. Strict mypy checks an
 external consumer against that environment, and runtime checks verify its
@@ -122,3 +132,9 @@ installed copy to simulate another bundle revision while retaining host metadata
 An additional probe imports resources directly from the built wheel as a ZIP,
 removes the archive after loading, and verifies snapshot installation, binary
 bytes, executable intent, placeholder directories and removal.
+
+The combined CLI consumer verifies generated guidance and both MCP environment
+reference forms, executes the installed portable hook with its packaged assets,
+and compares new guidance and moved rendered assets under the same label. It
+checks read-only status, unchanged updates, edit protection, unsupported preflight,
+and source-free removal. Host activation stays explicitly unchecked.

@@ -1,48 +1,46 @@
 # Architecture
 
-Flyrail has three stages: snapshot a bundle, resolve/observe explicit destinations,
-then perform an optional receipt-backed transaction per physical target. All
-runtime code uses Python's standard library. The host application owns command
-parsing, user consent, presentation and process exit status.
+Flyrail separates detached bundle snapshots, rendered resources, pure document
+edits and filesystem transactions. The application owns agent selection, command
+parsing, presentation and replacement decisions. Runtime library operations do not
+execute bundled commands or use the network.
 
-| Area | Modules | Responsibility |
+| Boundary | Entry points | Responsibility |
 | --- | --- | --- |
-| Public values | `models`, `observations`, `targets`, `bundle` | Immutable metadata, snapshots, destination attribution and results. `flyrail.__init__` defines public exports. |
-| Source boundary | `_validation`, `_manifest`, `_sources` | Portable names/paths, strict schema parsing, safe filesystem/package/ZIP reading and complete snapshots. |
-| Recorded and actual state | `_inventory`, `_receipts`, `_observation`, `inspection` | Deterministic digests, receipt validation/reconciliation, actual filesystem comparisons and read-only results. |
-| Mutation boundary | `lifecycle`, `_intent`, `_transaction`, `_filesystem` | Request orchestration, transaction records, staging/publication/recovery, locks and native filesystem operations. |
+| Snapshot | `bundle`, `artifacts`, `content` | Strict portable inputs and immutable byte/value snapshots. |
+| Rendering | `translation`, `destinations`, `rendered` | Pure agent presets, explicit destinations, notices and dependency edges. |
+| Hook execution | `hooks`, `runtime/` | Detached adapter assets; execution later inside native or existing host runtimes. |
+| Editing | `editors` | Pure section/JSON/JSONC/TOML proposals with scoped baselines and creation provenance. |
+| Observation/planning | `configuration`, `_resource_plan`, `_lifecycle` | Resource summaries, immutable previews and logical index membership. |
+| Persistence | `_codec`, `_resource_models`, `_resource_transaction` | Closed state records, complete revisions, journal and receipt commit. |
+| Native I/O | `_resource_io`, `_security`, `_filesystem` | Safe observations, private metadata, security preservation, locks and exclusive publication. |
 
-Bundle construction copies bytes and executable intent before any mutation.
-Retained canonical source roots prevent a later request from overwriting its own
-source. JSON schemas and digest encodings are language-neutral; Python dataclasses
-and internal helpers are implementation choices.
+The skill convenience API adapts named subtrees into this same kernel. Every
+physical document/tree/skill container has one adjacent authority, lock, receipt
+and journal across all owners. A logical installation index is membership
+bookkeeping, not another source of ownership. This permits independent applications
+to own disjoint sections or keys in one document.
 
-Every complete request is validated and canonicalized before its first write.
-Physical target aliases are deduplicated while retaining each original request's
-agent/scope attribution and position. Target and sibling state directories cannot
-overlap one another, another destination, or the source. Inspection performs
-best-effort reads and detects observable concurrent changes without locking.
+Each contender registers its permanent boundary before validating ancestor and
+descendant boundaries. Incompatible concurrent parent/child admissions can both
+fail, but cannot both succeed. Cooperating writers acquire the index lock first,
+then resource locks in deterministic order. No home-wide ownership scan is used.
 
-A mutation holds one permanent advisory lock for the entire physical skill
-container, across all bundles. It reconciles ownership receipts, recovers known
-abandoned work, observes the requested bundle, then stages complete new trees and
-an immutable intent. Exclusive directory moves publish individual skills; receipt
-replacement commits the transaction. Before commit, safe recovery rolls back.
-After commit, it only cleans up. Uninstall commits a removal tombstone and can run
-without source bytes. Unexpected recovery data remains available to the caller.
+Previews bind complete preimages and private state. Mutations preflight known
+target conflicts, persist pending membership before the first publication, then
+commit resources in dependency order. Receipt publication is the resource commit
+boundary. Before it, recovery restores only recognized complete revisions; after
+it, recovery cleans only. Unexpected data remains available for examination.
 
-The lock and recovery state live in sibling `.<container>.flyrail`, outside skill
-discovery. Ownership belongs to whole named skill roots at that physical target,
-including missing files. There is no machine-wide registry, logical consumer
-reference count or transaction spanning targets.
+A document edit owns selected content and syntax, while current file metadata and
+unselected bytes remain live. Whole file/tree claims have an explicit mode
+contract. POSIX and Windows adapters capture supported native metadata or refuse
+the operation. TOML imports pinned `tomlkit` lazily; other core paths use the
+standard library.
 
-`_filesystem` isolates OS locking and exclusive rename behavior. POSIX locks use
-`fcntl.flock`; Windows locks one byte through `msvcrt`. Linux and macOS exclusive
-renames use narrow `ctypes` calls to their native APIs; Windows uses its exclusive
-`os.rename` contract. Unsupported native/filesystem behavior returns a typed
-error. The implementation never substitutes an unsafe check-then-rename sequence.
-
-The public [API](api.md), [bundle](../../spec/bundle-format.md), [receipt](../../spec/receipt-format.md)
-and [transaction](../../spec/transaction-protocol.md) documents are the contract references.
-[Support limits](support.md) describe the filesystem and concurrency boundary;
-[porting notes](../../spec/porting.md) cover compatible future implementations.
+[Resource authority](../../spec/resource-authority.md),
+[state encoding](../../spec/receipt-format.md),
+[index semantics](../../spec/configuration-state.md) and
+[transactions](../../spec/transaction-protocol.md) define the language-neutral
+contracts. [Porting](../../spec/porting.md) explains how another implementation
+must verify them.

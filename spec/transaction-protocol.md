@@ -1,165 +1,114 @@
-# Transaction and recovery protocol, schema 1
+# Resource transaction and recovery protocol, schema 2
 
-The sibling state directory described in the [receipt format](receipt-format.md)
-contains one permanent lock, receipt files, staging/backup containers and at most
-one published `transaction.json`. A mutation holds the target's lock for recovery,
-observation, preparation, publication and cleanup. All bundles at that physical
-target use the same lock inode. The lock is never replaced or deleted.
+The [state layout](receipt-format.md) provides one permanent lock and at most one
+published journal per resource. A mutation holds the index lock before all
+required resource locks. POSIX locks use `flock`; Windows locks byte zero with
+length one. Nonblocking attempts and a monotonic deadline implement bounded waiting.
+A busy lock is never interpreted as abandonment.
 
-New state, receipt, staging and backup containers are created with mode `0700`.
-Each transaction's fresh staging root, its `skills` container and backup root also
-use `0700` before any skill bytes are written or moved there. On POSIX these
-transaction roots prevent group/other access even if existing management parents
-have broader permissions. Existing directories and lock permissions are preserved;
-installed skill files retain their executable/nonexecutable modes.
+## Immutable journal
 
-Windows implementations must create management directories with access limited to
-the current user and administrators. The [Python support reference](../python/docs/support.md)
-explains its standard-library version requirements.
+`transaction.json` is a closed tagged `Journal` record with schema version 2.
+It binds the resource, previous and intended receipts, complete original,
+staged, published and private-backup revisions, and ancestor snapshots.
+Ancestor evidence includes the authority, staging and backup directories.
+The intended receipt's fresh transaction ID identifies its commit boundary.
+The complete receipt and journal must agree on their resource.
 
-POSIX uses nonblocking `flock`. Windows uses a nonblocking exclusive lock on byte
-zero with length one. Bounded waiting uses repeated nonblocking attempts and a
-monotonic deadline. Process termination releases the OS lock. A busy live lock is
-never treated as an abandoned transaction; no PID lease or lock stealing is used.
+Revision equality includes every owned and foreign byte, node identity, mode,
+owner/group and supported security evidence. Equal-byte adoption and label-only
+changes still journal ownership transitions; they do not need a content move.
 
-Exclusive moves use macOS `renamex_np(RENAME_EXCL)`, Linux
-`renameat2(RENAME_NOREPLACE)`, or a Windows move that refuses an existing
-destination. There is no POSIX existence-check-plus-rename fallback. Missing
-native support or an unsupported filesystem produces an explicit `UNSUPPORTED`
-error. Destination, receipt, staging and backup directories must be on the same
-volume. Language bindings are described by each implementation.
+Staging and backups stay under the adjacent authority on the resource volume.
+Existing management directories must satisfy the supported private-access
+contract before they receive payloads. Unsafe directories are refused without
+changing their permissions. Newly created payload files are private before their
+first bytes are written.
+Private metadata preparation uses checked `.next` files before atomic
+publication. Unknown or incomplete preparations remain recovery evidence.
+Only specifically recognized complete preparations can be resumed or discarded.
 
-## Immutable intent
+A prepared installation index can repeat the current index, prepare a new pending
+generation with all prior and desired resource references, or complete the recorded
+pending generation. Recovery retains all references: it promotes recognized pending
+preparation or discards a repeated/completion preparation only while the current
+index still locates its resources. Required receipts, including those evidenced by
+a recognized completed preparation, are checked before resource or index cleanup.
+Resource recovery succeeds before this index cleanup. Unrecognized index transitions
+retain their preparation and fail.
 
-A transaction has a fresh 32-character lowercase hexadecimal ID, carried by its
-`new` receipt. It uses:
+## Publication
 
-```text
-.<container>.flyrail/
-    lock
-    receipts/<bundle-id>.json
-    transaction.json
-    staging/<transaction-id>/
-        skills/<skill-name>/...
-        receipt.json
-    backup/<transaction-id>/<skill-name>/...
-```
+1. Register each permanent authority fence before checking hierarchy conflicts.
+   Recover recognized prior work under locks and observe a fresh target.
+2. Preflight all known target conflicts and persist pending desired/previous
+   index membership before the first resource content change.
+3. Validate the planned ancestor evidence and stage the complete changed resource
+   in private storage. Recheck full preimage, receipt, stage and ancestors, then
+   publish the immutable journal. Only verified directories created by the
+   operation may extend its ancestor evidence; preparation cannot refresh it.
+4. Publish through exclusive moves or the supported native Windows document
+   replacement transition. Recheck moved backups and the published full revision.
+5. Recheck the previous receipt, expected published resource, backups, journal
+   and recognized private layout, including stage/backup placement. Atomically
+   publish the intended receipt. **This is the resource commit.**
+6. Remove only recognized staging/backup data and preparations; remove the journal
+   last. Complete the installation index only after every resource reconciles.
 
-`transaction.json` is UTF-8 JSON with exactly these fields:
+Exclusive POSIX moves use macOS `renamex_np(RENAME_EXCL)` or Linux
+`renameat2(RENAME_NOREPLACE)`. Windows uses exclusive moves for applicable trees
+and `ReplaceFileW` with flags zero for existing supported documents.
+There is no existence-check-plus-rename or in-place overwrite fallback.
 
-| Field | Meaning |
+Windows document replacement narrows the live file to the journaled private DACL
+before producing its backup. The replacement is published privately, then receives
+the recorded original descriptor at its public destination. Both protected and
+original-security states must be explicitly recognized. Backups and staging never
+regain broad DACLs inside private storage. A process interruption can leave the
+destination restricted until recovery; unavailable required descriptor access
+safely refuses publication.
+
+## Recovery
+
+Only a mutation holding the resource lock decides that a journal can be recovered.
+Read-only inspection can observe an active writer and cannot establish abandonment.
+
+| Observed receipt/revisions | Action |
 | --- | --- |
-| `schema_version` | Integer `1`, never a boolean. |
-| `previous` | Complete previous receipt, including a previous removal receipt, or `null` when no receipt existed. |
-| `new` | Complete intended receipt; an active installation or transaction-tagged removal tombstone. |
-| `changes` | Array of `{ "name": ..., "old": [...], "new": [...] }` skill operations. |
+| Previous receipt, exact original destination, recognized preparation | Clean preparation and preserve previous ownership. |
+| Previous receipt, destination absent, complete recognized original backup | Restore the backup. |
+| Previous receipt, exact published destination and original backup | Return recognized new data to staging and restore the original revision. |
+| Previous receipt, equal-byte ownership-only transition | Preserve previous receipt ownership. |
+| Intended committed receipt | Cleanup only; preserve subsequent public content edits. |
+| Unexpected content, identity, security, ancestors, receipt or backup | Retain evidence and report `INCOMPLETE`. |
 
-Both receipts use the complete [receipt schema](receipt-format.md), including
-inventory digests. Their bundle IDs agree and their transaction IDs differ.
-Unknown fields, duplicate keys, unsupported schemas and malformed values are
-rejected. Names are valid skill identifiers, with one operation per skill.
-Inventories use receipt entry records and portable path rules. Each includes
-exact parent directories, unique portable paths and one named root when present.
+Rollback requires complete recognized revisions. It never selectively recomposes
+a foreign edit around an owned selection. On Windows, restore a recognized private
+backup to the public destination before restoring original security there.
+Every recovery transition must itself be recognizable after interruption.
 
-An operation's `old` inventory describes the exact observed safe revision, which
-may differ from `previous.entries` only for that receipt's owned skills. It may
-be empty, lack `SKILL.md`, contain added files, or have a file in place of the
-owned root when explicit replacement was authorized. The `new` inventory must
-match that skill's portion of the new receipt. Empty inventories represent
-absence. Names outside previous/new ownership cannot appear, and every change
-between recorded previous/new inventories must have an operation. Identical
-observed old/new inventories require no filesystem moves, even if recording that
-revision requires a receipt change. Unchanged skills can be omitted.
+After commit, cleanup cannot roll back ownership. Nodes are deleted in reverse
+revision order. An interrupted deletion is recognized only when the remaining
+nodes form an exact prefix of the recorded revision, including their bytes,
+identities and security metadata. This also permits resuming cleanup after
+rollback has restored the complete original destination and emptied its backup.
+Other remaining data is retained. A later source-free retry can resume after the
+caller reconciles an unknown state to a recognized revision.
+There is no automatic age-based garbage collection or force-clean operation.
 
-The writer emits compact JSON with sorted object keys, a trailing newline,
-sorted inventory paths and sorted skill operations. The intent is immutable once
-published. Recovery verifies it before cleanup and again before removing it.
-JSON whitespace and object order do not affect its meaning. Shared vectors in
-`spec/fixtures/transactions.json` cover installation, uninstall and
-a label-only update, using the independently framed receipt fixture.
+## Limits and verification
 
-## Publication and commit
+Resources commit independently; later failures retain completed resource commits
+and pending logical membership. The aggregate can be `PARTIAL` while a resource
+is `APPLIED` or has `INCOMPLETE` recovery. No source bundle is needed to locate
+recorded claims or recover an already journaled transition.
 
-1. Read/reconcile receipts and observe managed content under the lock. Recover
-   existing work first, then obtain the revision used for this operation.
-2. Build the new receipt and per-skill expected inventories. Create the transaction
-   private staging and backup directories, write every changed new skill, set executable
-   modes, and write the new receipt. Revalidate the observed old trees, staged
-   new trees and previous receipt before target publication.
-3. Write `staging/<id>/intent.json`, then exclusively move that complete file to
-   `transaction.json`. The published intent is never rewritten to advance phases.
-4. For each changed skill, exclusively move old content to its backup location,
-   revalidate the backup, and exclusively move staged new content to the target.
-   Removed skills have no new publication. Recheck changed and desired trees.
-5. Revalidate the previous receipt and staged receipt, then atomically replace
-   `receipts/<bundle-id>.json` with the staged receipt. **This is the commit
-   boundary.** Uninstall commits by publishing its removal tombstone.
-6. Revalidate and remove expected backup/staging data, remove the transaction's
-   empty directories, then remove `transaction.json` last.
+Locks and full-revision checks coordinate cooperating writers. State is not
+authenticated against a hostile same-user process. The protocol handles process
+interruption, not power-loss durability: it provides no fsync ordering guarantee.
 
-An exception before commit attempts safe rollback under the held lock. An
-exception after receipt publication only attempts cleanup. Publishing changed
-skills individually does not provide simultaneous visibility of all skills.
-
-## Recovery after interruption
-
-Only a mutation holding the lock interprets intent as abandoned work. It validates
-all receipts, the intent, old/new ownership against other receipts, and the
-recognized recovery layout. The current receipt must equal either `previous` or
-`new`; anything else is uncertain and retained.
-
-If the current receipt equals `new`, the transaction committed. Recovery cleans
-only its expected staging and backups, even when installed content has since
-been edited. The next ordinary operation observes those edits before deciding
-whether it can proceed.
-
-If the current receipt equals `previous` (or both are absent), recovery rolls
-back. It recognizes complete expected old backups, expected new destinations,
-and staged new content. To restore an old backup it first exclusively returns a
-published new directory to its stage, then exclusively restores the backup. A
-first installation rolls back to absence. A restored old destination with no
-backup is already rolled back. Missing or changed old backups are never treated
-as complete recoverable old data. Unexpected destination bytes are retained.
-
-Recovery itself may be interrupted after either move. The same inventory and
-placement checks recognize those intermediate states on the next call. Cleanup
-accepts a verified subset of the expected inventory: missing entries can have
-been deleted by an earlier cleanup attempt, while every remaining file's bytes,
-size, executable intent and every remaining directory must still match. Each
-cleanup attempt validates the whole remaining inventory once, then revalidates
-each entry's content, type and safe ancestors immediately before deletion.
-Unchanged cleanup data is read a bounded number of times per attempt, including
-large skills. Rollback requires complete old data; subset
-rules apply only to deletion of expected cleanup data. This allows interruption
-in the middle of either committed cleanup or rollback cleanup.
-
-Unknown entries, edited backups, conflicting destinations, incomplete old data,
-or invalid/unreadable intent are retained and reported with `INCOMPLETE` and
-recovery paths. No caller needs source files to recover or uninstall.
-
-If a process dies during preparation before publishing a complete intent, its
-unrecognized staging/backup data is conservatively retained. This includes a
-complete staged `intent.json` that never reached the published location. There
-is no automatic age-based deletion or reconstruction from partial preparation.
-The caller must preserve and examine the reported paths before resolving that
-state. The same bounded behavior applies when preparation fails normally before
-intent publication; it does not erase uncertain bytes to make the next call pass.
-
-## Guarantees and limits
-
-Locks coordinate Flyrail writers. Inventories and exclusive moves detect common
-concurrent edits and preserve unexpected recovery data. They do not authenticate
-receipts or defend against a hostile same-user process changing paths between a
-check and a syscall. Inspection is read-only and can observe an active transaction.
-
-There is no cross-target atomicity, simultaneous multi-skill visibility, or
-power-loss durability claim. The protocol handles process interruption; it does
-not use an fsync ordering protocol. Permanent locks and small management
-containers/receipts may remain after uninstall. The skill container and unrelated
-content are retained.
-
-Tests kill real subprocesses before/after intent and receipt publication, after
-backup and target moves, during partial deletion, and during rollback recovery.
-They separately exercise uninstall's tombstone boundary and bounded lock
-contention. Platform adapters have contract tests; actual native filesystem and
-locking behavior must also run on each supported operating system.
+`fixtures/configurations.json` contains production-shaped tagged journals and
+observed recovery transitions, including ownership-only adoption. Implementations
+must additionally exercise real process admission races and native failures at
+publication, security, receipt, cleanup and rollback boundaries on each supported
+operating system.

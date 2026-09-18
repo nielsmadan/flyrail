@@ -1,9 +1,11 @@
 # Python development
 
+[Tool setup](#tool-setup) · [Hook runtimes and shell probes](#hook-runtimes-and-shell-probes) · [Commands](#commands) · [Repository files and generated output](#repository-files-and-generated-output) · [CI and maintenance](#ci-and-maintenance) · [Preparing a release](#preparing-a-release)
+
 Run the commands below from `python/`. The repository-root Justfile forwards the
 same commands here. Python 3.11+ and uv 0.12.13+ are required; just is optional.
-Runtime dependencies are empty. Build, development and audit dependencies are
-pinned in `pyproject.toml` and resolved with artifact hashes in `uv.lock`.
+The sole runtime dependency is `tomlkit`, loaded lazily for TOML editing.
+Build, development and audit dependencies are pinned in `pyproject.toml` and resolved with artifact hashes in `uv.lock`.
 
 ## Tool setup
 
@@ -21,11 +23,40 @@ verify the checksum and extract the executable into repository-root
 then PATH, and requires the exact version. [CI](../../.github/workflows/ci.yml)
 contains the Linux download and checksum command.
 
+## Hook runtimes and shell probes
+
+Hook development checks require Node 24+, npm and Bun 1.4.2+. The shared gate
+installs the exact `runtime-tooling/package-lock.json` development graph under
+repository `.cache/hook-tooling`, audits it, and checks TypeScript strictly before
+running the real child-process/host-loader tests. These are development and later
+hook-execution prerequisites; ordinary Python package builds do not invoke them.
+
+CI enables `FLYRAIL_TEST_CODEX_LOGIN_SHELL=1` so POSIX Codex bridge probes execute
+its documented default `/bin/sh -lc` argument on clean runner profiles. Local
+checks normally use `/bin/sh -c` and report POSIX non-login execution explicitly.
+To include the default login shell locally, run in an environment whose startup
+files are accessible (for example, an unsandboxed terminal):
+
+```sh
+FLYRAIL_TEST_CODEX_LOGIN_SHELL=1 just check
+```
+
+This does not imply Codex offers arbitrary shell arguments. It selects the test
+probe, not host configuration. Keep strict stderr checks; do not alter HOME or
+startup files to make a probe pass. Windows probes use native `cmd.exe /C` and
+direct execution. Native Windows security/process checks and Linux behavior must
+run on those platforms; configured mypy platforms are only static validation:
+
+```sh
+uv run --no-sync mypy --platform win32
+uv run --no-sync mypy --platform linux
+```
+
 ## Commands
 
 | Command | Work performed |
 | --- | --- |
-| `just check` | Locked sync, Ruff format/lint/security checks, strict mypy, pytest with branch coverage, and package/consumer checks. |
+| `just check` | Locked sync, Ruff format/lint/security checks, interpreter verification, strict mypy, hook runtime checks, pytest with branch coverage, and package/consumer checks. |
 | `just audit-dependencies` | Audit every locked registry package/version with pip-audit. |
 | `just check-workflow` | Validate all repository workflows with actionlint. |
 | `just check-package` | Build and verify distributions and installed example applications. |
@@ -85,8 +116,12 @@ Package checks compare complete archive contents against the selected source byt
 ## CI and maintenance
 
 [CI](../../.github/workflows/ci.yml) runs the shared check on Ubuntu 24.04, macOS 15
-and Windows 2025 with Python 3.11 and 3.14. All six jobs must pass before a release
-claims those platforms. Workflows use pinned action commits, pinned uv, a
+and Windows 2025 with Python 3.11 and 3.14. `setup-python` supplies a modern
+3.14 bootstrap; pinned uv selects the tested interpreter using matrix `UV_PYTHON`
+and `UV_MANAGED_PYTHON=1`. The shared gate prints the running version/executable
+and verifies its base against `uv python find --system --managed-python`. This
+avoids the Windows 3.11.9 installer, whose private-directory behavior is unsupported.
+All six jobs must pass before a release claims those platforms. Workflows use pinned action commits, pinned uv, a
 checksum-pinned actionlint archive and read-only repository permissions.
 
 [Dependabot](../../.github/dependabot.yml) groups weekly Python dependency updates
@@ -97,7 +132,7 @@ are embedded tool versions, separate from action versions.
 ## Preparing a release
 
 1. Set the package version in `pyproject.toml` and run `just lock`. Host application
-   versions and skill bundle labels change independently.
+   versions and configuration bundle labels change independently.
 2. Run `just check`, `just audit-dependencies` and `just check-workflow`, and obtain
    passing native CI results for every OS/interpreter cell.
 3. Run `just build` and review the wheel and source archive in `python/dist/`.

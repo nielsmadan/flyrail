@@ -464,6 +464,8 @@ def test_rejects_source_symlinks(tmp_path: Path, kind: str) -> None:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO")
 def test_rejects_special_files_without_opening_them(tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO")
     skill = write_bundle(tmp_path)
     os.mkfifo(skill / "pipe")
     with pytest.raises(ValueError, match="special files"):

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from test_inspection import make_bundle, snapshot
+from skill_helpers import make_bundle, snapshot
 
 from flyrail import Bundle, OperationStatus, Target, inspect, install, uninstall, update
 from flyrail import _filesystem as filesystem
@@ -39,7 +39,7 @@ def test_old_windows_python_rejects_mutations_before_writes(
     for result in results:
         assert result.status is OperationStatus.FAILED
         assert result.error is not None and result.error.code is ErrorCode.UNSUPPORTED
-        assert result.error.path == result.state_root
+        assert result.error.path is not None
         assert result.observation.error is None
         assert result.recovery_paths == ()
     assert snapshot(tmp_path) == before

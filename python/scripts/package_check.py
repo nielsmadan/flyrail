@@ -1,4 +1,5 @@
 import email.parser
+import hashlib
 import os
 import re
 import shutil
@@ -7,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import tomllib
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -96,7 +98,13 @@ def verify_artifacts(project: Path, wheel: Path, sdist: Path) -> None:
         project, config["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
     )
     if project == ROOT:
-        for name in ("bundles.json", "receipts.json", "transactions.json"):
+        for name in (
+            "bundles.json",
+            "configurations.json",
+            "edits.json",
+            "translations.json",
+            "hooks.json",
+        ):
             expected_sdist[f"spec/fixtures/{name}"] = (
                 REPOSITORY / "spec/fixtures" / name
             ).read_bytes()
@@ -114,6 +122,45 @@ def verify_artifacts(project: Path, wheel: Path, sdist: Path) -> None:
     print(f"Verified complete wheel and sdist: {project.name}", flush=True)
 
 
+def dependency_wheels(work: Path) -> list[Path]:
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    wheels: list[Path] = []
+    for requirement in config["project"]["dependencies"]:
+        name, version = requirement.split("==")
+        package = next(
+            item for item in lock["package"] if item["name"] == name and item["version"] == version
+        )
+        (wheel,) = package["wheels"]
+        url = wheel["url"]
+        require(
+            url.startswith("https://files.pythonhosted.org/"), "dependency wheel origin differs"
+        )
+        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310
+            data = response.read()
+        require(
+            "sha256:" + hashlib.sha256(data).hexdigest() == wheel["hash"],
+            "dependency wheel digest differs from lock",
+        )
+        destination = work / url.rsplit("/", 1)[-1]
+        destination.write_bytes(data)
+        with zipfile.ZipFile(destination) as archive:
+            metadata_name = next(
+                item for item in archive.namelist() if item.endswith(".dist-info/METADATA")
+            )
+            metadata = email.parser.BytesParser().parsebytes(archive.read(metadata_name))
+        require(
+            metadata["Name"] == name and metadata["Version"] == version,
+            "dependency metadata differs",
+        )
+        require(
+            not metadata.get_all("Requires-Dist", []),
+            "dependency has an unverified runtime dependency",
+        )
+        wheels.append(destination)
+    return wheels
+
+
 def main() -> int:
     environment = tool_environment()
     environment.pop("PYTHONPATH", None)
@@ -128,6 +175,7 @@ def main() -> int:
     work = Path(tempfile.mkdtemp(prefix="run-", dir=workspace)).resolve()
     consumer = work / "consumer"
     consumer.mkdir()
+    build_environment = {**environment, "PATH": ""}
     wheels: list[Path] = []
     for index, project in enumerate(
         [ROOT, ROOT / "examples/filesystem", ROOT / "examples/packaged"]
@@ -137,13 +185,13 @@ def main() -> int:
         run(
             [*build, "--sdist", "--wheel", "--out-dir", str(output), str(project)],
             consumer,
-            environment,
+            build_environment,
         )
         (wheel,) = output.glob("*.whl")
         (sdist,) = output.glob("*.tar.gz")
         verify_artifacts(project, wheel, sdist)
         rebuilt = output / "rebuilt"
-        run([*build, "--wheel", "--out-dir", str(rebuilt), str(sdist)], consumer, environment)
+        run([*build, "--wheel", "--out-dir", str(rebuilt), str(sdist)], consumer, build_environment)
         (rebuilt_wheel,) = rebuilt.glob("*.whl")
         require(
             wheel.read_bytes() == rebuilt_wheel.read_bytes(), f"sdist rebuild differs: {project}"
@@ -164,12 +212,18 @@ def main() -> int:
             "--link-mode",
             "copy",
             *map(str, wheels),
+            *map(str, dependency_wheels(work)),
         ],
         consumer,
         environment,
     )
     shutil.copytree(ROOT / "examples/filesystem/bundle", consumer / "notes-bundle")
-    for name in ("package_probe.py", "typed_consumer.py"):
+    for name in (
+        "package_probe.py",
+        "typed_consumer.py",
+        "hook_package_probe.py",
+        "configuration_package_probe.py",
+    ):
         shutil.copyfile(ROOT / "scripts" / name, consumer / name)
     run(
         [
@@ -188,6 +242,8 @@ def main() -> int:
         environment,
     )
     run([str(python), "-I", "typed_consumer.py"], consumer, environment)
+    run([str(python), "-I", "hook_package_probe.py"], consumer, environment)
+    run([str(python), "-I", "configuration_package_probe.py"], consumer, environment)
     run([str(python), "-I", "package_probe.py", str(wheels[2])], consumer, environment)
     print(f"Package QA passed. Built artifacts and isolated installation: {work}")
     return 0

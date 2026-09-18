@@ -1,0 +1,3616 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "four-families-native-and-assets",
+      "manifest": {
+        "schema_version": 2,
+        "id": "team",
+        "version": "opaque label",
+        "artifacts": [
+          {
+            "kind": "skill",
+            "id": "review-skill",
+            "name": "review",
+            "path": "skills/review",
+            "executables": [
+              "run.py"
+            ]
+          },
+          {
+            "kind": "instruction",
+            "id": "guide",
+            "path": "instructions.md"
+          },
+          {
+            "kind": "mcp",
+            "id": "local-tools",
+            "name": "local-tools",
+            "transport": {
+              "kind": "stdio",
+              "command": {
+                "argv": [
+                  "python",
+                  "server.py"
+                ],
+                "env": {
+                  "API_TOKEN": {
+                    "env": "TOOLS_TOKEN"
+                  },
+                  "MODE": "local"
+                },
+                "cwd": "tools"
+              }
+            }
+          },
+          {
+            "kind": "mcp",
+            "id": "remote-tools",
+            "name": "remote-tools",
+            "transport": {
+              "kind": "http",
+              "url": "https://tools.example.test/mcp",
+              "bearer_token_env": "REMOTE_TOKEN"
+            }
+          },
+          {
+            "kind": "hook",
+            "id": "check-tool",
+            "event": "before-tool",
+            "protocol_version": 1,
+            "command": {
+              "argv": [
+                "python",
+                "check.py"
+              ]
+            },
+            "outcomes": [
+              "continue",
+              "block"
+            ],
+            "tools": [
+              "shell"
+            ]
+          },
+          {
+            "kind": "native",
+            "id": "native-guide",
+            "family": "instructions",
+            "audience": {
+              "agent": "claude",
+              "scope": "project"
+            },
+            "destination": "guidance/custom.md",
+            "content": {
+              "kind": "file",
+              "path": "native.md",
+              "mode": "readable"
+            }
+          },
+          {
+            "kind": "native",
+            "id": "native-section",
+            "family": "instructions",
+            "audience": {
+              "agent": "codex",
+              "scope": "project"
+            },
+            "destination": "AGENTS.md",
+            "content": {
+              "kind": "section",
+              "marker": "guide",
+              "text": "Use the project checks.\n"
+            }
+          },
+          {
+            "kind": "native",
+            "id": "native-array",
+            "family": "hooks",
+            "audience": {
+              "agent": "claude",
+              "scope": "user"
+            },
+            "destination": ".claude/settings.json",
+            "content": {
+              "kind": "structured",
+              "format": "json",
+              "selector": [
+                "hooks",
+                "PreToolUse",
+                {
+                  "identity": {
+                    "command": "check"
+                  }
+                }
+              ],
+              "value": {
+                "command": "check"
+              },
+              "placement": {
+                "position": "after",
+                "anchor": {
+                  "identity": {
+                    "command": "existing"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "kind": "native",
+            "id": "native-key",
+            "family": "mcp",
+            "audience": {
+              "agent": "codex",
+              "scope": "user",
+              "platform": "linux"
+            },
+            "destination": ".codex/config.toml",
+            "content": {
+              "kind": "structured",
+              "format": "toml",
+              "selector": [
+                "mcp_servers",
+                "review"
+              ],
+              "value": {
+                "command": "review"
+              }
+            }
+          },
+          {
+            "kind": "native",
+            "id": "native-tree",
+            "family": "skills",
+            "audience": {
+              "agent": "cursor",
+              "scope": "project",
+              "surface": "ide"
+            },
+            "destination": ".cursor/skills/review",
+            "content": {
+              "kind": "tree",
+              "path": "skills/review"
+            }
+          }
+        ],
+        "assets": [
+          {
+            "id": "hook-support",
+            "family": "hooks",
+            "path": "support"
+          }
+        ],
+        "dependencies": [
+          {
+            "dependent": "check-tool",
+            "required": "hook-support"
+          }
+        ]
+      },
+      "entries": [
+        {
+          "path": "skills/review/SKILL.md",
+          "data_hex": "23205265766965770d0a"
+        },
+        {
+          "path": "skills/review/run.py",
+          "data_hex": "7072696e742831290a"
+        },
+        {
+          "path": "skills/review/empty",
+          "data_hex": null
+        },
+        {
+          "path": "instructions.md",
+          "data_hex": "557365207468652070726f6a65637420636865636b732e0a"
+        },
+        {
+          "path": "native.md",
+          "data_hex": "23204e61746976650a"
+        },
+        {
+          "path": "support/check.py",
+          "data_hex": "706173730a"
+        }
+      ],
+      "content_digest": "925ca002a636e7f7398fdbc1f050f8b0a8d2abd5bfe2a652c7642a07625cfcb0"
+    },
+    {
+      "name": "generated-instruction",
+      "manifest": {
+        "schema_version": 2,
+        "id": "guidance",
+        "version": "1",
+        "artifacts": [
+          {
+            "kind": "instruction",
+            "id": "guide",
+            "text": "Hello"
+          }
+        ]
+      },
+      "entries": [],
+      "content_digest": "79d34d349d9f79d264aa80eb99e1e3887664cf0e5674bfa87f1f47379ddbb2da"
+    },
+    {
+      "name": "native-hook-member",
+      "manifest": {
+        "schema_version": 2,
+        "id": "tools",
+        "version": "opaque",
+        "artifacts": [
+          {
+            "kind": "native",
+            "id": "review-hook",
+            "family": "hooks",
+            "audience": {
+              "agent": "claude",
+              "scope": "project"
+            },
+            "destination": "config.json",
+            "content": {
+              "kind": "structured",
+              "format": "json",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "review",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "command": "run",
+                "name": "review"
+              }
+            }
+          }
+        ]
+      },
+      "entries": [],
+      "content_digest": "c2c2822fd93735611312f29eb2fd4e56043963aae2c0143b5468a1f8537f6302"
+    },
+    {
+      "name": "installed-asset-references",
+      "manifest": {
+        "schema_version": 2,
+        "id": "support-demo",
+        "version": "same-label",
+        "artifacts": [
+          {
+            "id": "tools",
+            "kind": "mcp",
+            "name": "tools",
+            "transport": {
+              "kind": "stdio",
+              "command": {
+                "argv": [
+                  "node",
+                  {
+                    "asset": "runtime",
+                    "path": "server.js"
+                  }
+                ],
+                "cwd": {
+                  "asset": "runtime",
+                  "path": "data"
+                }
+              }
+            }
+          }
+        ],
+        "assets": [
+          {
+            "id": "runtime",
+            "family": "mcp",
+            "path": "runtime"
+          }
+        ],
+        "dependencies": [
+          {
+            "dependent": "tools",
+            "required": "runtime"
+          }
+        ]
+      },
+      "entries": [
+        {
+          "path": "runtime/server.js",
+          "data_hex": "636f6e736f6c652e6c6f6728224d435022293b"
+        },
+        {
+          "path": "runtime/data",
+          "data_hex": null
+        }
+      ],
+      "content_digest": "a517d9ac25afe88faaa8853a227303095db8c68c52ea5539076f57e660298fc9"
+    }
+  ],
+  "semantic_values": [
+    {
+      "record": [
+        "null"
+      ],
+      "encoding_hex": "5b226e756c6c225d",
+      "sha256": "53b41ab0dae62befcb8708620b6d14794a24fedad6c24c03dd01e51fa698ff0b"
+    },
+    {
+      "record": [
+        "boolean",
+        true
+      ],
+      "encoding_hex": "5b22626f6f6c65616e222c747275655d",
+      "sha256": "ff26742602682f2e255c585ab7254e92583d71a61264aa4468aea39f2f833d85"
+    },
+    {
+      "record": [
+        "integer",
+        "1"
+      ],
+      "encoding_hex": "5b22696e7465676572222c2231225d",
+      "sha256": "5189bab51971ab777fe9e709a7297ebd2591a066ff7b0c64c31f985daf49d9d5"
+    },
+    {
+      "record": [
+        "float",
+        "0x1.0000000000000p+0"
+      ],
+      "encoding_hex": "5b22666c6f6174222c223078312e30303030303030303030303030702b30225d",
+      "sha256": "6afe0c20b69ca4866e663c3d219f1ba7fd65ac4bb1b41317b6fbb84b8e0ccd6d"
+    },
+    {
+      "record": [
+        "float",
+        "-0x0.0p+0"
+      ],
+      "encoding_hex": "5b22666c6f6174222c222d3078302e30702b30225d",
+      "sha256": "6e8d2a955ef0e767f68e469c464198eeb07c5b3bf54bec7e08ab6f8b8a1f967f"
+    },
+    {
+      "record": [
+        "string",
+        "1"
+      ],
+      "encoding_hex": "5b22737472696e67222c2231225d",
+      "sha256": "166d9fe6fc369a913e812a0bcf74cab732403ea4032d2010c018e9ccd7160f3b"
+    },
+    {
+      "record": [
+        "date",
+        "2026-01-02"
+      ],
+      "encoding_hex": "5b2264617465222c22323032362d30312d3032225d",
+      "sha256": "d67d24aae05d52a5f7cee48ac43456f8b49ead6dc6b6377ddac0f10419b4706c"
+    },
+    {
+      "record": [
+        "time",
+        "01:02:03.000000"
+      ],
+      "encoding_hex": "5b2274696d65222c2230313a30323a30332e303030303030225d",
+      "sha256": "716d607db6ae720a22ebcc0141bb0a34f079631e26ee1e00477ff61b03db64e5"
+    },
+    {
+      "record": [
+        "datetime",
+        "2026-01-02T00:02:03.000000+00:00"
+      ],
+      "encoding_hex": "5b226461746574696d65222c22323032362d30312d30325430303a30323a30332e3030303030302b30303a3030225d",
+      "sha256": "2bde12a175a0661a5c7362225b8c23e6aac208a3e465cfe741c4fd67f0a0fd18"
+    },
+    {
+      "record": [
+        "object",
+        [
+          [
+            "a",
+            [
+              "integer",
+              "1"
+            ]
+          ],
+          [
+            "b",
+            [
+              "array",
+              [
+                [
+                  "boolean",
+                  true
+                ],
+                [
+                  "null"
+                ]
+              ]
+            ]
+          ]
+        ]
+      ],
+      "encoding_hex": "5b226f626a656374222c5b5b2261222c5b22696e7465676572222c2231225d5d2c5b2262222c5b226172726179222c5b5b22626f6f6c65616e222c747275655d2c5b226e756c6c225d5d5d5d5d5d",
+      "sha256": "acd23c1537140c0a03fa8897ba3adaae47c14e4d00d07ed6c2ca7e782547893a"
+    }
+  ],
+  "claims": [
+    {
+      "name": "whole-file",
+      "destination": "/fixture/project/AGENTS.md",
+      "kind": "file",
+      "selector": null,
+      "identity": "679149d4f786ae44865ff4ebd2cd063032fa9f3beb531de364a8f4e9df87969d"
+    },
+    {
+      "name": "whole-tree",
+      "destination": "/fixture/project/skills",
+      "kind": "tree",
+      "selector": null,
+      "identity": "51a662a9f3bb3862fff670e74a2840ba2892c021a645d53f309c336ac99f302c"
+    },
+    {
+      "name": "subtree",
+      "destination": "/fixture/project/skills",
+      "kind": "subtree",
+      "selector": "review",
+      "identity": "22f66045be10818d6f8d61c3d2f95dfbcbd6dcff16e05251809b50a9827d7fa8"
+    },
+    {
+      "name": "subtree-child",
+      "destination": "/fixture/project/skills",
+      "kind": "subtree",
+      "selector": "review/scripts",
+      "identity": "ec64d5768f1172cfc4e1f10ff403dd60949975987aad0ce7b8c080e2c11f1443"
+    },
+    {
+      "name": "subtree-other",
+      "destination": "/fixture/project/skills",
+      "kind": "subtree",
+      "selector": "other",
+      "identity": "e3ba3b11a7cf225d469b0eb03d73f20920a829e6805f8da01e30fb83650616a4"
+    },
+    {
+      "name": "section",
+      "destination": "/fixture/project/AGENTS.md",
+      "kind": "section",
+      "selector": [
+        "<!-- flyrail:guide:start -->",
+        "<!-- flyrail:guide:end -->"
+      ],
+      "identity": "9715e19141ee0a00920331b3b9123b004d6baff1cbcd70b73c2020a5672b95a2"
+    },
+    {
+      "name": "section-retargeted",
+      "destination": "/fixture/project/other.md",
+      "kind": "section",
+      "selector": [
+        "<!-- flyrail:guide:start -->",
+        "<!-- flyrail:guide:end -->"
+      ],
+      "identity": "06d7e599a98b9e7ad0dc33db46b3cd28177cdd62fa460f7b895e38b0c6b8c6d3"
+    },
+    {
+      "name": "section-other",
+      "destination": "/fixture/project/AGENTS.md",
+      "kind": "section",
+      "selector": [
+        "<!-- custom:start -->",
+        "<!-- custom:end -->"
+      ],
+      "identity": "9eda0047de5c910fbc6782358f99b6aaa77993951f67468dad697aaa5c0678f1"
+    },
+    {
+      "name": "section-shared-boundary",
+      "destination": "/fixture/project/AGENTS.md",
+      "kind": "section",
+      "selector": [
+        "<!-- flyrail:guide:start -->",
+        "<!-- different:end -->"
+      ],
+      "identity": "2bd64898f126cd736a2ecd83ee6e3ea417d3ef918f7fd0df776791fbc4b052c2"
+    },
+    {
+      "name": "structured-key",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "mcpServers"
+        ],
+        [
+          "key",
+          "review"
+        ]
+      ],
+      "identity": "38ac9d8b7dd7b5307da45cfbd887c40f549b2bc51aa4e9be18ba0934be0abee5"
+    },
+    {
+      "name": "structured-child",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "mcpServers"
+        ],
+        [
+          "key",
+          "review"
+        ],
+        [
+          "key",
+          "command"
+        ]
+      ],
+      "identity": "bee9ca1b47f561be569651e1dc4fd2dd4c4510edf60dfb1f97fc18aa5b3914fd"
+    },
+    {
+      "name": "structured-other",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "mcpServers"
+        ],
+        [
+          "key",
+          "other"
+        ]
+      ],
+      "identity": "e449c7ddb87fe789a4239bba77a610f39d43b27a52af7d1d5df78d237be4e818"
+    },
+    {
+      "name": "member-integer",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "hooks"
+        ],
+        [
+          "member",
+          [],
+          [
+            "integer",
+            "1"
+          ]
+        ]
+      ],
+      "identity": "c31f41786685e0f57b11bb9ae5a58e341fe9ddd22ef7897f7904e51a781c6483"
+    },
+    {
+      "name": "member-boolean",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "hooks"
+        ],
+        [
+          "member",
+          [],
+          [
+            "boolean",
+            true
+          ]
+        ]
+      ],
+      "identity": "82f9f3cd4bbaee356e32f7d9178ac312fbab0325350968fb8bd20a0d6ccd74c3"
+    },
+    {
+      "name": "member-float",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "hooks"
+        ],
+        [
+          "member",
+          [],
+          [
+            "float",
+            "0x1.0000000000000p+0"
+          ]
+        ]
+      ],
+      "identity": "76425e57b92be3c7c0f9a9a7924f0c7d6f73d1b04cf663f815f317964f0c778a"
+    },
+    {
+      "name": "member-native",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "hooks"
+        ],
+        [
+          "member",
+          [
+            "name"
+          ],
+          [
+            "string",
+            "review"
+          ]
+        ]
+      ],
+      "identity": "0dda57636a335b64cec84a596eab95e6a26302c89967991b4f893b7265ca1915"
+    },
+    {
+      "name": "member-other-key",
+      "destination": "/fixture/project/config.json",
+      "kind": "structured",
+      "selector": [
+        [
+          "key",
+          "hooks"
+        ],
+        [
+          "member",
+          [
+            "id"
+          ],
+          [
+            "string",
+            "review"
+          ]
+        ]
+      ],
+      "identity": "445843081e658ddd760a6e2ce405d357f0fa6d778e5f2a992a8bb39f1e96a621"
+    }
+  ],
+  "claim_overlaps": [
+    {
+      "first": "whole-file",
+      "second": "section",
+      "overlaps": true
+    },
+    {
+      "first": "whole-tree",
+      "second": "subtree",
+      "overlaps": true
+    },
+    {
+      "first": "subtree",
+      "second": "subtree-child",
+      "overlaps": true
+    },
+    {
+      "first": "subtree",
+      "second": "subtree-other",
+      "overlaps": false
+    },
+    {
+      "first": "section",
+      "second": "section-other",
+      "overlaps": false
+    },
+    {
+      "first": "section",
+      "second": "section-shared-boundary",
+      "overlaps": true
+    },
+    {
+      "first": "structured-key",
+      "second": "structured-child",
+      "overlaps": true
+    },
+    {
+      "first": "structured-key",
+      "second": "structured-other",
+      "overlaps": false
+    },
+    {
+      "first": "member-integer",
+      "second": "member-boolean",
+      "overlaps": false
+    },
+    {
+      "first": "member-integer",
+      "second": "member-float",
+      "overlaps": false
+    },
+    {
+      "first": "member-native",
+      "second": "member-other-key",
+      "overlaps": true
+    }
+  ],
+  "authorities": [
+    {
+      "name": "document",
+      "destination": "/fixture/project/AGENTS.md",
+      "state_root": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state",
+      "lock_path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state/lock"
+    },
+    {
+      "name": "absent-uppercase",
+      "destination": "/fixture/project/ABSENT.md",
+      "state_root": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state",
+      "lock_path": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state/lock"
+    },
+    {
+      "name": "absent-lowercase",
+      "destination": "/fixture/project/absent.md",
+      "state_root": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state",
+      "lock_path": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state/lock"
+    },
+    {
+      "name": "unicode",
+      "destination": "/fixture/project/Stra\u00dfe.json",
+      "state_root": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state",
+      "lock_path": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state/lock"
+    },
+    {
+      "name": "unicode-folded",
+      "destination": "/fixture/project/STRASSE.json",
+      "state_root": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state",
+      "lock_path": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state/lock"
+    },
+    {
+      "name": "relocated",
+      "destination": "/fixture/relocated/AGENTS.md",
+      "state_root": "/fixture/relocated/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state",
+      "lock_path": "/fixture/relocated/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state/lock"
+    }
+  ],
+  "renderings": [
+    {
+      "name": "instruction-section",
+      "artifacts": [
+        {
+          "id": "guide",
+          "family": "instructions",
+          "destination": "/fixture/project/AGENTS.md",
+          "content": {
+            "kind": "section",
+            "marker": "guide",
+            "text": "Hello"
+          }
+        }
+      ],
+      "dependencies": [],
+      "content_digest": "249a091ac4a021ebbd33997ba8e3b49d34765516a1d2fdfab2f28f195329838b"
+    },
+    {
+      "name": "structured-hook-member",
+      "artifacts": [
+        {
+          "id": "review-hook",
+          "family": "hooks",
+          "destination": "/fixture/project/config.json",
+          "content": {
+            "kind": "structured",
+            "format": "json",
+            "selector": [
+              "hooks",
+              {
+                "identity": "review",
+                "key": [
+                  "name"
+                ]
+              }
+            ],
+            "value": {
+              "command": "run",
+              "name": "review"
+            }
+          }
+        }
+      ],
+      "dependencies": [],
+      "content_digest": "ef345145d7f79f0daed8f1551d4528fb4c9fe80a9c8c5da11669c73fabbfac49"
+    },
+    {
+      "name": "schema-hook-stable-launcher",
+      "artifacts": [
+        {
+          "id": "launcher",
+          "family": "hooks",
+          "destination": "/fixture/project/launcher",
+          "content": {
+            "kind": "file",
+            "data_hex": "72756e0a"
+          }
+        },
+        {
+          "id": "review-hook",
+          "family": "hooks",
+          "destination": "/fixture/project/config.json",
+          "content": {
+            "kind": "structured",
+            "format": "json",
+            "selector": [
+              "hooks",
+              {
+                "identity": "review",
+                "key": [
+                  "name"
+                ]
+              }
+            ],
+            "value": {
+              "command": "/fixture/project/launcher",
+              "name": "review"
+            }
+          },
+          "schema_requirements": [
+            {
+              "format": "json",
+              "key": "version",
+              "value": 1
+            }
+          ]
+        }
+      ],
+      "dependencies": [
+        {
+          "dependent": "review-hook",
+          "required": "launcher",
+          "mode": "stable-reference"
+        }
+      ],
+      "content_digest": "60273a81e48d315630e0112cad12b5fe9c6e5ae642d84f0370f07c1b5553702c"
+    }
+  ],
+  "receipts": [
+    {
+      "name": "created-section",
+      "record": {
+        "type": "Receipt",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "11111111111111111111111111111111",
+          "claims": [
+            {
+              "type": "OwnedClaim",
+              "fields": {
+                "claim": {
+                  "type": "Claim",
+                  "fields": {
+                    "kind": {
+                      "enum": "Ownership",
+                      "value": "section"
+                    },
+                    "selector": {
+                      "type": "SectionBoundaries",
+                      "fields": {
+                        "start": "<!-- flyrail:guide:start -->",
+                        "end": "<!-- flyrail:guide:end -->"
+                      }
+                    }
+                  }
+                },
+                "claim_id": "9715e19141ee0a00920331b3b9123b004d6baff1cbcd70b73c2020a5672b95a2",
+                "bundle_id": "guidance",
+                "artifact_id": "guide",
+                "version": "1",
+                "bundle_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "render_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "selection": {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "section"
+                        },
+                        "selector": {
+                          "type": "SectionBoundaries",
+                          "fields": {
+                            "start": "<!-- flyrail:guide:start -->",
+                            "end": "<!-- flyrail:guide:end -->"
+                          }
+                        }
+                      }
+                    },
+                    "format": null,
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "owned_syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "created"
+                    },
+                    "baseline": null,
+                    "separator": {
+                      "bytes": "0a"
+                    }
+                  }
+                },
+                "installed": null,
+                "disposition": {
+                  "enum": "Disposition",
+                  "value": "created"
+                },
+                "baseline": null,
+                "requirements": [],
+                "stable_requirements": [],
+                "schema_requirements": []
+              }
+            }
+          ],
+          "provenance": {
+            "type": "DocumentProvenance",
+            "fields": {
+              "empty_document": null,
+              "containers": [],
+              "trailing_separators": [],
+              "schema_fields": [],
+              "schema_empty_document": null
+            }
+          },
+          "schema_version": 2,
+          "created_directories": []
+        }
+      },
+      "document_hex": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+      "removal": {
+        "unchanged": {
+          "document_hex": "466f726569676e0a",
+          "status": "applied"
+        },
+        "modified": {
+          "document_hex": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4564697465640a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "name": "taken-over-section",
+      "record": {
+        "type": "Receipt",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "11111111111111111111111111111111",
+          "claims": [
+            {
+              "type": "OwnedClaim",
+              "fields": {
+                "claim": {
+                  "type": "Claim",
+                  "fields": {
+                    "kind": {
+                      "enum": "Ownership",
+                      "value": "section"
+                    },
+                    "selector": {
+                      "type": "SectionBoundaries",
+                      "fields": {
+                        "start": "<!-- flyrail:guide:start -->",
+                        "end": "<!-- flyrail:guide:end -->"
+                      }
+                    }
+                  }
+                },
+                "claim_id": "9715e19141ee0a00920331b3b9123b004d6baff1cbcd70b73c2020a5672b95a2",
+                "bundle_id": "guidance",
+                "artifact_id": "guide",
+                "version": "1",
+                "bundle_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "render_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "selection": {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "section"
+                        },
+                        "selector": {
+                          "type": "SectionBoundaries",
+                          "fields": {
+                            "start": "<!-- flyrail:guide:start -->",
+                            "end": "<!-- flyrail:guide:end -->"
+                          }
+                        }
+                      }
+                    },
+                    "format": null,
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "owned_syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "taken-over"
+                    },
+                    "baseline": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4f726967696e616c0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4f726967696e616c0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "owned_syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4f726967696e616c0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                },
+                "installed": null,
+                "disposition": {
+                  "enum": "Disposition",
+                  "value": "taken-over"
+                },
+                "baseline": null,
+                "requirements": [],
+                "stable_requirements": [],
+                "schema_requirements": []
+              }
+            }
+          ],
+          "provenance": {
+            "type": "DocumentProvenance",
+            "fields": {
+              "empty_document": null,
+              "containers": [],
+              "trailing_separators": [],
+              "schema_fields": [],
+              "schema_empty_document": null
+            }
+          },
+          "schema_version": 2,
+          "created_directories": []
+        }
+      },
+      "document_hex": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+      "removal": {
+        "unchanged": {
+          "document_hex": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4f726967696e616c0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+          "status": "applied"
+        },
+        "modified": {
+          "document_hex": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4564697465640a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "name": "adopted-section",
+      "record": {
+        "type": "Receipt",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "11111111111111111111111111111111",
+          "claims": [
+            {
+              "type": "OwnedClaim",
+              "fields": {
+                "claim": {
+                  "type": "Claim",
+                  "fields": {
+                    "kind": {
+                      "enum": "Ownership",
+                      "value": "section"
+                    },
+                    "selector": {
+                      "type": "SectionBoundaries",
+                      "fields": {
+                        "start": "<!-- flyrail:guide:start -->",
+                        "end": "<!-- flyrail:guide:end -->"
+                      }
+                    }
+                  }
+                },
+                "claim_id": "9715e19141ee0a00920331b3b9123b004d6baff1cbcd70b73c2020a5672b95a2",
+                "bundle_id": "guidance",
+                "artifact_id": "guide",
+                "version": "1",
+                "bundle_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "render_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "selection": {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "section"
+                        },
+                        "selector": {
+                          "type": "SectionBoundaries",
+                          "fields": {
+                            "start": "<!-- flyrail:guide:start -->",
+                            "end": "<!-- flyrail:guide:end -->"
+                          }
+                        }
+                      }
+                    },
+                    "format": null,
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "owned_syntax": {
+                          "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "adopted"
+                    },
+                    "baseline": null,
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                },
+                "installed": null,
+                "disposition": {
+                  "enum": "Disposition",
+                  "value": "adopted"
+                },
+                "baseline": null,
+                "requirements": [],
+                "stable_requirements": [],
+                "schema_requirements": []
+              }
+            }
+          ],
+          "provenance": {
+            "type": "DocumentProvenance",
+            "fields": {
+              "empty_document": null,
+              "containers": [],
+              "trailing_separators": [],
+              "schema_fields": [],
+              "schema_empty_document": null
+            }
+          },
+          "schema_version": 2,
+          "created_directories": []
+        }
+      },
+      "document_hex": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+      "removal": {
+        "unchanged": {
+          "document_hex": "466f726569676e0a",
+          "status": "applied"
+        },
+        "modified": {
+          "document_hex": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a4564697465640a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a",
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "name": "taken-over-member",
+      "record": {
+        "type": "Receipt",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/config.json"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/project/.flyrail-587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "11111111111111111111111111111111",
+          "claims": [
+            {
+              "type": "OwnedClaim",
+              "fields": {
+                "claim": {
+                  "type": "Claim",
+                  "fields": {
+                    "kind": {
+                      "enum": "Ownership",
+                      "value": "structured"
+                    },
+                    "selector": {
+                      "type": "Selector",
+                      "fields": {
+                        "parts": [
+                          {
+                            "type": "Key",
+                            "fields": {
+                              "name": "hooks"
+                            }
+                          },
+                          {
+                            "type": "Member",
+                            "fields": {
+                              "identity": {
+                                "value": [
+                                  "string",
+                                  "review"
+                                ]
+                              },
+                              "key": [
+                                "name"
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "claim_id": "0dda57636a335b64cec84a596eab95e6a26302c89967991b4f893b7265ca1915",
+                "bundle_id": "tools",
+                "artifact_id": "review-hook",
+                "version": "1",
+                "bundle_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "render_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "selection": {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "structured"
+                        },
+                        "selector": {
+                          "type": "Selector",
+                          "fields": {
+                            "parts": [
+                              {
+                                "type": "Key",
+                                "fields": {
+                                  "name": "hooks"
+                                }
+                              },
+                              {
+                                "type": "Member",
+                                "fields": {
+                                  "identity": {
+                                    "value": [
+                                      "string",
+                                      "review"
+                                    ]
+                                  },
+                                  "key": [
+                                    "name"
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "format": {
+                      "enum": "DocumentFormat",
+                      "value": "json"
+                    },
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "value": [
+                            "object",
+                            [
+                              [
+                                "command",
+                                [
+                                  "string",
+                                  "run"
+                                ]
+                              ],
+                              [
+                                "name",
+                                [
+                                  "string",
+                                  "review"
+                                ]
+                              ]
+                            ]
+                          ]
+                        },
+                        "syntax": {
+                          "bytes": "7b22636f6d6d616e64223a2272756e222c226e616d65223a22726576696577227d"
+                        },
+                        "owned_syntax": {
+                          "bytes": "7b22636f6d6d616e64223a2272756e222c226e616d65223a22726576696577227d"
+                        },
+                        "position": {
+                          "type": "ArrayPosition",
+                          "fields": {
+                            "previous": {
+                              "type": "Member",
+                              "fields": {
+                                "identity": {
+                                  "value": [
+                                    "string",
+                                    "earlier"
+                                  ]
+                                },
+                                "key": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "following": {
+                              "type": "Member",
+                              "fields": {
+                                "identity": {
+                                  "value": [
+                                    "string",
+                                    "later"
+                                  ]
+                                },
+                                "key": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "prefix": {
+                              "bytes": ""
+                            }
+                          }
+                        },
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "taken-over"
+                    },
+                    "baseline": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "value": [
+                            "object",
+                            [
+                              [
+                                "command",
+                                [
+                                  "string",
+                                  "original"
+                                ]
+                              ],
+                              [
+                                "name",
+                                [
+                                  "string",
+                                  "review"
+                                ]
+                              ]
+                            ]
+                          ]
+                        },
+                        "syntax": {
+                          "bytes": "7b226e616d65223a22726576696577222c22636f6d6d616e64223a226f726967696e616c227d"
+                        },
+                        "owned_syntax": {
+                          "bytes": "7b226e616d65223a22726576696577222c22636f6d6d616e64223a226f726967696e616c227d"
+                        },
+                        "position": {
+                          "type": "ArrayPosition",
+                          "fields": {
+                            "previous": {
+                              "type": "Member",
+                              "fields": {
+                                "identity": {
+                                  "value": [
+                                    "string",
+                                    "earlier"
+                                  ]
+                                },
+                                "key": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "following": {
+                              "type": "Member",
+                              "fields": {
+                                "identity": {
+                                  "value": [
+                                    "string",
+                                    "later"
+                                  ]
+                                },
+                                "key": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "prefix": {
+                              "bytes": ""
+                            }
+                          }
+                        },
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                },
+                "installed": null,
+                "disposition": {
+                  "enum": "Disposition",
+                  "value": "taken-over"
+                },
+                "baseline": null,
+                "requirements": [],
+                "stable_requirements": [],
+                "schema_requirements": []
+              }
+            }
+          ],
+          "provenance": {
+            "type": "DocumentProvenance",
+            "fields": {
+              "empty_document": null,
+              "containers": [],
+              "trailing_separators": [],
+              "schema_fields": [],
+              "schema_empty_document": null
+            }
+          },
+          "schema_version": 2,
+          "created_directories": []
+        }
+      },
+      "document_hex": "7b22686f6f6b73223a5b7b226e616d65223a226561726c696572227d2c7b22636f6d6d616e64223a2272756e222c226e616d65223a22726576696577227d2c7b226e616d65223a226c61746572227d5d7d",
+      "removal": {
+        "unchanged": {
+          "document_hex": "7b22686f6f6b73223a5b7b226e616d65223a226561726c696572227d2c7b226e616d65223a22726576696577222c22636f6d6d616e64223a226f726967696e616c227d2c7b226e616d65223a226c61746572227d5d7d",
+          "status": "applied"
+        },
+        "modified": {
+          "document_hex": "7b22686f6f6b73223a5b7b226e616d65223a226561726c696572227d2c7b22636f6d6d616e64223a2265646974222c226e616d65223a22726576696577227d2c7b226e616d65223a226c61746572227d5d7d",
+          "status": "failed"
+        },
+        "reordered": {
+          "document_hex": "7b22686f6f6b73223a5b7b226e616d65223a226c61746572227d2c7b22636f6d6d616e64223a2272756e222c226e616d65223a22726576696577227d2c7b226e616d65223a226561726c696572227d5d7d",
+          "status": "failed"
+        },
+        "duplicate": {
+          "document_hex": "7b22686f6f6b73223a5b7b226e616d65223a226561726c696572227d2c7b22636f6d6d616e64223a2272756e222c226e616d65223a22726576696577227d2c7b226e616d65223a226561726c696572227d5d7d",
+          "status": "failed"
+        }
+      }
+    },
+    {
+      "name": "created-document-schema",
+      "record": {
+        "type": "Receipt",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/config.json"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/.flyrail-587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "claims": [
+            {
+              "type": "OwnedClaim",
+              "fields": {
+                "claim": {
+                  "type": "Claim",
+                  "fields": {
+                    "kind": {
+                      "enum": "Ownership",
+                      "value": "structured"
+                    },
+                    "selector": {
+                      "type": "Selector",
+                      "fields": {
+                        "parts": [
+                          {
+                            "type": "Key",
+                            "fields": {
+                              "name": "handler"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "claim_id": "88188af1194252be52ab4de8af6a6aa2fc291f7733015e67013cdf214d1c44b3",
+                "bundle_id": "team",
+                "artifact_id": "handler",
+                "version": "1",
+                "bundle_digest": "00b520b4268b17b8b3c95a2fb6198b995300d38ffd821e1447219350e1dc02bc",
+                "render_digest": "89b055cbf16159e459a650ef2684e9f0461e0e3a6eefbbda54dab1f6e5b5a801",
+                "selection": {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "structured"
+                        },
+                        "selector": {
+                          "type": "Selector",
+                          "fields": {
+                            "parts": [
+                              {
+                                "type": "Key",
+                                "fields": {
+                                  "name": "handler"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "format": {
+                      "enum": "DocumentFormat",
+                      "value": "jsonc"
+                    },
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "value": [
+                            "string",
+                            "value"
+                          ]
+                        },
+                        "syntax": {
+                          "bytes": "2276616c756522"
+                        },
+                        "owned_syntax": {
+                          "bytes": "2276616c756522"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "created"
+                    },
+                    "baseline": null,
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                },
+                "installed": null,
+                "disposition": {
+                  "enum": "Disposition",
+                  "value": "created"
+                },
+                "baseline": null,
+                "requirements": [],
+                "stable_requirements": [],
+                "schema_requirements": [
+                  {
+                    "type": "DocumentSchema",
+                    "fields": {
+                      "format": {
+                        "enum": "DocumentFormat",
+                        "value": "jsonc"
+                      },
+                      "key": "version",
+                      "value": {
+                        "value": [
+                          "integer",
+                          "1"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "provenance": {
+            "type": "DocumentProvenance",
+            "fields": {
+              "empty_document": {
+                "bytes": "7b7d"
+              },
+              "containers": [],
+              "trailing_separators": [],
+              "schema_fields": [
+                {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "structured"
+                        },
+                        "selector": {
+                          "type": "Selector",
+                          "fields": {
+                            "parts": [
+                              {
+                                "type": "Key",
+                                "fields": {
+                                  "name": "version"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "format": {
+                      "enum": "DocumentFormat",
+                      "value": "jsonc"
+                    },
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "value": [
+                            "integer",
+                            "1"
+                          ]
+                        },
+                        "syntax": {
+                          "bytes": "31"
+                        },
+                        "owned_syntax": {
+                          "bytes": "31"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "created"
+                    },
+                    "baseline": null,
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ],
+              "schema_empty_document": null
+            }
+          },
+          "created_directories": [],
+          "schema_version": 2
+        }
+      },
+      "document_hex": "7b2268616e646c6572223a2276616c7565222c2276657273696f6e223a317d",
+      "removal": {
+        "unchanged": {
+          "status": "applied",
+          "document_hex": null
+        }
+      }
+    },
+    {
+      "name": "empty-document-schema",
+      "record": {
+        "type": "Receipt",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/config.json"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/.flyrail-587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "claims": [
+            {
+              "type": "OwnedClaim",
+              "fields": {
+                "claim": {
+                  "type": "Claim",
+                  "fields": {
+                    "kind": {
+                      "enum": "Ownership",
+                      "value": "structured"
+                    },
+                    "selector": {
+                      "type": "Selector",
+                      "fields": {
+                        "parts": [
+                          {
+                            "type": "Key",
+                            "fields": {
+                              "name": "handler"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "claim_id": "51bba3b61513cffe614411c55270d7eae0a346a0216a1da834cb90401a25cbb1",
+                "bundle_id": "team",
+                "artifact_id": "handler",
+                "version": "1",
+                "bundle_digest": "00b520b4268b17b8b3c95a2fb6198b995300d38ffd821e1447219350e1dc02bc",
+                "render_digest": "db3d203d806d2ba61225b0588e24928f39069c391053f140a7f8704aebeb6978",
+                "selection": {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "structured"
+                        },
+                        "selector": {
+                          "type": "Selector",
+                          "fields": {
+                            "parts": [
+                              {
+                                "type": "Key",
+                                "fields": {
+                                  "name": "handler"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "format": {
+                      "enum": "DocumentFormat",
+                      "value": "jsonc"
+                    },
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "value": [
+                            "string",
+                            "value"
+                          ]
+                        },
+                        "syntax": {
+                          "bytes": "2276616c756522"
+                        },
+                        "owned_syntax": {
+                          "bytes": "2276616c756522"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "created"
+                    },
+                    "baseline": null,
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                },
+                "installed": null,
+                "disposition": {
+                  "enum": "Disposition",
+                  "value": "created"
+                },
+                "baseline": null,
+                "requirements": [],
+                "stable_requirements": [],
+                "schema_requirements": [
+                  {
+                    "type": "DocumentSchema",
+                    "fields": {
+                      "format": {
+                        "enum": "DocumentFormat",
+                        "value": "jsonc"
+                      },
+                      "key": "version",
+                      "value": {
+                        "value": [
+                          "integer",
+                          "1"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "provenance": {
+            "type": "DocumentProvenance",
+            "fields": {
+              "empty_document": null,
+              "containers": [],
+              "trailing_separators": [],
+              "schema_fields": [
+                {
+                  "type": "OwnedSelection",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "structured"
+                        },
+                        "selector": {
+                          "type": "Selector",
+                          "fields": {
+                            "parts": [
+                              {
+                                "type": "Key",
+                                "fields": {
+                                  "name": "version"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "format": {
+                      "enum": "DocumentFormat",
+                      "value": "jsonc"
+                    },
+                    "installed": {
+                      "type": "SelectionSnapshot",
+                      "fields": {
+                        "value": {
+                          "value": [
+                            "integer",
+                            "1"
+                          ]
+                        },
+                        "syntax": {
+                          "bytes": "31"
+                        },
+                        "owned_syntax": {
+                          "bytes": "31"
+                        },
+                        "position": null,
+                        "layout": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "created"
+                    },
+                    "baseline": null,
+                    "separator": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ],
+              "schema_empty_document": {
+                "bytes": "200a"
+              }
+            }
+          },
+          "created_directories": [],
+          "schema_version": 2
+        }
+      },
+      "document_hex": "7b2268616e646c6572223a2276616c7565222c2276657273696f6e223a317d",
+      "removal": {
+        "unchanged": {
+          "status": "applied",
+          "document_hex": "200a"
+        }
+      }
+    }
+  ],
+  "journals": [
+    {
+      "name": "create-section",
+      "record": {
+        "type": "Journal",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "previous": {
+            "type": "Receipt",
+            "fields": {
+              "resource": {
+                "type": "ResourceRef",
+                "fields": {
+                  "destination": {
+                    "path": "/fixture/project/AGENTS.md"
+                  },
+                  "kind": {
+                    "enum": "ResourceKind",
+                    "value": "document"
+                  },
+                  "state_root": {
+                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+                  },
+                  "schema_version": 2
+                }
+              },
+              "transaction_id": "00000000000000000000000000000000",
+              "claims": [],
+              "provenance": {
+                "type": "DocumentProvenance",
+                "fields": {
+                  "empty_document": null,
+                  "containers": [],
+                  "trailing_separators": [],
+                  "schema_fields": [],
+                  "schema_empty_document": null
+                }
+              },
+              "schema_version": 2,
+              "created_directories": []
+            }
+          },
+          "receipt": {
+            "type": "Receipt",
+            "fields": {
+              "resource": {
+                "type": "ResourceRef",
+                "fields": {
+                  "destination": {
+                    "path": "/fixture/project/AGENTS.md"
+                  },
+                  "kind": {
+                    "enum": "ResourceKind",
+                    "value": "document"
+                  },
+                  "state_root": {
+                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+                  },
+                  "schema_version": 2
+                }
+              },
+              "transaction_id": "11111111111111111111111111111111",
+              "claims": [
+                {
+                  "type": "OwnedClaim",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "section"
+                        },
+                        "selector": {
+                          "type": "SectionBoundaries",
+                          "fields": {
+                            "start": "<!-- flyrail:guide:start -->",
+                            "end": "<!-- flyrail:guide:end -->"
+                          }
+                        }
+                      }
+                    },
+                    "claim_id": "9715e19141ee0a00920331b3b9123b004d6baff1cbcd70b73c2020a5672b95a2",
+                    "bundle_id": "guidance",
+                    "artifact_id": "guide",
+                    "version": "1",
+                    "bundle_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "render_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "selection": {
+                      "type": "OwnedSelection",
+                      "fields": {
+                        "claim": {
+                          "type": "Claim",
+                          "fields": {
+                            "kind": {
+                              "enum": "Ownership",
+                              "value": "section"
+                            },
+                            "selector": {
+                              "type": "SectionBoundaries",
+                              "fields": {
+                                "start": "<!-- flyrail:guide:start -->",
+                                "end": "<!-- flyrail:guide:end -->"
+                              }
+                            }
+                          }
+                        },
+                        "format": null,
+                        "installed": {
+                          "type": "SelectionSnapshot",
+                          "fields": {
+                            "value": {
+                              "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                            },
+                            "syntax": {
+                              "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                            },
+                            "owned_syntax": {
+                              "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                            },
+                            "position": null,
+                            "layout": {
+                              "bytes": ""
+                            }
+                          }
+                        },
+                        "disposition": {
+                          "enum": "Disposition",
+                          "value": "created"
+                        },
+                        "baseline": null,
+                        "separator": {
+                          "bytes": "0a"
+                        }
+                      }
+                    },
+                    "installed": null,
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "created"
+                    },
+                    "baseline": null,
+                    "requirements": [],
+                    "stable_requirements": [],
+                    "schema_requirements": []
+                  }
+                }
+              ],
+              "provenance": {
+                "type": "DocumentProvenance",
+                "fields": {
+                  "empty_document": null,
+                  "containers": [],
+                  "trailing_separators": [],
+                  "schema_fields": [],
+                  "schema_empty_document": null
+                }
+              },
+              "schema_version": 2,
+              "created_directories": []
+            }
+          },
+          "before": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 1,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "staged": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 2,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "published": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 2,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "backup": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 1,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "ancestors": [],
+          "schema_version": 2
+        }
+      }
+    },
+    {
+      "name": "adopt-section",
+      "record": {
+        "type": "Journal",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "state_root": {
+                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+              },
+              "schema_version": 2
+            }
+          },
+          "previous": {
+            "type": "Receipt",
+            "fields": {
+              "resource": {
+                "type": "ResourceRef",
+                "fields": {
+                  "destination": {
+                    "path": "/fixture/project/AGENTS.md"
+                  },
+                  "kind": {
+                    "enum": "ResourceKind",
+                    "value": "document"
+                  },
+                  "state_root": {
+                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+                  },
+                  "schema_version": 2
+                }
+              },
+              "transaction_id": "00000000000000000000000000000000",
+              "claims": [],
+              "provenance": {
+                "type": "DocumentProvenance",
+                "fields": {
+                  "empty_document": null,
+                  "containers": [],
+                  "trailing_separators": [],
+                  "schema_fields": [],
+                  "schema_empty_document": null
+                }
+              },
+              "schema_version": 2,
+              "created_directories": []
+            }
+          },
+          "receipt": {
+            "type": "Receipt",
+            "fields": {
+              "resource": {
+                "type": "ResourceRef",
+                "fields": {
+                  "destination": {
+                    "path": "/fixture/project/AGENTS.md"
+                  },
+                  "kind": {
+                    "enum": "ResourceKind",
+                    "value": "document"
+                  },
+                  "state_root": {
+                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+                  },
+                  "schema_version": 2
+                }
+              },
+              "transaction_id": "11111111111111111111111111111111",
+              "claims": [
+                {
+                  "type": "OwnedClaim",
+                  "fields": {
+                    "claim": {
+                      "type": "Claim",
+                      "fields": {
+                        "kind": {
+                          "enum": "Ownership",
+                          "value": "section"
+                        },
+                        "selector": {
+                          "type": "SectionBoundaries",
+                          "fields": {
+                            "start": "<!-- flyrail:guide:start -->",
+                            "end": "<!-- flyrail:guide:end -->"
+                          }
+                        }
+                      }
+                    },
+                    "claim_id": "9715e19141ee0a00920331b3b9123b004d6baff1cbcd70b73c2020a5672b95a2",
+                    "bundle_id": "guidance",
+                    "artifact_id": "guide",
+                    "version": "1",
+                    "bundle_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "render_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "selection": {
+                      "type": "OwnedSelection",
+                      "fields": {
+                        "claim": {
+                          "type": "Claim",
+                          "fields": {
+                            "kind": {
+                              "enum": "Ownership",
+                              "value": "section"
+                            },
+                            "selector": {
+                              "type": "SectionBoundaries",
+                              "fields": {
+                                "start": "<!-- flyrail:guide:start -->",
+                                "end": "<!-- flyrail:guide:end -->"
+                              }
+                            }
+                          }
+                        },
+                        "format": null,
+                        "installed": {
+                          "type": "SelectionSnapshot",
+                          "fields": {
+                            "value": {
+                              "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                            },
+                            "syntax": {
+                              "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                            },
+                            "owned_syntax": {
+                              "bytes": "3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                            },
+                            "position": null,
+                            "layout": {
+                              "bytes": ""
+                            }
+                          }
+                        },
+                        "disposition": {
+                          "enum": "Disposition",
+                          "value": "adopted"
+                        },
+                        "baseline": null,
+                        "separator": {
+                          "bytes": ""
+                        }
+                      }
+                    },
+                    "installed": null,
+                    "disposition": {
+                      "enum": "Disposition",
+                      "value": "adopted"
+                    },
+                    "baseline": null,
+                    "requirements": [],
+                    "stable_requirements": [],
+                    "schema_requirements": []
+                  }
+                }
+              ],
+              "provenance": {
+                "type": "DocumentProvenance",
+                "fields": {
+                  "empty_document": null,
+                  "containers": [],
+                  "trailing_separators": [],
+                  "schema_fields": [],
+                  "schema_empty_document": null
+                }
+              },
+              "schema_version": 2,
+              "created_directories": []
+            }
+          },
+          "before": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 2,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "staged": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 2,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "published": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 2,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "backup": {
+            "type": "Revision",
+            "fields": {
+              "nodes": [
+                {
+                  "type": "Node",
+                  "fields": {
+                    "path": "",
+                    "data": {
+                      "bytes": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                    },
+                    "mode": 384,
+                    "uid": 0,
+                    "gid": 0,
+                    "device": 1,
+                    "inode": 2,
+                    "security": {
+                      "bytes": ""
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "ancestors": [],
+          "schema_version": 2
+        }
+      }
+    }
+  ],
+  "transactions": [
+    {
+      "name": "prepared",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": null,
+        "staged": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "action": "rollback-preparation",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": false,
+        "retain_backup": false,
+        "status": "recovered"
+      }
+    },
+    {
+      "name": "backup-moved",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "old",
+        "resource": null,
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "action": "restore-backup",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": false,
+        "retain_backup": false,
+        "status": "recovered"
+      }
+    },
+    {
+      "name": "published-before-receipt",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": null
+      },
+      "expected": {
+        "action": "restore-backup",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": false,
+        "retain_backup": false,
+        "status": "recovered"
+      }
+    },
+    {
+      "name": "ownership-only-adoption",
+      "journal": "adopt-section",
+      "observed": {
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": null,
+        "staged": null
+      },
+      "expected": {
+        "action": "rollback-ownership",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": false,
+        "retain_backup": false,
+        "status": "recovered"
+      }
+    },
+    {
+      "name": "receipt-committed",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "new",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": null
+      },
+      "expected": {
+        "action": "cleanup",
+        "receipt": "new",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": false,
+        "retain_backup": false,
+        "status": "recovered"
+      }
+    },
+    {
+      "name": "foreign-edit-before-commit",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a466f726569676e20656469740a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": null
+      },
+      "expected": {
+        "action": "retain-evidence",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a466f726569676e20656469740a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": true,
+        "retain_backup": true,
+        "status": "INCOMPLETE"
+      }
+    },
+    {
+      "name": "permissions-changed-before-commit",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": null
+      },
+      "expected": {
+        "action": "retain-evidence",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": true,
+        "retain_backup": true,
+        "status": "INCOMPLETE"
+      }
+    },
+    {
+      "name": "identity-changed-before-commit",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 3,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": null
+      },
+      "expected": {
+        "action": "retain-evidence",
+        "receipt": "old",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 3,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": true,
+        "retain_backup": true,
+        "status": "INCOMPLETE"
+      }
+    },
+    {
+      "name": "committed-foreign-edit",
+      "journal": "create-section",
+      "observed": {
+        "receipt": "new",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a466f726569676e20656469740a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "backup": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 1,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "staged": null
+      },
+      "expected": {
+        "action": "cleanup",
+        "receipt": "new",
+        "resource": {
+          "type": "Revision",
+          "fields": {
+            "nodes": [
+              {
+                "type": "Node",
+                "fields": {
+                  "path": "",
+                  "data": {
+                    "bytes": "466f726569676e0a0a3c212d2d20666c797261696c3a67756964653a7374617274202d2d3e0a48656c6c6f0a3c212d2d20666c797261696c3a67756964653a656e64202d2d3e0a466f726569676e20656469740a"
+                  },
+                  "mode": 384,
+                  "uid": 0,
+                  "gid": 0,
+                  "device": 1,
+                  "inode": 2,
+                  "security": {
+                    "bytes": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "retain_journal": false,
+        "retain_backup": false,
+        "status": "recovered"
+      }
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "claude-project-stdio",
+      "context": {
+        "agent": "claude",
+        "scope": "project",
+        "surface": "cli",
+        "platform": "linux"
+      },
+      "request": {
+        "id": "review",
+        "kind": "mcp",
+        "name": "review",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "review-server"
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "supported": true,
+        "destination": ".mcp.json",
+        "format": "json",
+        "selector": [
+          "mcpServers",
+          "review"
+        ],
+        "value": {
+          "command": "review-server",
+          "args": [],
+          "env": {
+            "MODE": "local"
+          }
+        },
+        "notices": []
+      }
+    },
+    {
+      "name": "copilot-cli-stdio",
+      "context": {
+        "agent": "copilot",
+        "scope": "project",
+        "surface": "cli",
+        "platform": "windows"
+      },
+      "request": {
+        "id": "review",
+        "kind": "mcp",
+        "name": "review",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "review-server"
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "supported": true,
+        "destination": ".mcp.json",
+        "format": "json",
+        "selector": [
+          "mcpServers",
+          "review"
+        ],
+        "value": {
+          "command": "review-server",
+          "args": [],
+          "env": {
+            "MODE": "local"
+          },
+          "type": "local"
+        },
+        "notices": []
+      }
+    },
+    {
+      "name": "copilot-vscode-stdio",
+      "context": {
+        "agent": "copilot",
+        "scope": "project",
+        "surface": "vscode",
+        "platform": "windows"
+      },
+      "request": {
+        "id": "review",
+        "kind": "mcp",
+        "name": "review",
+        "transport": {
+          "kind": "stdio",
+          "command": {
+            "argv": [
+              "review-server"
+            ],
+            "env": {
+              "MODE": "local"
+            }
+          }
+        }
+      },
+      "expected": {
+        "supported": true,
+        "destination": ".vscode/mcp.json",
+        "format": "jsonc",
+        "selector": [
+          "servers",
+          "review"
+        ],
+        "value": {
+          "type": "stdio",
+          "command": "review-server",
+          "args": [],
+          "env": {
+            "MODE": "local"
+          }
+        },
+        "notices": []
+      }
+    },
+    {
+      "name": "codex-user-http-env",
+      "context": {
+        "agent": "codex",
+        "scope": "user",
+        "surface": "cli",
+        "platform": "macos"
+      },
+      "request": {
+        "id": "review",
+        "kind": "mcp",
+        "name": "review",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "supported": true,
+        "destination": ".codex/config.toml",
+        "format": "toml",
+        "selector": [
+          "mcp_servers",
+          "review"
+        ],
+        "value": {
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env_var": "TOOLS_TOKEN"
+        },
+        "notices": []
+      }
+    },
+    {
+      "name": "copilot-cli-unverified-auth-env",
+      "context": {
+        "agent": "copilot",
+        "scope": "project",
+        "surface": "cli",
+        "platform": "linux"
+      },
+      "request": {
+        "id": "review",
+        "kind": "mcp",
+        "name": "review",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "supported": false,
+        "reason": "portable-auth-env-unverified",
+        "mutation": "blocked",
+        "native_override": true
+      }
+    },
+    {
+      "name": "pi-mcp-adapter-prerequisite",
+      "context": {
+        "agent": "pi",
+        "scope": "user",
+        "surface": "cli",
+        "platform": "linux"
+      },
+      "request": {
+        "id": "review",
+        "kind": "mcp",
+        "name": "review",
+        "transport": {
+          "kind": "http",
+          "url": "https://tools.example.test/mcp",
+          "bearer_token_env": "TOOLS_TOKEN"
+        }
+      },
+      "expected": {
+        "supported": true,
+        "registration_fields": {
+          "url": "https://tools.example.test/mcp",
+          "bearerTokenEnv": "TOOLS_TOKEN",
+          "auth": "bearer"
+        },
+        "notices": [
+          {
+            "kind": "prerequisite",
+            "requirement": "pi-mcp-adapter",
+            "requires_schema_pin": true
+          }
+        ],
+        "configuration_current_requires_activation": false
+      }
+    },
+    {
+      "name": "cursor-generic-pretool-ask",
+      "context": {
+        "agent": "cursor",
+        "scope": "project",
+        "surface": "ide",
+        "platform": "linux"
+      },
+      "request": {
+        "id": "check",
+        "kind": "hook",
+        "event": "before-tool",
+        "command": {
+          "argv": [
+            "check"
+          ]
+        },
+        "protocol_version": 1,
+        "outcomes": [
+          "ask"
+        ]
+      },
+      "expected": {
+        "supported": false,
+        "reason": "generic-preToolUse-ask-is-ignored",
+        "mutation": "blocked"
+      }
+    }
+  ]
+}

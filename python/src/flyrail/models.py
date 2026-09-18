@@ -70,4 +70,5 @@ class OperationStatus(StrEnum):
     APPLIED = "applied"
     UNCHANGED = "unchanged"
     FAILED = "failed"
+    PARTIAL = "partial"
     INCOMPLETE = "incomplete"

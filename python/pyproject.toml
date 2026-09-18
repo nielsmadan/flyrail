@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "flyrail"
 version = "0.1.0"
-description = "A typed library for distributing skill bundles to local coding agents."
+description = "A typed library for reversible coding-agent configuration bundles."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -23,7 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = []
+dependencies = ["tomlkit==0.15.1"]
 
 [dependency-groups]
 audit = ["pip-audit==2.10.1"]
@@ -42,7 +42,7 @@ required-version = ">=0.12.13"
 packages = ["src/flyrail"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/hatch_build.py", "/.gitignore"]
+include = ["/src", "/tests", "/runtime-tooling", "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/hatch_build.py", "/.gitignore"]
 exclude = ["**/.git", "**/.cache", "**/.venv", "**/__pycache__", "**/*.py[cod]", "**/*.egg-info", "**/build", "**/dist", "**/.DS_Store", "**/*.log"]
 
 [tool.hatch.build.targets.sdist.hooks.custom]
@@ -60,6 +60,8 @@ select = ["E", "F", "I", "UP", "B", "S", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
 "scripts/package_probe.py" = ["S101"]
+"scripts/hook_package_probe.py" = ["S101"]
+"scripts/configuration_package_probe.py" = ["S101"]
 "scripts/typed_consumer.py" = ["S101"]
 
 [tool.mypy]

@@ -121,7 +121,7 @@ def lifecycle(host: Host) -> None:
     report = host.call("status", [first], expected=1)
     assert report["results"][0]["observation"]["state"] == "absent"
     assert not first.exists()
-    assert not first.with_name(".first.flyrail").exists()
+    assert not flyrail.ResourceAuthority(first).state_root.exists()
     command([str(host.executable), "ai", "install"], expected=2)
     report = host.call("install", targets, expected=1)
     assert statuses(report) == ["applied", "failed", "applied"]
@@ -204,7 +204,8 @@ def lifecycle(host: Host) -> None:
     ]
     assert statuses(host.call("uninstall", active)) == ["unchanged", "unchanged"]
     assert set(path.name for path in first.iterdir()) == {"foreign-skill", "untracked.txt"}
-    assert list(later.iterdir()) == []
+    assert not later.exists()
+    assert flyrail.ResourceAuthority(later).state_root.is_dir()
     assert (first / "foreign-skill/SKILL.md").read_bytes() == b"foreign owned bytes"
     assert (first / "untracked.txt").read_bytes() == b"untracked neighbor"
     assert (collision / "SKILL.md").read_bytes() == b"untracked content"

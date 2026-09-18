@@ -2,9 +2,10 @@ import os
 import stat
 from pathlib import Path
 
+from flyrail._resource_models import Ancestor
+from flyrail._security import security
 from flyrail._sources import _signature
-from flyrail._validation import portable_path_key, validate_relative_path
-from flyrail.models import BundleEntry
+from flyrail._validation import portable_path_key
 from flyrail.observations import ErrorCode, TargetError
 
 
@@ -17,6 +18,36 @@ class ObservationFailure(Exception):
 class Observer:
     def __init__(self) -> None:
         self.observed: dict[Path, tuple[int, ...] | None] = {}
+        self.ancestors: dict[Path, Ancestor | None] = {}
+        self.matches: dict[tuple[Path, str], tuple[Path, ...]] = {}
+
+    def ancestor(self, path: Path) -> Ancestor | None:
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            current = None
+        else:
+            if not stat.S_ISDIR(metadata.st_mode) or (
+                getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                raise ObservationFailure(
+                    ErrorCode.UNSAFE_PATH, "resource ancestor is not an ordinary directory", path
+                )
+            current = Ancestor(
+                path,
+                metadata.st_dev,
+                metadata.st_ino,
+                stat.S_IMODE(metadata.st_mode),
+                metadata.st_uid,
+                metadata.st_gid,
+                security(path, ancestor=True),
+            )
+        if path in self.ancestors and self.ancestors[path] != current:
+            raise ObservationFailure(
+                ErrorCode.CONCURRENT_CHANGE, "ancestor changed during inspection", path
+            )
+        self.ancestors[path] = current
+        return current
 
     def metadata(self, path: Path) -> os.stat_result | None:
         try:
@@ -32,6 +63,7 @@ class Observer:
         if metadata is not None and (
             getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
             or not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode))
+            or (stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1)
         ):
             raise ObservationFailure(
                 ErrorCode.UNSAFE_PATH,
@@ -41,16 +73,18 @@ class Observer:
         return metadata
 
     def directory(self, path: Path, *, matching: str | None = None) -> tuple[Path, ...]:
-        metadata = self.metadata(path)
-        if metadata is None:
-            return ()
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise ObservationFailure(ErrorCode.UNSAFE_PATH, "expected a directory", path)
+        if matching is None:
+            metadata = self.metadata(path)
+            present = metadata is not None
+            if metadata is not None and not stat.S_ISDIR(metadata.st_mode):
+                raise ObservationFailure(ErrorCode.UNSAFE_PATH, "expected a directory", path)
+        else:
+            present = self.ancestor(path) is not None
         children = tuple(
             sorted(
                 (
                     child
-                    for child in path.iterdir()
+                    for child in (path.iterdir() if present else ())
                     if matching is None
                     or portable_path_key(child.name) == portable_path_key(matching)
                 ),
@@ -65,7 +99,16 @@ class Observer:
                     ErrorCode.UNSAFE_PATH, "portable filename collision", child
                 )
             keys.add(key)
-        self.metadata(path)
+        if matching is None:
+            self.metadata(path)
+        else:
+            self.ancestor(path)
+            match_key = (path, matching)
+            if match_key in self.matches and self.matches[match_key] != children:
+                raise ObservationFailure(
+                    ErrorCode.CONCURRENT_CHANGE, "selected directory entries changed", path
+                )
+            self.matches[match_key] = children
         return children
 
     def managed_directory(self, path: Path) -> None:
@@ -95,30 +138,10 @@ class Observer:
         self.metadata(path)
         return data
 
-    def tree(self, root: Path, name: str, executables: frozenset[str]) -> tuple[BundleEntry, ...]:
-        entries: list[BundleEntry] = []
-
-        def walk(path: Path, relative: str) -> None:
-            metadata = self.metadata(path)
-            if metadata is None:
-                return
-            try:
-                validate_relative_path(relative, "installed path")
-            except ValueError as error:
-                raise ObservationFailure(ErrorCode.UNSAFE_PATH, str(error), path) from error
-            if stat.S_ISDIR(metadata.st_mode):
-                entries.append(BundleEntry(relative))
-                for child in self.directory(path):
-                    walk(child, relative + "/" + child.name)
-            else:
-                executable = (
-                    relative in executables if os.name == "nt" else bool(metadata.st_mode & 0o111)
-                )
-                entries.append(BundleEntry(relative, self.file(path), executable))
-
-        walk(root / name, name)
-        return tuple(entries)
-
     def finish(self) -> None:
         for path in self.observed:
             self.metadata(path)
+        for path in self.ancestors:
+            self.ancestor(path)
+        for path, matching in self.matches:
+            self.directory(path, matching=matching)

@@ -1,5 +1,7 @@
 # Destinations and read-only inspection
 
+[Paths, home and environment](#paths-home-and-environment) · [Read-only configuration inspection](#read-only-configuration-inspection) · [Skill convenience inspection](#skill-convenience-inspection) · [Path and state safety](#path-and-state-safety)
+
 `Target.directory(root)` selects the actual skill container. For example,
 `Target.directory("./custom-skills")` places skill `review` at
 `./custom-skills/review`. `Target.project(agent, root)` and
@@ -14,7 +16,7 @@ or the corresponding `Agent` enum values. Unknown names are errors.
 | `opencode` | `~/.config/opencode/skills` | `XDG_CONFIG_HOME/opencode/skills` | `.opencode/skills` |
 | `pi` | `~/.pi/agent/skills` | `PI_CODING_AGENT_DIR/skills` | `.pi/skills` |
 | `cursor` | `~/.cursor/skills` | None | `.cursor/skills` |
-| `copilot` | `~/.copilot/skills` | None | `.github/skills` |
+| `copilot` | `~/.copilot/skills` | `COPILOT_HOME/skills` (CLI) | `.github/skills` |
 
 These paths follow the agent documentation for
 [Claude skills](https://code.claude.com/docs/en/skills) and
@@ -35,8 +37,10 @@ make no cloud-agent compatibility claim.
 
 `CODEX_HOME` does not relocate `.agents/skills`. `OPENCODE_CONFIG_DIR` adds
 discovery and does not replace OpenCode's default skill directory. General Cursor
-or Copilot configuration variables do not relocate these presets. Use an explicit
-directory target for a custom arrangement.
+configuration variables do not relocate these presets. `COPILOT_HOME` applies to
+the Copilot CLI preset; the VS Code render surface retains documented home paths. Use an explicit
+directory target for a custom arrangement. See [translation](translation.md) for
+instruction/MCP routes and surface-specific relocation.
 
 ## Paths, home and environment
 
@@ -75,112 +79,86 @@ relocated = Target.user(
 custom = Target.directory("./shared-skills")
 ```
 
-## Inspection API
+## Read-only configuration inspection
 
-`inspect(bundle, targets)` accepts a `Bundle` snapshot and a nonempty iterable of
-`Target` values. It consumes and validates the complete request before observing
-installations. It resolves explicit roots once, permits ordinary system symlinks
-above those roots, and refuses symlinks, known Windows reparse points, junctions,
-and special files at an explicit root or inside managed paths. Preset path
-components and management directories must have exact, unambiguous spelling.
+`inspect_installation(bundle_id, installation_target)` reads the index and the
+union of current, pending, previous and residual resource references, including
+references in complete prepared index metadata. It does not
+need the bundle source, create directories, acquire locks, recover transactions
+or change permissions. Reads may update access times.
 
-Canonical target and sibling state roots must not overlap any retained bundle
-source root, including a package archive, or another destination or its state.
-The overlap comparison also rejects portable case-folding collisions. Nested
-destinations are errors even when currently absent. Such request errors raise
-`ValueError` before any installation content is inspected. Expected destination
-filesystem failures, including permission failures during resolution, become
-per-target errors and do not prevent independent destinations being inspected.
+Its `InstallationObservation` includes recorded version/digests, pending state,
+resource summaries and an error. Each resource summary contains claim attribution,
+claim status, a revision digest, diagnostics and recovery paths. It excludes full
+foreign content and baseline payloads.
 
-The return value is a tuple of `TargetInspection` values in request order:
+A missing receipt required by a committed current or previous generation, including
+a recognized prepared completion, is a resource `INVALID_STATE` error, with the
+receipt path retained in the diagnostic.
+It makes the installation noncurrent and blocks mutation without discarding index
+membership. Pending first-install resources that never committed and valid retained
+empty receipts are distinct from missing committed ownership metadata.
 
-| Field | Meaning |
-| --- | --- |
-| `target` | Original immutable target with agent/scope attribution. |
-| `root` | Resolved physical skill container; requested path if resolution failed. |
-| `state_root` | Sibling `.<container-name>.flyrail` directory. |
-| `alias_of` | Zero-based index of the first request for the same physical target, or `None`. |
-| `observation` | Immutable `Observation`, shared by requests that alias one physical target. |
+`is_current` means all recorded generation claims agree with their version,
+bundle/render digests and actual owned content, with no unresolved membership or
+recovery. It does not compare with an unavailable new application bundle. To check
+that bundle, use `observation.matches(bundle, rendered)`. It requires a supported
+rendering, matching bundle identity/version/content and render digest, and intact
+recorded state. A same-label change to generated text or rendered destinations
+returns false. The comparison is pure and remains a snapshot: inspect again to
+observe later filesystem changes. Use `preview` to review proposed acquisitions
+and retirements. Neither comparison verifies activation or prerequisites.
 
-Existing directories are deduplicated by device and inode identity as well as
-canonical path. Missing destinations use their canonical paths. Each physical
-installation is read once. The original requested path and consumer attribution
-remain available through `target`.
+A preview is also read-only, but intentionally contains full preimages and
+baselines. Treat it as sensitive explicit review data, not ordinary status output.
+Changes to unowned bytes stale an existing preview even when owned claims remain
+current.
 
-Inspection creates no destination, state, lock, staging, or backup directory. It
-does not acquire locks, recover abandoned work, or alter receipt or installed
-bytes or permissions. Reads may update filesystem access times. The observation
-is best effort: directory and file metadata are rechecked to detect concurrent
-changes, but there is no globally coherent snapshot against arbitrary external
-writers.
+## Skill convenience inspection
 
-## Observation fields
+`inspect(bundle, targets)` returns an ordered tuple of `TargetInspection` values
+for a nonempty iterable of skill `Target` values. Each carries the requested
+target, canonical root, adjacent hashed authority `state_root`, `alias_of` and
+an `Observation`. Same-physical aliases share an observation and point to the
+first request's zero-based index.
 
-`observation.is_current` is the convenience answer for whether the requested
-bundle revision is installed and intact. It requires an installed same-owner
-receipt, matching version, recorded content and actual content, no same-owner
-modification, no desired-skill conflict, and no error or pending recovery. An
-unrelated bundle's content edits do not by themselves change this value.
+If a target cannot be canonicalized, its observation is `UNKNOWN` with a typed
+error, and independent targets are still inspected. Its `root` retains the
+requested path; `state_root` is derived from that path for diagnostics. Physical
+alias attribution requires successful canonicalization.
 
-The explanatory fields stay independent:
+The skill adapter uses a deterministic sibling index named
+`.<container>.flyrail-index-<bundle-id>`. Its recorded context binds the canonical
+physical container. Equivalent directory and agent-preset routes can inspect,
+update and remove that installation in later calls, regardless of their order.
+The selected agent, scope, home and routing environment remain captured in the
+preview. Ownership remains at the shared container authority.
 
-| Field | Meaning |
-| --- | --- |
-| `state` | `INSTALLED` when an active same-owner receipt exists; `ABSENT` without one, including after a removal receipt; `RECOVERY_NEEDED` when pending state exists; `UNKNOWN` when inspection cannot safely establish state. |
-| `installed` | Requested bundle's `Installation`, or `None`. |
-| `installations` | All active receipts as `Installation` values, ordered by receipt filename. |
-| `version_matches` | Receipt version equals requested opaque version; `None` without an active same-owner receipt. |
-| `recorded_content_matches` | Receipt content digest equals the bundle digest; `None` without an active same-owner receipt. |
-| `content_matches` | Actual selected bytes, directory names and executable intent equal the requested content. `None` when inspection fails. |
-| `modifications` | Changes against every active receipt, including other bundles, ordered by receipt filename then UTF-8 path bytes. |
-| `conflicts` | Desired skill roots claimed by another bundle, occupied without ownership, or present with different portable-equivalent spelling. |
-| `error` | `TargetError`, or `None`; an error has `code`, `message`, optional absolute `path`, and optional OS `errno`. |
-| `recovery_paths` | Existing transaction record or nonempty staging/backup locations that require recovery. |
+`Observation` preserves the skill-facing shape: installed inventory summaries,
+version/content comparisons, same-resource ownership, modifications, desired
+conflicts, errors and recovery paths. Modification summaries identify changed
+owned claims; use the general preview for the complete proposed resource change.
+Desired-content conflicts remain in `conflicts`. Other preview failures appear in
+`error` and make the state `UNKNOWN`, while an existing `RECOVERY_NEEDED` state
+and its recovery paths are preserved.
 
-Actual-content comparison includes all requested skills plus any retired skills
-still owned by this bundle. Unrelated unowned entries and unrelated bundles'
-skills are excluded. Byte-identical untracked or foreign-owned content can match
-the desired content while remaining a conflict. Editing installed bytes to match
-a newly supplied bundle can make `content_matches=True` while
-`recorded_content_matches=False` and same-owner modifications remain. Neither
-case is current. A version-only change leaves the two content comparisons true
-and `version_matches=False`.
+`ObservationState` is `INSTALLED`, `ABSENT`, `RECOVERY_NEEDED` or `UNKNOWN`.
+An uninstall observation has no desired bundle snapshot, so comparison fields are
+null and its skill-facing `is_current` is false. Inventory entries expose paths,
+file sizes/SHA-256 and executable intent, without file contents.
 
-Each `Installation` contains `bundle_id`, `version`, `content_digest`,
-`transaction_id`, and a tuple of `InventoryEntry` values. Inventory entries retain
-installed paths, directories, file sizes, file SHA-256, and executable intent.
-`InventoryEntry` exposes `path`, `size`, `sha256`, `executable`, and
-`is_directory`. Directories have `size=None` and `sha256=None`; files have an
-integer byte size and hexadecimal SHA-256, including size zero for empty files.
-Receipt versions are equality-only labels; there is no ordering.
+## Path and state safety
 
-`Modification` contains `bundle_id`, installed-relative `path`, and a
-`ModificationKind`: `MISSING`, `ADDED`, `TYPE_CHANGED`, `CONTENT_CHANGED`, or
-`EXECUTABLE_CHANGED`. File bytes and executable intent changing together produce
-two modifications. Removing a directory produces missing records for it and its
-recorded descendants. Every recorded directory, including an empty one, matters.
-POSIX considers a file executable when any execute bit is set; other permission
-bits are not part of installed content identity. On Windows, the receipt retains
-logical executable intent because POSIX execute bits cannot be verified there.
-Unowned Windows files have no recorded executable intent.
+Canonicalization resolves physical aliases and rejects managed symlinks, reparse
+points, hard links, special files and ambiguous portable names. Actual rendered
+outputs and authority/index storage must not overlap retained bundle sources.
+A project containing a bundle may still manage a disjoint document.
 
-`Conflict` contains `path` and `owner`, which is a bundle ID or `None` for an
-untracked entry. Ownership persists when the owned skill or files are missing.
-All receipts are validated and reconciled before ownership is trusted. Missing,
-changed, or added content is an observation, while malformed, unsupported, or
-contradictory receipt state is an `INVALID_STATE` error. Other error codes are
-`IO_ERROR`, `UNSAFE_PATH`, `CONCURRENT_CHANGE`, and `RECOVERY_NEEDED`.
+Malformed state, contradictory ownership or an inconsistent index fails closed.
+Unknown transaction/preparation data is reported for recovery. Inspection may
+observe an active writer; pending state is not proof that the writer stopped.
+Only a locked mutation can perform [recovery](../../spec/transaction-protocol.md).
 
-Any transaction record, even a truncated or unsupported one, or nonempty staging
-or backup directory makes inspection report recovery needed. This read-only API
-does not interpret a transaction as permission to recover or claim its outcome.
-An invalid receipt still fails closed when recovery state is also present.
-Unknown management entries are invalid state. See the
-[receipt format](../../spec/receipt-format.md) for storage and validation rules.
-
-
-Mutation results reuse these observations and retain operation status/error fields
-separately. See the [lifecycle API](lifecycle.md). Only a mutation holding the
-permanent lock can interpret pending transaction state as abandoned and perform
-[recovery](../../spec/transaction-protocol.md). Inspection can encounter a live transaction;
-`RECOVERY_NEEDED` does not establish that its writer has stopped.
+The [lifecycle](lifecycle.md) describes conflicts, replacement, aggregate outcomes
+and source-free removal. [Resource state](../../spec/receipt-format.md) defines
+the durable layout and strict encoding.

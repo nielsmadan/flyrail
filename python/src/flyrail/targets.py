@@ -1,6 +1,6 @@
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -18,6 +18,18 @@ class TargetScope(StrEnum):
     DIRECTORY = "directory"
     USER = "user"
     PROJECT = "project"
+
+
+class Surface(StrEnum):
+    CLI = "cli"
+    IDE = "ide"
+    VSCODE = "vscode"
+
+
+class Platform(StrEnum):
+    MACOS = "macos"
+    LINUX = "linux"
+    WINDOWS = "windows"
 
 
 _PROJECT = {
@@ -38,6 +50,7 @@ _RELOCATIONS = {
     Agent.CLAUDE: ("CLAUDE_CONFIG_DIR", ("skills",)),
     Agent.OPENCODE: ("XDG_CONFIG_HOME", ("opencode", "skills")),
     Agent.PI: ("PI_CODING_AGENT_DIR", ("skills",)),
+    Agent.COPILOT: ("COPILOT_HOME", ("skills",)),
 }
 
 
@@ -87,6 +100,8 @@ class Target:
     scope: TargetScope
     _anchor: Path
     _suffix: tuple[str, ...]
+    home: Path | None = field(compare=False)
+    environment: tuple[tuple[str, str], ...] = field(compare=False)
 
     def __init__(self) -> None:
         raise TypeError("use Target.directory, Target.user, or Target.project")
@@ -128,12 +143,22 @@ class Target:
                 relocation[1],
                 selected,
                 TargetScope.USER,
+                home_root,
+                environment,
             )
-        return cls._create(home_root, _USER[selected], selected, TargetScope.USER)
+        return cls._create(
+            home_root, _USER[selected], selected, TargetScope.USER, home_root, environment
+        )
 
     @classmethod
     def _create(
-        cls, anchor: Path, suffix: tuple[str, ...], agent: Agent | None, scope: TargetScope
+        cls,
+        anchor: Path,
+        suffix: tuple[str, ...],
+        agent: Agent | None,
+        scope: TargetScope,
+        home: Path | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> "Target":
         root = anchor.joinpath(*suffix)
         if root == root.parent:
@@ -145,6 +170,28 @@ class Target:
             ("scope", scope),
             ("_anchor", anchor),
             ("_suffix", suffix),
+            ("home", home),
+            (
+                "environment",
+                tuple(
+                    sorted(
+                        (key, value)
+                        for key, value in (environment or {}).items()
+                        if key
+                        in {
+                            "HOME",
+                            "USERPROFILE",
+                            "CLAUDE_CONFIG_DIR",
+                            "CODEX_HOME",
+                            "XDG_CONFIG_HOME",
+                            "OPENCODE_CONFIG",
+                            "OPENCODE_CONFIG_DIR",
+                            "PI_CODING_AGENT_DIR",
+                            "COPILOT_HOME",
+                        }
+                    )
+                ),
+            ),
         ):
             object.__setattr__(result, name, value)
         return result

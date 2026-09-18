@@ -72,9 +72,11 @@ def main() -> int:
         commands += [[uv, "run", "--no-sync", "ruff", "format", "."]]
     elif arguments.action == "check":
         commands += [
+            [uv, "run", "--no-sync", "python", "scripts/interpreter_check.py"],
             [uv, "run", "--no-sync", "ruff", "format", "--check", "."],
             [uv, "run", "--no-sync", "ruff", "check", "."],
             [uv, "run", "--no-sync", "mypy"],
+            [uv, "run", "--no-sync", "python", "scripts/runtime_check.py"],
             [uv, "run", "--no-sync", "pytest"],
         ]
     elif arguments.action == "audit-dependencies":
