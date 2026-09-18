@@ -22,7 +22,7 @@ from flyrail._resource_io import atomic, observe
 from flyrail._resource_models import Generation, Index, Receipt, Revision
 from flyrail._resource_transaction import Journal, recover, transaction_ancestors
 
-VECTORS = json.loads((FIXTURES / "configurations.json").read_text())
+VECTORS = json.loads((FIXTURES / "configurations.json").read_text(encoding="utf-8"))
 
 
 def relocated(raw: object, root: Path) -> object:
@@ -35,18 +35,16 @@ def relocated(raw: object, root: Path) -> object:
         name = original.rsplit("/", 1)[1]
         if name.startswith(".flyrail-"):
             return {
-                "path": str(
-                    ResourceAuthority(
-                        root / ("config.json" if "config.json" in str(raw) else "AGENTS.md")
-                    ).state_root
-                )
+                "path": ResourceAuthority(
+                    root / ("config.json" if "config.json" in str(raw) else "AGENTS.md")
+                ).state_root.as_posix()
             }
-        return {"path": str(root / name)}
+        return {"path": (root / name).as_posix()}
     result: dict[str, Any] = {key: relocated(value, root) for key, value in raw.items()}
     if result.get("type") == "ResourceRef":
         fields = result["fields"]
         path = Path(fields["destination"]["path"])
-        fields["state_root"] = {"path": str(ResourceAuthority(path).state_root)}
+        fields["state_root"] = {"path": ResourceAuthority(path).state_root.as_posix()}
     if result.get("type") == "Receipt":
         fields = result["fields"]
         ref = decode(json.dumps(fields["resource"]).encode())

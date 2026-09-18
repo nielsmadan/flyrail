@@ -247,7 +247,9 @@ def test_selected_dependencies_cannot_disappear_by_audience(tmp_path: Path) -> N
 
 
 def asset_bundle(data: bytes = b'console.log("MCP");') -> Bundle:
-    manifest = json.loads((FIXTURES / "translations.json").read_text())["asset_manifest"]
+    manifest = json.loads((FIXTURES / "translations.json").read_text(encoding="utf-8"))[
+        "asset_manifest"
+    ]
     return Bundle.from_memory(
         manifest, [BundleEntry("runtime/server.js", data), BundleEntry("runtime/data")]
     )
@@ -378,7 +380,9 @@ def test_asset_root_and_command_file_references(tmp_path: Path) -> None:
     assert render(bundle, context(tmp_path)).supported
     with pytest.raises(ValueError):
         AssetRef("runtime", "../outside")
-    manifest = json.loads((FIXTURES / "translations.json").read_text())["asset_manifest"]
+    manifest = json.loads((FIXTURES / "translations.json").read_text(encoding="utf-8"))[
+        "asset_manifest"
+    ]
     manifest["artifacts"][0]["transport"]["command"]["argv"][1]["extra"] = True
     with pytest.raises(ValueError):
         Bundle.from_memory(

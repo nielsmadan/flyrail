@@ -43,7 +43,7 @@ class BundleCase(TypedDict):
 
 CASES = cast(
     list[BundleCase],
-    json.loads((FIXTURES / "bundles.json").read_text())["cases"],
+    json.loads((FIXTURES / "bundles.json").read_text(encoding="utf-8"))["cases"],
 )
 PACKAGE = "flyrail_fixture_pkg"
 
@@ -407,9 +407,12 @@ def test_missing_and_wrong_source_types(tmp_path: Path) -> None:
 def test_nonportable_actual_source_names(tmp_path: Path, name: str) -> None:
     skill = write_bundle(tmp_path)
     try:
-        (skill / name).mkdir()
+        selected = skill / name
+        selected.mkdir()
     except OSError:
         pytest.skip("host cannot create this nonportable filename; covered through ZIP fixtures")
+    if selected.name not in {path.name for path in skill.iterdir()}:
+        pytest.skip("host normalized this nonportable filename; covered through ZIP fixtures")
     with pytest.raises(ValueError, match="source name"):
         Bundle.from_directory(tmp_path)
 
@@ -565,6 +568,13 @@ def write_archive(
     monkeypatch.syspath_prepend(str(path))
 
 
+def raw_archive_name(name: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo("placeholder")
+    info.filename = name
+    info.orig_filename = name
+    return info
+
+
 def test_zip_inferred_directories_and_closed_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -598,7 +608,9 @@ def test_zip_inferred_directories_and_closed_context(
 def test_zip_rejects_nonportable_and_traversal_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    members = [*archive_members(), (PACKAGE + "/flyrail/a/" + name, b"bad")]
+    path = PACKAGE + "/flyrail/a/" + name
+    member: str | zipfile.ZipInfo = raw_archive_name(path) if "\\" in name else path
+    members = [*archive_members(), (member, b"bad")]
     write_archive(tmp_path / "package.zip", members, monkeypatch)
     with pytest.raises(ValueError, match="archive path"):
         Bundle.from_package(PACKAGE)

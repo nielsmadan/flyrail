@@ -4,7 +4,11 @@ from pathlib import Path
 
 from flyrail._resource_models import Ancestor
 from flyrail._security import security
-from flyrail._sources import _signature
+from flyrail._sources import (
+    _descriptor_signature,
+    _path_descriptor_signature,
+    _path_signature,
+)
 from flyrail._validation import portable_path_key
 from flyrail.observations import ErrorCode, TargetError
 
@@ -19,7 +23,9 @@ class Observer:
     def __init__(self) -> None:
         self.observed: dict[Path, tuple[int, ...] | None] = {}
         self.ancestors: dict[Path, Ancestor | None] = {}
-        self.matches: dict[tuple[Path, str], tuple[Path, ...]] = {}
+        self.directories: dict[Path, tuple[str, ...]] = {}
+        self.matches: dict[tuple[Path, str], tuple[str, ...]] = {}
+        self.listed: set[str] = set()
 
     def ancestor(self, path: Path) -> Ancestor | None:
         try:
@@ -54,7 +60,11 @@ class Observer:
             metadata = path.lstat()
         except FileNotFoundError:
             metadata = None
-        signature = None if metadata is None else _signature(metadata)
+        signature = None if metadata is None else _path_signature(metadata)
+        if metadata is None and os.fspath(path) in self.listed:
+            raise ObservationFailure(
+                ErrorCode.CONCURRENT_CHANGE, "listed path disappeared during inspection", path
+            )
         if path in self.observed and self.observed[path] != signature:
             raise ObservationFailure(
                 ErrorCode.CONCURRENT_CHANGE, "path changed during inspection", path
@@ -80,14 +90,18 @@ class Observer:
                 raise ObservationFailure(ErrorCode.UNSAFE_PATH, "expected a directory", path)
         else:
             present = self.ancestor(path) is not None
+        try:
+            children = tuple(path.iterdir()) if present else ()
+        except FileNotFoundError as error:
+            raise ObservationFailure(
+                ErrorCode.CONCURRENT_CHANGE, "directory disappeared during inspection", path
+            ) from error
+        if matching is not None:
+            key = portable_path_key(matching)
+            children = tuple(child for child in children if portable_path_key(child.name) == key)
         children = tuple(
             sorted(
-                (
-                    child
-                    for child in (path.iterdir() if present else ())
-                    if matching is None
-                    or portable_path_key(child.name) == portable_path_key(matching)
-                ),
+                children,
                 key=lambda child: child.name.encode("utf-8", errors="surrogatepass"),
             )
         )
@@ -99,16 +113,23 @@ class Observer:
                     ErrorCode.UNSAFE_PATH, "portable filename collision", child
                 )
             keys.add(key)
+            self.listed.add(os.fspath(child))
+        names = tuple(child.name for child in children)
         if matching is None:
             self.metadata(path)
+            if path in self.directories and self.directories[path] != names:
+                raise ObservationFailure(
+                    ErrorCode.CONCURRENT_CHANGE, "directory entries changed", path
+                )
+            self.directories[path] = names
         else:
             self.ancestor(path)
             match_key = (path, matching)
-            if match_key in self.matches and self.matches[match_key] != children:
+            if match_key in self.matches and self.matches[match_key] != names:
                 raise ObservationFailure(
                     ErrorCode.CONCURRENT_CHANGE, "selected directory entries changed", path
                 )
-            self.matches[match_key] = children
+            self.matches[match_key] = names
         return children
 
     def managed_directory(self, path: Path) -> None:
@@ -125,13 +146,20 @@ class Observer:
         before = self.metadata(path)
         if before is None or not stat.S_ISREG(before.st_mode):
             raise ObservationFailure(ErrorCode.INVALID_STATE, "expected a regular file", path)
-        with path.open("rb") as stream:
-            if _signature(os.fstat(stream.fileno())) != _signature(before):
+        try:
+            stream = path.open("rb")
+        except FileNotFoundError as error:
+            raise ObservationFailure(
+                ErrorCode.CONCURRENT_CHANGE, "file disappeared while opening", path
+            ) from error
+        with stream:
+            opened = os.fstat(stream.fileno())
+            if _path_descriptor_signature(opened) != _path_descriptor_signature(before):
                 raise ObservationFailure(
                     ErrorCode.CONCURRENT_CHANGE, "file changed while opening", path
                 )
             data = stream.read()
-            if _signature(os.fstat(stream.fileno())) != _signature(before):
+            if _descriptor_signature(os.fstat(stream.fileno())) != _descriptor_signature(opened):
                 raise ObservationFailure(
                     ErrorCode.CONCURRENT_CHANGE, "file changed while reading", path
                 )
@@ -143,5 +171,7 @@ class Observer:
             self.metadata(path)
         for path in self.ancestors:
             self.ancestor(path)
+        for path in self.directories:
+            self.directory(path)
         for path, matching in self.matches:
             self.directory(path, matching=matching)

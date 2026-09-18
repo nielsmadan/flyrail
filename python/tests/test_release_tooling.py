@@ -39,17 +39,25 @@ def git_environment() -> dict[str, str]:
     return environment
 
 
-def git(root: Path, *args: str, input_text: str | None = None) -> str:
+def git(
+    root: Path,
+    *args: str,
+    input_text: str | None = None,
+    input_bytes: bytes | None = None,
+) -> str:
+    assert input_text is None or input_bytes is None
     result = subprocess.run(  # noqa: S603
         [GIT, *args],
         cwd=root,
         env=git_environment(),
-        input=input_text,
-        text=True,
+        input=input_bytes if input_bytes is not None else input_text,
+        text=input_bytes is None,
+        encoding=None if input_bytes is not None else "utf-8",
         capture_output=True,
         check=True,
     )
-    return result.stdout.strip()
+    output = result.stdout.decode("utf-8") if isinstance(result.stdout, bytes) else result.stdout
+    return output.strip()
 
 
 def add_commit(
@@ -66,6 +74,7 @@ def add_commit(
             cwd=root,
             env=git_environment(),
             text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
@@ -85,7 +94,7 @@ def add_commit(
     if parent:
         stream += f"from {parent}\n"
     stream += f"M 100644 :1 {path}\ndone\n"
-    git(root, "fast-import", "--quiet", input_text=stream)
+    git(root, "fast-import", "--quiet", input_bytes=stream.encode("utf-8"))
     return git(root, "rev-parse", ref)
 
 
@@ -324,6 +333,7 @@ def test_prepare_release_validates_all_references_before_writing(
         [sys.executable, str(ROOT / "scripts" / "prepare_release.py"), "9.8.7"],
         cwd=tmp_path,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
     )

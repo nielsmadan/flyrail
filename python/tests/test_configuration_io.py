@@ -150,6 +150,8 @@ def test_immutable_preview_binds_full_ancestor_metadata(tmp_path: Path, change: 
     path = parent / "child" / "AGENTS.md" if change == "added-ancestor" else parent / "AGENTS.md"
     plan = preview(bundle(), rendered(path), target)
     if change == "ancestor-mode":
+        if os.name == "nt":
+            pytest.skip("POSIX ancestor mode evidence")
         parent.chmod(0o700)
     elif change == "added-ancestor":
         path.parent.mkdir()

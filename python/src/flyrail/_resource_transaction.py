@@ -252,7 +252,13 @@ def publish(journal: Journal) -> None:
         if os.name == "nt" and journal.before.data is not None and journal.staged.data is not None:
             replace_file(ref.destination, staged, backup)
             require(backup, journal.backup)
-            require(ref.destination, journal.staged)
+            actual = observe(ref.destination)
+            if actual not in (journal.staged, journal.published):
+                raise failure(
+                    ErrorCode.CONCURRENT_CHANGE,
+                    "published resource revision changed",
+                    ref.destination,
+                )
             set_security(ref.destination, journal.published.nodes[0].security)
         else:
             if journal.before.nodes:

@@ -54,6 +54,12 @@ def _windows() -> ctypes.CDLL:
     return cast(ctypes.CDLL, _native.WinDLL("advapi32", use_last_error=True))
 
 
+def _path_error(path: Path) -> OSError:
+    error = cast(OSError, _native.WinError(_native.get_last_error()))
+    error.filename = str(path)
+    return error
+
+
 def security(path: Path, *, ancestor: bool = False) -> bytes:
     if sys.platform == "win32":
         library = _windows()
@@ -69,10 +75,10 @@ def security(path: Path, *, ancestor: bool = False) -> bytes:
         size = ctypes.c_uint()
         function(str(path), 7, None, 0, ctypes.byref(size))
         if not size.value:
-            raise cast(OSError, _native.WinError(_native.get_last_error()))
+            raise _path_error(path)
         buffer = ctypes.create_string_buffer(size.value)
         if not function(str(path), 7, buffer, size.value, ctypes.byref(size)):
-            raise cast(OSError, _native.WinError(_native.get_last_error()))
+            raise _path_error(path)
         return buffer.raw[: size.value]
     flags = getattr(path.lstat(), "st_flags", 0)
     if flags and not ancestor:
@@ -166,11 +172,11 @@ def set_security(path: Path, descriptor: bytes, *, protected: bool | None = None
     ]
     inspect.restype = ctypes.c_int
     if not inspect(buffer, ctypes.byref(control), ctypes.byref(revision)):
-        raise cast(OSError, _native.WinError(_native.get_last_error()))
+        raise _path_error(path)
     restrictive = bool(control.value & 0x1000) if protected is None else protected
     flags = 0x80000000 if restrictive else 0x20000000
     if not function(str(path), 4 | flags, buffer):
-        raise cast(OSError, _native.WinError(_native.get_last_error()))
+        raise _path_error(path)
 
 
 def replace_file(destination: Path, staged: Path, backup: Path) -> None:
@@ -186,7 +192,7 @@ def replace_file(destination: Path, staged: Path, backup: Path) -> None:
     ]
     function.restype = ctypes.c_int
     if not function(str(destination), str(staged), str(backup), 0, None, None):
-        raise cast(OSError, _native.WinError(_native.get_last_error()))
+        raise _path_error(destination)
 
 
 def validate_windows_file(path: Path) -> None:
@@ -219,14 +225,14 @@ def validate_windows_file(path: Path) -> None:
     stream = Stream()
     handle = library.FindFirstStreamW(str(path), 0, ctypes.byref(stream), 0)
     if handle == ctypes.c_void_p(-1).value:
-        raise cast(OSError, _native.WinError(_native.get_last_error()))
+        raise _path_error(path)
     try:
         while True:
             if stream.name != "::$DATA":
                 raise OSError(errno.ENOTSUP, "alternate data streams are unsupported", path)
             if not library.FindNextStreamW(handle, ctypes.byref(stream)):
                 if _native.get_last_error() != 38:
-                    raise cast(OSError, _native.WinError(_native.get_last_error()))
+                    raise _path_error(path)
                 break
     finally:
         library.FindClose(handle)

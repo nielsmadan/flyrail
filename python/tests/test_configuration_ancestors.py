@@ -27,6 +27,7 @@ from flyrail import (
 from flyrail import _observation as observation
 from flyrail import _resource_io as io
 from flyrail import _security as security
+from flyrail import _sources as sources
 from flyrail._observation import ObservationFailure, Observer
 from flyrail._sources import DirectorySource
 
@@ -186,9 +187,14 @@ def test_ancestor_sampling_binds_owner_group_reparse_and_security_evidence(
                     st_mode=result.st_mode, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT
                 )
             if change in {"uid", "gid"}:
-                fields = list(result)
-                fields[4 if change == "uid" else 5] += 1
-                return os.stat_result(fields)
+                return SimpleNamespace(  # type: ignore[return-value]
+                    st_mode=result.st_mode,
+                    st_file_attributes=getattr(result, "st_file_attributes", 0),
+                    st_dev=result.st_dev,
+                    st_ino=result.st_ino,
+                    st_uid=result.st_uid + (change == "uid"),
+                    st_gid=result.st_gid + (change == "gid"),
+                )
         return result
 
     def descriptor(path: Path, *, ancestor: bool = False) -> bytes:
@@ -241,7 +247,8 @@ def test_filtered_directory_lookup_rechecks_selected_membership_and_identity(
     elif change == "removed":
         selected.rmdir()
     elif change == "alias":
-        selected.rename(tmp_path / "STATE")
+        selected.rename(tmp_path / "temporary")
+        (tmp_path / "temporary").rename(tmp_path / "STATE")
     else:
         selected.rename(tmp_path / "original")
         selected.mkdir()
@@ -264,7 +271,8 @@ def test_filtered_name_snapshot_rejects_membership_changes(tmp_path: Path, chang
     elif change == "removed":
         selected.rmdir()
     else:
-        selected.rename(tmp_path / "STATE")
+        selected.rename(tmp_path / "temporary")
+        (tmp_path / "temporary").rename(tmp_path / "STATE")
     with pytest.raises(ObservationFailure) as caught:
         observer.finish()
     assert caught.value.error.code is ErrorCode.CONCURRENT_CHANGE
@@ -312,3 +320,62 @@ def test_source_final_snapshot_still_rejects_directory_membership_changes(tmp_pa
     (tmp_path / "added").write_bytes(b"foreign")
     with pytest.raises(ValueError, match="source changed while loading"):
         source.finish()
+
+
+@pytest.mark.parametrize("descriptor_changed", [False, True])
+def test_windows_file_observation_compares_ctime_only_within_stat_channels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, descriptor_changed: bool
+) -> None:
+    path = tmp_path / "file"
+    path.write_bytes(b"content")
+    original = os.fstat
+    samples = 0
+
+    def descriptor(file_descriptor: int) -> SimpleNamespace:
+        nonlocal samples
+        metadata = original(file_descriptor)
+        samples += 1
+        return SimpleNamespace(
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino,
+            st_mode=metadata.st_mode,
+            st_size=metadata.st_size,
+            st_mtime_ns=metadata.st_mtime_ns,
+            st_ctime_ns=metadata.st_ctime_ns + 1 + (samples > 1 and descriptor_changed),
+        )
+
+    monkeypatch.setattr(sources, "_WINDOWS", True)
+    monkeypatch.setattr(os, "fstat", descriptor)
+    if descriptor_changed:
+        with pytest.raises(ObservationFailure) as caught:
+            Observer().file(path)
+        assert caught.value.error.code is ErrorCode.CONCURRENT_CHANGE
+        assert caught.value.error.message == "file changed while reading"
+    else:
+        assert Observer().file(path) == b"content"
+
+
+@pytest.mark.parametrize("source", [False, True])
+def test_listed_file_disappearance_is_a_concurrent_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: bool
+) -> None:
+    tree = tmp_path / "source"
+    make_bundle(tree)
+    selected = tree / "review"
+    disappearing = selected / "SKILL.md"
+    original = Path.iterdir
+
+    def children(path: Path) -> Iterator[Path]:
+        values = tuple(original(path))
+        if path == selected:
+            disappearing.unlink()
+        yield from values
+
+    monkeypatch.setattr(Path, "iterdir", children)
+    if source:
+        with pytest.raises(ValueError, match="source changed while loading"):
+            Bundle.from_directory(tree)
+    else:
+        with pytest.raises(ObservationFailure) as caught:
+            io.observe(selected)
+        assert caught.value.error.code is ErrorCode.CONCURRENT_CHANGE

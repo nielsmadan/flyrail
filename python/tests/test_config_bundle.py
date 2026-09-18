@@ -65,7 +65,10 @@ class ConfigCase(TypedDict):
     content_digest: str
 
 
-CASES = cast(list[ConfigCase], json.loads((FIXTURES / "configurations.json").read_text())["cases"])
+CASES = cast(
+    list[ConfigCase],
+    json.loads((FIXTURES / "configurations.json").read_text(encoding="utf-8"))["cases"],
+)
 
 
 class SemanticCase(TypedDict):
@@ -76,7 +79,7 @@ class SemanticCase(TypedDict):
 
 SEMANTIC_CASES = cast(
     list[SemanticCase],
-    json.loads((FIXTURES / "configurations.json").read_text())["semantic_values"],
+    json.loads((FIXTURES / "configurations.json").read_text(encoding="utf-8"))["semantic_values"],
 )
 
 

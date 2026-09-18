@@ -272,13 +272,30 @@ def test_native_windows_shared_file_security_preservation_and_private_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from flyrail import _lifecycle as lifecycle
+    from flyrail import _resource_transaction as transaction
     from flyrail._resource_transaction import Journal, paths
 
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"foreign")
     before = security.security(path)
+    replacements: list[tuple[int, int, int, int]] = []
+    original_replace = security.replace_file
+
+    def replace_file(destination: Path, staged: Path, backup: Path) -> None:
+        destination_id = destination.stat().st_ino
+        staged_id = staged.stat().st_ino
+        original_replace(destination, staged, backup)
+        replacements.append(
+            (destination_id, staged_id, destination.stat().st_ino, backup.stat().st_ino)
+        )
+
+    monkeypatch.setattr(transaction, "replace_file", replace_file)
     target = InstallationTarget(tmp_path / "index")
-    assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
+    initial = sync(bundle(), rendered(path), target)
+    assert initial.status is OperationStatus.APPLIED, initial.error
+    assert len(replacements) == 1
+    destination_id, staged_id, published_id, backup_id = replacements[0]
+    assert (published_id, backup_id) == (staged_id, destination_id)
     assert security.security(path) == before
     backups = []
 

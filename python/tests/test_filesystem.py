@@ -166,7 +166,11 @@ def test_replaced_lock_is_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     def wrong_identity(fd: int) -> SimpleNamespace:
         metadata = original(fd)
-        return SimpleNamespace(st_dev=metadata.st_dev, st_ino=metadata.st_ino + 1)
+        return SimpleNamespace(
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino + 1,
+            st_size=metadata.st_size,
+        )
 
     monkeypatch.setattr(os, "fstat", wrong_identity)
     with pytest.raises(ObservationFailure) as caught, filesystem.target_lock(tmp_path / "state", 0):

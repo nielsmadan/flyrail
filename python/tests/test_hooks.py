@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HOST = Path(__file__).with_name("hook_host.mjs")
 NODE = shutil.which("node")
 BUN = shutil.which("bun")
-VECTORS = json.loads((FIXTURES / "hooks.json").read_text())
+VECTORS = json.loads((FIXTURES / "hooks.json").read_text(encoding="utf-8"))
 
 
 def platform() -> Platform:
@@ -170,6 +170,7 @@ def invoke(
         command,
         input=json.dumps(request),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         cwd=root,
         env=environment,
@@ -335,6 +336,7 @@ def test_native_callback_values_are_validated_before_child_execution(
             {"host": host, "entry": str(entry), "cwd": str(tmp_path), "capture": str(capture)}
         ),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         cwd=tmp_path,
         env=environment,
