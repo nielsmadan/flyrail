@@ -16,6 +16,8 @@ from flyrail import InstallationTarget, OperationStatus, remove, sync
 from flyrail import _security as security
 from flyrail._resource_io import observe
 
+pytestmark = pytest.mark.integration
+
 
 def fake_windows(monkeypatch: pytest.MonkeyPatch, library: Any) -> Any:
     native = SimpleNamespace(

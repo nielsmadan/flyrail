@@ -12,6 +12,8 @@ from test_hooks import BUN, install, invoke, make_hook, node
 
 from flyrail import HookOutcome
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture(params=["node", "bun"])
 def runtime_binary(request: pytest.FixtureRequest) -> str:

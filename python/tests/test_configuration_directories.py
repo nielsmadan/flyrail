@@ -17,6 +17,8 @@ from flyrail import (
 )
 from flyrail._resource_io import observe
 
+pytestmark = pytest.mark.integration
+
 
 def skill(path: Path, name: str, data: bytes = b"skill") -> RenderedBundle:
     return RenderedBundle(

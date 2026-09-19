@@ -108,6 +108,7 @@ jobs:
           FLYRAIL_TEST_CODEX_LOGIN_SHELL: "1"
         run: |
           python python/scripts/check.py check
+          python python/scripts/check.py check-integration
           python python/scripts/check.py audit-dependencies
           python python/scripts/check.py check-workflow
 
@@ -210,7 +211,9 @@ jobs:
           no-cache: true
 
       - name: Run supported-platform checks
-        run: python python/scripts/check.py check
+        run: |
+          python python/scripts/check.py check
+          python python/scripts/check.py check-integration
 
   publish-pypi:
     needs: [verify, platform-checks]

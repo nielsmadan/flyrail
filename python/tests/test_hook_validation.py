@@ -27,6 +27,8 @@ from flyrail import (
     sync,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize("node_path", [Path("relative"), Path("/"), Path("/node/../bin"), "node"])
 def test_native_runtime_path_must_be_explicit_and_unambiguous(node_path: Any) -> None:

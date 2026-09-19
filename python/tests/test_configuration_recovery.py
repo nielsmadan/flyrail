@@ -33,6 +33,8 @@ from flyrail._resource_models import Revision
 from flyrail._security import replace_file as native_replace_file
 from flyrail.configuration import ResourcePlan
 
+pytestmark = pytest.mark.integration
+
 
 def live_writer(root: str, channel: Connection) -> None:
     original = tx.prepare

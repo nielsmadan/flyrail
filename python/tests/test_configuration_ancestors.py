@@ -31,6 +31,8 @@ from flyrail import _sources as sources
 from flyrail._observation import ObservationFailure, Observer
 from flyrail._sources import DirectorySource
 
+pytestmark = pytest.mark.integration
+
 
 def after_security_sample(
     monkeypatch: pytest.MonkeyPatch, parent: Path, change: Callable[[], None]

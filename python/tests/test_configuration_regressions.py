@@ -38,6 +38,8 @@ from flyrail._resource_models import Ancestor, Index, Node, Receipt, Revision
 from flyrail.configuration import ResourcePlan
 from flyrail.inspection import skill_targets
 
+pytestmark = pytest.mark.integration
+
 
 def tree_rendering(path: Path, value: bytes) -> RenderedBundle:
     tree = TreeContent(BundleEntry(name, value) for name in ("a", "branch/b", "branch/c", "z"))

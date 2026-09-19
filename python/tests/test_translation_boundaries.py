@@ -48,6 +48,8 @@ from flyrail import (
     sync,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize(
     ("agent", "variable", "skills", "instructions", "mcp"),

@@ -42,6 +42,8 @@ from flyrail._resource_models import (
 )
 from flyrail._security import security
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize("removal", [False, True])
 @pytest.mark.parametrize("damage", ["unknown-entry", "corrupt-index", "observation-io"])

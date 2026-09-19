@@ -78,7 +78,10 @@ cache_dir = ".cache/mypy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-config --strict-markers --cov=flyrail --cov-branch --cov-report=term-missing --cov-report=xml:.cache/coverage/coverage.xml --cov-fail-under=95"
+addopts = "--strict-config --strict-markers"
+markers = [
+  "integration: exercises real runtimes, subprocesses or full on-disk lifecycles",
+]
 cache_dir = ".cache/pytest"
 filterwarnings = ["error"]
 

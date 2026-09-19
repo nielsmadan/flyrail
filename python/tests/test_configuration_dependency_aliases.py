@@ -20,6 +20,8 @@ from flyrail import (
     sync,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize("mode", list(DependencyMode))
 @pytest.mark.parametrize("consumer_count", [1, 2])

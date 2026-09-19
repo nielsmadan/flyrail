@@ -9,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = ROOT.parent
 CACHE = REPOSITORY / ".cache"
 
+COVERAGE = (
+    "--cov=flyrail",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=xml:.cache/coverage/coverage.xml",
+    "--cov-fail-under=95",
+)
+
 
 def uv_executable() -> str | None:
     local = CACHE / "tools/uv" / ("uv.exe" if os.name == "nt" else "uv")
@@ -44,6 +52,7 @@ def main() -> int:
         "action",
         choices=(
             "check",
+            "check-integration",
             "format",
             "sync",
             "lock",
@@ -76,8 +85,12 @@ def main() -> int:
             [uv, "run", "--no-sync", "ruff", "format", "--check", "."],
             [uv, "run", "--no-sync", "ruff", "check", "."],
             [uv, "run", "--no-sync", "mypy"],
+            [uv, "run", "--no-sync", "pytest", "-m", "not integration"],
+        ]
+    elif arguments.action == "check-integration":
+        commands += [
             [uv, "run", "--no-sync", "python", "scripts/runtime_check.py"],
-            [uv, "run", "--no-sync", "pytest"],
+            [uv, "run", "--no-sync", "pytest", *COVERAGE],
         ]
     elif arguments.action == "audit-dependencies":
         commands = [
@@ -87,7 +100,7 @@ def main() -> int:
     elif arguments.action == "build":
         python = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         commands += [[uv, "build", "--no-build-isolation", "--python", str(python)]]
-    if arguments.action in {"check", "check-package"}:
+    if arguments.action in {"check-integration", "check-package"}:
         commands += [[uv, "run", "--no-sync", "python", "scripts/package_check.py"]]
     for command in commands:
         print(f"+ {' '.join(command)}", flush=True)

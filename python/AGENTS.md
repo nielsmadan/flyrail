@@ -9,8 +9,11 @@ Read README.md and the relevant docs before changing an interface. Keep public
 API, lifecycle, translation and example docs consistent with behavioral changes.
 Public prose belongs in documentation. Prefer clear names over comments and docstrings.
 
-Use `just check` for the shared Ruff formatting/lint/security, strict mypy, and
-pytest branch-coverage checks. `just format` formats Python code. The same commands
+Use `just check` for the shared Ruff formatting/lint/security, strict mypy, and the
+unit test tier; it is the git-hook gate and must stay fast. Use `just check-integration`
+for hook runtime checks, the complete suite with branch coverage, and package QA.
+Mark a test `@pytest.mark.integration` when it spawns a runtime or subprocess, or
+drives a full on-disk lifecycle. `just format` formats Python code. The same commands
 are available through `python3 scripts/check.py`. Set `UV_PYTHON` to check another
 supported interpreter; checks default to Python 3.11. Supported platforms are macOS
 and Linux; the Windows adapter is unsupported and not covered by CI.

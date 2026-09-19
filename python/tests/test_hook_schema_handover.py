@@ -37,6 +37,8 @@ from flyrail import (
     sync,
 )
 
+pytestmark = pytest.mark.integration
+
 
 def native_cursor(value: int) -> Bundle:
     audience = Audience(Agent.CURSOR, TargetScope.PROJECT)

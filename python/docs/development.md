@@ -25,11 +25,12 @@ contains the Linux download and checksum command.
 
 ## Hook runtimes and shell probes
 
-Hook development checks require Node 24+, npm and Bun 1.4.2+. The shared gate
+Hook development checks require Node 24+, npm and Bun 1.4.2+. `just check-integration`
 installs the exact `runtime-tooling/package-lock.json` development graph under
 repository `.cache/hook-tooling`, audits it, and checks TypeScript strictly before
 running the real child-process/host-loader tests. These are development and later
 hook-execution prerequisites; ordinary Python package builds do not invoke them.
+`just check` does not need them, so a registry outage cannot block a commit.
 
 CI enables `FLYRAIL_TEST_CODEX_LOGIN_SHELL=1` so POSIX Codex bridge probes execute
 its documented default `/bin/sh -lc` argument on clean runner profiles. Local
@@ -56,7 +57,8 @@ uv run --no-sync mypy --platform linux
 
 | Command | Work performed |
 | --- | --- |
-| `just check` | Locked sync, Ruff format/lint/security checks, interpreter verification, strict mypy, hook runtime checks, pytest with branch coverage, and package/consumer checks. |
+| `just check` | Locked sync, Ruff format/lint/security checks, interpreter verification, strict mypy, and the unit test tier. Runs in seconds; this is the git-hook and local release gate. |
+| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 95% gate, and package/consumer checks. Needs Node, npm and Bun. |
 | `just audit-dependencies` | Audit every locked registry package/version with pip-audit. |
 | `just check-workflow` | Validate all repository workflows with actionlint. |
 | `just check-package` | Build and verify distributions and installed example applications. |
@@ -107,6 +109,8 @@ repository-root `.cache/`. Python reports, check-package installations and tool
 caches use `python/.cache/`; the environment uses `python/.venv/` and release
 artifacts use `python/dist/`. Scripts preserve HOME and tests use isolated targets.
 The root `lefthook.yml` configures `just check`; maintainers manage hook activation.
+Hooks run the unit tier only. Integration tests run on the nightly CI schedule, on
+workflow dispatch, and in full on every release.
 
 The Flyrail wheel contains the library, typing marker and distribution metadata.
 Its source archive contains source, tests, the shared conformance fixtures, package
@@ -121,7 +125,13 @@ macOS 15 with Python 3.11 and 3.14. `setup-python` supplies a modern
 and `UV_MANAGED_PYTHON=1`. The shared gate prints the running version/executable
 and verifies its base against `uv python find --system --managed-python`.
 All four jobs must pass before a release claims those platforms. Windows 2025 is
-not in the matrix: the suite has never passed there, so Windows is unsupported. Workflows use pinned action commits, pinned uv, a
+not in the matrix: the suite has never passed there, so Windows is unsupported.
+
+Every push and pull request runs the fast tier. The integration matrix runs on the
+nightly schedule and on workflow dispatch, and the release workflow runs both tiers
+on every supported platform, so no release publishes without integration results.
+
+Workflows use pinned action commits, pinned uv, a
 checksum-pinned actionlint archive and read-only repository permissions.
 
 [Dependabot](../../.github/dependabot.yml) groups weekly Python dependency updates

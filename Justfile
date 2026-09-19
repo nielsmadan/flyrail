@@ -9,6 +9,9 @@ setup:
 check:
     {{python}} python/scripts/check.py check
 
+check-integration:
+    {{python}} python/scripts/check.py check-integration
+
 format:
     {{python}} python/scripts/check.py format
 

@@ -37,6 +37,8 @@ from flyrail._codec import encode
 from flyrail._resource_io import read
 from flyrail._resource_models import Index
 
+pytestmark = pytest.mark.integration
+
 
 def run_crash(worker: Callable[[str, str], None], root: Path, boundary: str) -> None:
     process = mp.get_context("spawn").Process(target=worker, args=(str(root), boundary))

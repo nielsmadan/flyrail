@@ -33,6 +33,8 @@ from flyrail import (
     sync,
 )
 
+pytestmark = pytest.mark.integration
+
 ROOT = Path(__file__).resolve().parents[2]
 HOST = Path(__file__).with_name("hook_host.mjs")
 NODE = shutil.which("node")

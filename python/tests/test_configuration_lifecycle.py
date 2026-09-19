@@ -42,6 +42,8 @@ from flyrail import (
 from flyrail._codec import decode
 from flyrail._resource_models import Receipt
 
+pytestmark = pytest.mark.integration
+
 
 def bundle(version: str = "1", identifier: str = "team") -> Bundle:
     return Bundle.from_artifacts(

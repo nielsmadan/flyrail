@@ -13,6 +13,8 @@ from flyrail import _resource_io as io
 from flyrail import _resource_transaction as tx
 from flyrail._resource_models import Receipt, Revision
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize(
     "seam",

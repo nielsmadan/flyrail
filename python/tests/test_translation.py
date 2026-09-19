@@ -111,11 +111,9 @@ def test_neutral_combined_translation_vectors(tmp_path: Path, case: dict[str, An
     assert remove(bundle.id, target).status is OperationStatus.APPLIED
 
 
-@pytest.mark.parametrize("platform", list(Platform))
-@pytest.mark.parametrize("case", VECTORS["cases"], ids=lambda case: case["name"])
-def test_neutral_translation_and_lifecycle_vectors(
+def vector_context(
     tmp_path: Path, case: dict[str, Any], platform: Platform
-) -> None:
+) -> tuple[RenderContext, Bundle, RenderedBundle]:
     target = (
         Target.project(case["agent"], tmp_path)
         if case["scope"] == "project"
@@ -136,7 +134,54 @@ def test_neutral_translation_and_lifecycle_vectors(
             "artifacts": [case["artifact"]],
         }
     )
-    rendered = render(bundle, selected)
+    return selected, bundle, render(bundle, selected)
+
+
+def assert_rendered_vector(
+    tmp_path: Path, case: dict[str, Any], rendered: RenderedBundle
+) -> tuple[Any, dict[str, Any] | None] | None:
+    expected = case["expected"]
+    if "unsupported" in expected:
+        assert codes(rendered) == {expected["unsupported"]}
+        return None
+    assert rendered.supported
+    (artifact,) = rendered.artifacts
+    if "directory" in expected:
+        assert artifact.destination.parent == tmp_path / expected["directory"]
+        assert artifact.destination.name.endswith(expected["suffix"])
+    else:
+        assert artifact.destination == tmp_path / expected["destination"]
+    expected_value = expected.get("value")
+    if "cwd_from_root" in expected:
+        expected_value = {**expected_value, "cwd": str(tmp_path / expected["cwd_from_root"])}
+    if isinstance(artifact.content, StructuredContent):
+        assert artifact.content.format == DocumentFormat(expected["format"])
+        assert artifact.content.value == freeze_value(expected_value)
+        assert [part.name for part in artifact.content.selector.parts] == [expected["key"], "tools"]  # type: ignore[union-attr]
+    elif isinstance(artifact.content, SectionContent):
+        assert artifact.content.text == expected["text"]
+    else:
+        assert isinstance(artifact.content, FileContent)
+        assert artifact.content.data.decode() == expected["text"]
+    return artifact, expected_value
+
+
+@pytest.mark.parametrize("platform", list(Platform))
+@pytest.mark.parametrize("case", VECTORS["cases"], ids=lambda case: case["name"])
+def test_neutral_translation_vectors(
+    tmp_path: Path, case: dict[str, Any], platform: Platform
+) -> None:
+    _selected, _bundle, rendered = vector_context(tmp_path, case, platform)
+    assert_rendered_vector(tmp_path, case, rendered)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("platform", list(Platform))
+@pytest.mark.parametrize("case", VECTORS["cases"], ids=lambda case: case["name"])
+def test_neutral_translation_and_lifecycle_vectors(
+    tmp_path: Path, case: dict[str, Any], platform: Platform
+) -> None:
+    selected, bundle, rendered = vector_context(tmp_path, case, platform)
     installation = selected.installation(tmp_path / "private-index")
     expected = case["expected"]
     if "unsupported" in expected:

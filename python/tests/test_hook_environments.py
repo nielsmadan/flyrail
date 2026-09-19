@@ -7,6 +7,8 @@ from test_hooks import install, invoke, make_hook
 
 from flyrail import EnvRef
 
+pytestmark = pytest.mark.integration
+
 NAMES = ["__proto__", "constructor", "toString", "FLYRAIL_TEST_ORDINARY"]
 
 

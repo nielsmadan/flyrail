@@ -36,6 +36,8 @@ from flyrail import (
     sync,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize(
     "host,event,outcome",
