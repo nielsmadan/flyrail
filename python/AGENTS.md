@@ -11,8 +11,9 @@ Public prose belongs in documentation. Prefer clear names over comments and docs
 
 Use `just check` for the shared Ruff formatting/lint/security, strict mypy, and
 pytest branch-coverage checks. `just format` formats Python code. The same commands
-are available through `python3 scripts/check.py` (Windows: `python`). Set
-`UV_PYTHON` to check another supported interpreter; checks default to Python 3.11.
+are available through `python3 scripts/check.py`. Set `UV_PYTHON` to check another
+supported interpreter; checks default to Python 3.11. Supported platforms are macOS
+and Linux; the Windows adapter is unsupported and not covered by CI.
 Keep dependencies pinned in pyproject.toml and regenerate uv.lock with `just lock`.
 `just release --dry-run` previews a Python release. Creating a release commit or
 tag, pushing, and publishing require explicit user authorization.

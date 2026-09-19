@@ -1,15 +1,13 @@
 # Supported destinations and limits
 
-Flyrail requires Python 3.11 or newer. Its native adapters target macOS, Linux and
-Windows. Native runner results are required before claiming support for a release;
+Flyrail requires Python 3.11 or newer. Its supported native adapters target macOS
+and Linux. Native runner results are required before claiming support for a release;
 a simulated native call is not a substitute.
 
-Windows mutations require Python **3.11.10+**, **3.12.4+**, or **3.13+** for private
-directory creation. See the documented
-[3.11 os.mkdir behavior](https://docs.python.org/3.11/library/os.html#os.mkdir) and
-[3.12 behavior](https://docs.python.org/3.12/library/os.html#os.mkdir).
-Earlier patches refuse mutations; source loading and read-only observation remain
-available.
+A Windows adapter exists in the source but is **unsupported**. It has never passed a
+native Windows runner, so no release claims Windows behavior and CI does not gate on
+it. Treat the Windows rows and paragraphs below as a description of the unverified
+adapter, not a support commitment.
 
 ## Content and destinations
 
@@ -40,7 +38,7 @@ Whole file/tree claims use their explicit mode contract.
 | --- | --- |
 | POSIX | Mode and owner/group are bound and preserved. Special mode bits, unsupported flags, extended ACLs or xattrs on managed resources refuse mutation. |
 | macOS | Opaque `com.apple.provenance` bytes are captured and must match staged/publication evidence. Other resource xattrs and extended ACLs refuse. |
-| Windows | Owner/group/DACL snapshots and supported native document replacement; read-only, encrypted, compressed, sparse or alternate-stream resources refuse. Tree/container metadata must satisfy the supported private-descriptor contract. |
+| Windows (unsupported) | Owner/group/DACL snapshots and supported native document replacement; read-only, encrypted, compressed, sparse or alternate-stream resources refuse. Tree/container metadata must satisfy the supported private-descriptor contract. |
 
 Ancestor snapshots include identity, mode/ownership and security evidence.
 Existing state, staging and backup directories must pass private-access checks;

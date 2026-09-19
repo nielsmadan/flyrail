@@ -800,7 +800,11 @@ def test_release_workflow_uses_pinned_actions_and_split_permissions() -> None:
     assert "id-token: write" not in verify
     assert "contents: write" not in verify
     assert "needs: verify" in platform_checks
-    assert platform_checks.count("- os:") == 5
+    assert re.findall(r'- os: (\S+)\n\s+python: "(\S+)"', platform_checks) == [
+        ("ubuntu-24.04", "3.14"),
+        ("macos-15", "3.11"),
+        ("macos-15", "3.14"),
+    ]
     assert "needs: [verify, platform-checks]" in pypi
     assert "id-token: write" in pypi
     assert "contents: write" not in pypi

@@ -115,13 +115,13 @@ Package checks compare complete archive contents against the selected source byt
 
 ## CI and maintenance
 
-[CI](../../.github/workflows/ci.yml) runs the shared check on Ubuntu 24.04, macOS 15
-and Windows 2025 with Python 3.11 and 3.14. `setup-python` supplies a modern
+[CI](../../.github/workflows/ci.yml) runs the shared check on Ubuntu 24.04 and
+macOS 15 with Python 3.11 and 3.14. `setup-python` supplies a modern
 3.14 bootstrap; pinned uv selects the tested interpreter using matrix `UV_PYTHON`
 and `UV_MANAGED_PYTHON=1`. The shared gate prints the running version/executable
-and verifies its base against `uv python find --system --managed-python`. This
-avoids the Windows 3.11.9 installer, whose private-directory behavior is unsupported.
-All six jobs must pass before a release claims those platforms. Workflows use pinned action commits, pinned uv, a
+and verifies its base against `uv python find --system --managed-python`.
+All four jobs must pass before a release claims those platforms. Windows 2025 is
+not in the matrix: the suite has never passed there, so Windows is unsupported. Workflows use pinned action commits, pinned uv, a
 checksum-pinned actionlint archive and read-only repository permissions.
 
 [Dependabot](../../.github/dependabot.yml) groups weekly Python dependency updates

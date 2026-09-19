@@ -33,10 +33,7 @@ uv pip install --python .cache/example-venv/bin/python . examples/filesystem exa
 .cache/example-venv/bin/flyrail-checksum ai install --target .cache/demo-checksum-skills
 ```
 
-On Windows, virtual-environment executables are under `Scripts`:
-`Scripts/python.exe`, `Scripts/flyrail-notes.exe`, and
-`Scripts/flyrail-checksum.exe`. Use those paths in the commands above. The example
-destinations stay inside the checkout's ignored cache.
+The example destinations stay inside the checkout's ignored cache.
 
 Run `just check-package` to exercise built distributions with the pinned tools.
 It retains its artifacts and disposable installation under
@@ -93,7 +90,7 @@ and no library calls print or exit.
 The checksum wheel includes the manifest, `SKILL.md`, a binary fixture,
 `scripts/verify_checksum.py`, and `scratch/README.txt`. The manifest declares
 executable intent; unpacked archive permission bits are not the authority.
-Flyrail applies that intent on POSIX and records it on Windows.
+Flyrail applies that intent on POSIX.
 
 Git does not track empty directories, and Hatchling 1.32.0 omits them from wheels.
 Flyrail preserves the tree the resource provider actually supplies; it cannot

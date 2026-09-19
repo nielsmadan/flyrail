@@ -115,7 +115,7 @@ changes; its original content baseline does not own file-wide permissions.
 Whole file/tree modes follow their explicit content contract.
 
 Private state, baselines and recovery payloads stay on the resource volume.
-Supported Windows document publication journals its temporary private-DACL
+The unsupported Windows adapter's document publication journals its private-DACL
 transition; interruption can leave the public file restricted until recovery
 restores its original descriptor. Unsupported metadata fails without a weaker
 in-place fallback. See [platform support](support.md).

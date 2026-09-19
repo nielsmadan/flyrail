@@ -180,10 +180,6 @@ jobs:
             python: "3.11"
           - os: macos-15
             python: "3.14"
-          - os: windows-2025
-            python: "3.11"
-          - os: windows-2025
-            python: "3.14"
     env:
       UV_PYTHON: ${{ matrix.python }}
       UV_MANAGED_PYTHON: "1"

@@ -48,9 +48,9 @@ just check-workflow
 Install the published Python distribution with `python -m pip install pyflyrail`;
 the import package is `flyrail`.
 
-Without just, run `python3 python/scripts/check.py check` from this directory
-(Windows: `python`). See [Python development](python/docs/development.md) for tool
-setup and the individual build/test commands. Generated logs, test installations,
-reports and build outputs stay in ignored local directories.
+Without just, run `python3 python/scripts/check.py check` from this directory.
+See [Python development](python/docs/development.md) for tool setup and the
+individual build/test commands. Generated logs, test installations, reports and
+build outputs stay in ignored local directories.
 
 Licensed under the [MIT License](LICENSE).
