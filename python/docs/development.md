@@ -163,10 +163,13 @@ version. A read-only job reruns all release gates, builds and installs the sdist
 and wheel, and saves one verified artifact bundle. A separate OIDC-only job
 publishes the bundle to PyPI. Only after PyPI succeeds does a `contents: write`
 job create the GitHub Release and attach the same artifacts. The local helper
-reports the workflow and waits for publication.
+prints the workflow and release locations; it does not require the GitHub CLI and
+does not wait for publication. Follow the printed workflow link to confirm it.
 
 If publication fails after the tag is pushed, fix the workflow on `main` and
-retry the existing tag. Never move or replace a published tag:
+retry the existing tag from the workflow's Actions page with **Run workflow** on
+`main`, supplying the tag. Never move or replace a published tag. With the GitHub
+CLI available the same retry is:
 
 ```sh
 gh workflow run release-python.yml --ref main -f tag=python-v0.1.0

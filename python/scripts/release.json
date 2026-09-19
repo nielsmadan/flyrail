@@ -8,7 +8,7 @@
     ["just", "audit-dependencies"],
     ["just", "check-workflow"]
   ],
-  "tools": ["git", "gh", "just", "uvx"],
+  "tools": ["git", "just", "uvx"],
   "stages": [
     {
       "files": [

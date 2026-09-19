@@ -5,7 +5,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -431,78 +430,12 @@ def prepare(root: Path, config: ReleaseConfig, version: str) -> None:
         clean(root)
 
 
-def report_publication(root: Path, config: ReleaseConfig, tag: str, revision: str) -> None:
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        runs = json.loads(
-            run(
-                root,
-                "gh",
-                "run",
-                "list",
-                "--repo",
-                config["repository"],
-                "--workflow",
-                config["workflow"],
-                "--event",
-                "push",
-                "--commit",
-                revision,
-                "--json",
-                "databaseId,headBranch,url",
-                "--limit",
-                "20",
-            )
-        )
-        matches = [item for item in runs if item["headBranch"] == tag]
-        if matches:
-            workflow_run = matches[0]
-            break
-        time.sleep(3)
-    else:
-        raise ReleaseError(
-            f"{tag} was pushed, but its release workflow has not appeared. Check GitHub Actions."
-        )
-    print("Publication: " + workflow_run["url"], flush=True)
-    deadline = time.monotonic() + 7200
-    while time.monotonic() < deadline:
-        result = json.loads(
-            run(
-                root,
-                "gh",
-                "run",
-                "view",
-                str(workflow_run["databaseId"]),
-                "--repo",
-                config["repository"],
-                "--json",
-                "status,conclusion",
-            )
-        )
-        if result["status"] == "completed":
-            if result["conclusion"] != "success":
-                raise ReleaseError(
-                    f"Publication finished with {result['conclusion']}: {workflow_run['url']}"
-                )
-            published = json.loads(
-                run(
-                    root,
-                    "gh",
-                    "release",
-                    "view",
-                    tag,
-                    "--repo",
-                    config["repository"],
-                    "--json",
-                    "url,isDraft",
-                )
-            )
-            if published["isDraft"] is not False:
-                raise ReleaseError(f"Expected a published release: {published['url']}")
-            print("Released: " + published["url"])
-            return
-        time.sleep(5)
-    raise ReleaseError("Publication is still running: " + workflow_run["url"])
+def report_publication(config: ReleaseConfig, tag: str) -> None:
+    repository = config["repository"]
+    workflow = config["workflow"]
+    print(f"\nPushed {tag}. Publishing {config['publication']}.")
+    print(f"Workflow:  https://github.com/{repository}/actions/workflows/{workflow}")
+    print(f"Release:   https://github.com/{repository}/releases/tag/{tag}")
 
 
 def proposal(
@@ -550,7 +483,6 @@ def main() -> None:
             print("Check:     " + " ".join(command))
         print("Dry run: checks and publication were not run.")
         return
-    run(root, "gh", "repo", "view", config["repository"], "--json", "nameWithOwner")
     if args.yes and version is None:
         raise ReleaseError("No automatic release is due. Supply an explicit version or bump.")
     for command in config["checks"]:
@@ -582,7 +514,7 @@ def main() -> None:
         "refs/tags/" + tag,
         capture=False,
     )
-    report_publication(root, config, tag, run(root, "git", "rev-parse", "HEAD"))
+    report_publication(config, tag)
 
 
 if __name__ == "__main__":
