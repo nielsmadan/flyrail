@@ -12,6 +12,8 @@ from unittest.mock import Mock
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = ROOT.parent
 GIT = shutil.which("git") or ""
@@ -350,6 +352,23 @@ def test_inspect_accepts_expected_repository_state(
     state = release.inspect(root, release_config())
     assert state["head"] == git(root, "rev-parse", "HEAD")
     assert state["latest"] is None
+    assert state["messages"] == ["feat: initial Python release"]
+
+
+def test_inspect_ignores_inherited_git_repository_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _remote = repository(tmp_path)
+    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    git(caller, "init", "--initial-branch=main")
+    add_commit(caller, "refs/heads/main", "test: caller", "caller.txt", "caller\n")
+    git(caller, "reset", "--hard", "HEAD")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(caller / ".git/index"))
+    monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
+    state = release.inspect(root, release_config())
+    assert state["head"] == git(root, "rev-parse", "HEAD")
     assert state["messages"] == ["feat: initial Python release"]
 
 

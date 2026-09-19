@@ -10,6 +10,18 @@ from typing import TypedDict, cast
 
 SEMVER_PARTS = 3
 
+GIT_CONTEXT_VARIABLES = (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_INDEX_VERSION",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REFLOG_ACTION",
+    "GIT_WORK_TREE",
+)
+
 
 class ReleaseError(Exception):
     pass
@@ -143,6 +155,8 @@ def load_config(path: Path) -> ReleaseConfig:
 
 def run(root: Path, *args: str, capture: bool = True) -> str:
     environment = os.environ.copy()
+    for name in GIT_CONTEXT_VARIABLES:
+        environment.pop(name, None)
     environment.setdefault("UV_TOOL_DIR", str(root / ".cache/uv/tools"))
     environment.setdefault("UV_CACHE_DIR", str(root / ".cache/uv/cache"))
     result = subprocess.run(  # noqa: S603
