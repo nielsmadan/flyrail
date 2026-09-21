@@ -131,13 +131,25 @@ on its result.
 ## Plan summaries
 
 `ChangeAction` classifies one planned resource: `CREATE`, `UPDATE`, `DELETE`,
-`UNCHANGED` or `CONFLICT`. `PlannedChange(artifact_id, family, kind, destination,
-action)` describes one resource of a `LifecyclePreview`; `artifact_id` and
-`family` are `None` when no rendered artifact matches, such as in a removal plan.
+`UNCHANGED` or `CONFLICT`. `CONFLICT` covers both a resource whose plan carries an
+error and one whose plan needs recovery, which together are what make
+`LifecyclePreview.applicable` false.
+
+`PlannedChange(artifact_ids, families, kind, destination, action, error,
+recovery_paths)` describes one resource of a `LifecyclePreview`. Several rendered
+artifacts can share one destination — two skills in one skill container, two
+instruction artifacts in one `AGENTS.md`, two MCP servers in one `.mcp.json` — so
+`artifact_ids` and `families` are parallel tuples covering every artifact that
+lands there, ordered by artifact id: `families[i]` is the family of
+`artifact_ids[i]`. Both are empty when no rendered artifact matches, such as in a
+removal plan. `error` and `recovery_paths` come from the resource's own plan and
+say what a `CONFLICT` is.
+
 `PlanSummary(agent, scope, surface, applicable, changes, notices, error)` is a
 read-only view of a preview: `agent`, `scope` and `surface` come from the
 preview's routing context and are `None` for a `Target.directory` installation;
-the remaining fields are copied from the preview unchanged.
+the remaining fields are copied from the preview unchanged. `error` is the
+target-level error; per-resource errors live on each `PlannedChange`.
 
 `summarize(preview)` builds a `PlanSummary` from the `LifecyclePreview` returned
 by `preview` or `preview_removal`, performing no filesystem or environment reads.

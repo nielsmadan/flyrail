@@ -71,9 +71,9 @@ targets = {
 ```
 
 A real host offers whichever agents `found` actually reported; keeping two agents
-here keeps the example free of a separate concern: Cursor, OpenCode and Pi also
-default to `AGENTS.md` at the project root, and Copilot to `.mcp.json` alongside
-Claude. Applying one agent's preview changes that shared file on disk, and
+here keeps the example free of a separate concern: Codex, Cursor, OpenCode and Pi
+all default to `AGENTS.md` at the project root, and Copilot to `.mcp.json`
+alongside Claude. Applying one agent's preview changes that shared file on disk, and
 `apply_preview` rejects any other already-built preview whose precondition that
 apply changed (see [Installation, update and removal](lifecycle.md)) — so a host
 offering several agents that share a destination should apply promptly after
@@ -106,9 +106,22 @@ for agent, proposal in previews.items():
 ```
 
 Each `PlannedChange` carries the destination and a `ChangeAction`: `CREATE`,
-`UPDATE`, `DELETE`, `UNCHANGED` or `CONFLICT`. `artifact_id` and `family` are
-`None` when no rendered artifact matches the resource, which is normal for a
-removal plan. `PlanSummary.agent`, `.scope` and `.surface` come from the preview's
+`UPDATE`, `DELETE`, `UNCHANGED` or `CONFLICT`. Several rendered artifacts can share
+one destination, so `artifact_ids` and `families` are parallel tuples covering all
+of them, ordered by artifact id; both are empty when no rendered artifact matches
+the resource, which is normal for a removal plan. A `CONFLICT` change carries the
+resource's own `error` and `recovery_paths`, which is what a host needs to say
+what conflicts; `PlanSummary.error` reports the target as a whole and is set
+independently:
+
+```python
+for change in summarize(previews[Agent.CLAUDE]).changes:
+    print(change.action.value, ",".join(change.artifact_ids) or "-", change.destination)
+    if change.action.value == "conflict":
+        print("  ", change.error, change.recovery_paths)
+```
+
+`PlanSummary.agent`, `.scope` and `.surface` come from the preview's
 routing context and are `None` for a `Target.directory` installation.
 
 ## Deselecting an agent needs no API

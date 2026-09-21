@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from flyrail._resource_models import ResourceKind
+from flyrail._resource_models import ResourceKind, absolute, sequence
 from flyrail.artifacts import Family
 from flyrail.configuration import LifecyclePreview, ResourcePlan
 from flyrail.observations import TargetError
-from flyrail.rendered import Notice
+from flyrail.rendered import Notice, RenderedArtifact
 from flyrail.targets import Agent, Surface, TargetScope
 
 
@@ -20,19 +20,30 @@ class ChangeAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PlannedChange:
-    artifact_id: str | None
-    family: Family | None
+    artifact_ids: tuple[str, ...]
+    families: tuple[Family, ...]
     kind: ResourceKind
     destination: Path
     action: ChangeAction
+    error: TargetError | None = None
+    recovery_paths: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, ResourceKind) or not isinstance(self.action, ChangeAction):
             raise TypeError("planned changes require a ResourceKind and ChangeAction")
-        if self.family is not None and not isinstance(self.family, Family):
-            raise TypeError("planned change family must be a Family")
+        object.__setattr__(self, "artifact_ids", sequence(self.artifact_ids, str))
+        object.__setattr__(self, "families", tuple(self.families))
+        if any(not isinstance(family, Family) for family in self.families):
+            raise TypeError("planned change families must be Family values")
+        if len(self.artifact_ids) != len(self.families):
+            raise ValueError("planned change artifact ids and families must agree")
+        if self.error is not None and type(self.error) is not TargetError:
+            raise TypeError("planned change error must be a TargetError")
         if not isinstance(self.destination, Path) or not self.destination.is_absolute():
             raise ValueError("planned change destination must be an absolute Path")
+        object.__setattr__(self, "recovery_paths", tuple(self.recovery_paths))
+        for path in self.recovery_paths:
+            absolute(path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,14 +57,26 @@ class PlanSummary:
     error: TargetError | None
 
     def __post_init__(self) -> None:
+        if (
+            (self.agent is not None and not isinstance(self.agent, Agent))
+            or (self.scope is not None and not isinstance(self.scope, TargetScope))
+            or (self.surface is not None and not isinstance(self.surface, Surface))
+        ):
+            raise TypeError("plan summary routing must use Agent, TargetScope and Surface values")
         if type(self.applicable) is not bool:
             raise TypeError("plan summary applicability must be a bool")
+        if self.error is not None and type(self.error) is not TargetError:
+            raise TypeError("plan summary error must be a TargetError")
+        object.__setattr__(self, "changes", tuple(self.changes))
         if any(type(change) is not PlannedChange for change in self.changes):
             raise TypeError("plan summary changes must be PlannedChange values")
+        object.__setattr__(self, "notices", sequence(self.notices, Notice))
 
 
 def _action(plan: ResourcePlan) -> ChangeAction:
     if plan.error is not None:
+        return ChangeAction.CONFLICT
+    if plan.recovery_paths:
         return ChangeAction.CONFLICT
     if plan.previous == plan.receipt and plan.before == plan.after:
         return ChangeAction.UNCHANGED
@@ -68,17 +91,21 @@ def summarize(preview: LifecyclePreview) -> PlanSummary:
     if type(preview) is not LifecyclePreview:
         raise TypeError("summarize requires a LifecyclePreview")
     routing = dict(preview.target.routing_context)
-    artifacts = {artifact.destination: artifact for artifact in preview.rendered.artifacts}
+    artifacts: dict[Path, list[RenderedArtifact]] = {}
+    for artifact in preview.rendered.artifacts:
+        artifacts.setdefault(artifact.destination, []).append(artifact)
     changes = []
     for plan in preview.resources:
-        artifact = artifacts.get(plan.resource.destination)
+        matched = sorted(artifacts.get(plan.resource.destination, ()), key=lambda item: item.id)
         changes.append(
             PlannedChange(
-                None if artifact is None else artifact.id,
-                None if artifact is None else artifact.family,
+                tuple(artifact.id for artifact in matched),
+                tuple(artifact.family for artifact in matched),
                 plan.resource.kind,
                 plan.resource.destination,
                 _action(plan),
+                plan.error,
+                plan.recovery_paths,
             )
         )
     agent = routing.get("agent")

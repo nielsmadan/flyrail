@@ -95,6 +95,16 @@ def test_claude_desktop_application_is_not_claude_code(tmp_path: Path) -> None:
     assert detect_agents(path=str(tmp_path / "empty"), applications=[directory]) == ()
 
 
+def test_non_executable_files_are_not_evidence(tmp_path: Path) -> None:
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    candidate = binaries / "claude"
+    candidate.write_text("#!/bin/sh\nexit 0\n")
+    candidate.chmod(0o644)
+
+    assert detect_agents(path=str(binaries), applications=()) == ()
+
+
 def test_configuration_directories_are_not_evidence(tmp_path: Path) -> None:
     for name in (".claude", ".codex", ".agents", ".opencode", ".pi", ".cursor", ".copilot"):
         (tmp_path / name).mkdir()
