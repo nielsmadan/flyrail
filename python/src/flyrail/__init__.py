@@ -52,6 +52,7 @@ from flyrail.destinations import (
     instruction_destination,
     mcp_destination,
 )
+from flyrail.discovery import AgentPresence, detect_agents
 from flyrail.editors import (
     Acquisition,
     ArrayPosition,
@@ -118,6 +119,7 @@ from flyrail.values import (
 __all__ = [
     "Acquisition",
     "Agent",
+    "AgentPresence",
     "Ancestor",
     "ArrayPosition",
     "ArrayValue",
@@ -209,6 +211,7 @@ __all__ = [
     "apply_preview",
     "capabilities",
     "content_claim",
+    "detect_agents",
     "edit_document",
     "freeze_value",
     "inspect",
