@@ -74,6 +74,7 @@ shows an in-memory instruction example and explains explicit takeover/adoption.
 - [Command hooks](https://github.com/nielsmadan/flyrail/blob/main/python/docs/hooks.md)
 - [Destinations and inspection](https://github.com/nielsmadan/flyrail/blob/main/python/docs/inspection.md)
 - [Lifecycle and recovery](https://github.com/nielsmadan/flyrail/blob/main/python/docs/lifecycle.md)
+- [Developer integration walkthrough](https://github.com/nielsmadan/flyrail/blob/main/python/docs/integration.md)
 - [Examples](https://github.com/nielsmadan/flyrail/blob/main/python/docs/examples.md)
 - [Support and limits](https://github.com/nielsmadan/flyrail/blob/main/python/docs/support.md)
 - [Shared formats](https://github.com/nielsmadan/flyrail/tree/main/spec)

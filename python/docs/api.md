@@ -1,6 +1,6 @@
 # Public Python API
 
-[Bundles and rendered content](#bundles-and-rendered-content) · [Configuration lifecycle](#configuration-lifecycle) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
+[Bundles and rendered content](#bundles-and-rendered-content) · [Configuration lifecycle](#configuration-lifecycle) · [Agent discovery](#agent-discovery) · [Plan summaries](#plan-summaries) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
 
 Import supported names from `flyrail`. Bundles, previews, observations and results
 are immutable snapshots. The library is synchronous; the application chooses
@@ -108,6 +108,41 @@ supported rendering. This pure comparison uses the captured observation without
 reading files, resolving environment variables or checking host readiness.
 A preview checks proposed acquisitions and retirements
 as well. [Lifecycle](lifecycle.md) explains these distinctions and replacement.
+
+## Agent discovery
+
+`detect_agents(*, path=None, applications=None)` returns a tuple of
+`AgentPresence`, one per `Agent` with at least one piece of evidence on the host.
+Called with no arguments it searches the process `PATH` and, on macOS only,
+`/Applications` and `~/Applications`; the keyword arguments exist so callers can
+substitute an explicit search list, including in tests. `AgentPresence.executable`
+is the resolved absolute path of a matching binary; `AgentPresence.application` is
+a matching `.app` bundle. Results follow `Agent` declaration order.
+
+Evidence is not proof of usability. `pi` is a common binary name and can resolve
+to unrelated tooling on `PATH`. A present `Visual Studio Code.app` shows the
+editor is installed, not that its Copilot extension is. A Cursor or VS Code
+install on Linux with no CLI shim on `PATH` produces no evidence at all, because
+application-bundle detection only runs on macOS. `detect_agents` reports
+evidence; it never selects, prints or prompts, so the caller decides which
+agents to offer. [The developer integration walkthrough](integration.md) builds
+on its result.
+
+## Plan summaries
+
+`ChangeAction` classifies one planned resource: `CREATE`, `UPDATE`, `DELETE`,
+`UNCHANGED` or `CONFLICT`. `PlannedChange(artifact_id, family, kind, destination,
+action)` describes one resource of a `LifecyclePreview`; `artifact_id` and
+`family` are `None` when no rendered artifact matches, such as in a removal plan.
+`PlanSummary(agent, scope, surface, applicable, changes, notices, error)` is a
+read-only view of a preview: `agent`, `scope` and `surface` come from the
+preview's routing context and are `None` for a `Target.directory` installation;
+the remaining fields are copied from the preview unchanged.
+
+`summarize(preview)` builds a `PlanSummary` from the `LifecyclePreview` returned
+by `preview` or `preview_removal`, performing no filesystem or environment reads.
+Use it to show a user what a pending `apply_preview` call would do before making
+it. [The developer integration walkthrough](integration.md) prints one per agent.
 
 ## Skill convenience API
 
