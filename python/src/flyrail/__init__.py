@@ -104,6 +104,7 @@ from flyrail.rendered import (
     RenderedArtifact,
     RenderedBundle,
 )
+from flyrail.summary import ChangeAction, PlannedChange, PlanSummary, summarize
 from flyrail.targets import Agent, Platform, Surface, Target, TargetScope
 from flyrail.translation import render, render_many
 from flyrail.values import (
@@ -130,6 +131,7 @@ __all__ = [
     "BundleEntry",
     "BundleIdentity",
     "Capability",
+    "ChangeAction",
     "Claim",
     "ClaimObservation",
     "Command",
@@ -179,6 +181,8 @@ __all__ = [
     "OwnedSelection",
     "Ownership",
     "Placement",
+    "PlanSummary",
+    "PlannedChange",
     "Platform",
     "Position",
     "RenderContext",
@@ -227,6 +231,7 @@ __all__ = [
     "render_many",
     "render_skills",
     "semantic_bytes",
+    "summarize",
     "sync",
     "uninstall",
     "update",
