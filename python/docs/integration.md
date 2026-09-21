@@ -33,10 +33,10 @@ should account for three gaps:
 
 Render and install into a separate `RenderContext` and `InstallationTarget` for
 each agent the developer offers. Separate targets are what make later per-agent
-removal possible: removing Codex's target cannot touch Claude's resources, even
-though both were installed from the same bundle into the same project. The rest
-of this walkthrough offers two agents that `found` can report evidence for,
-Claude and Codex:
+removal possible: removing one agent's target can never touch another agent's
+resources, even when both were rendered from the same bundle into the same
+project. The rest of this walkthrough offers two agents that `found` can
+report evidence for, Claude and Codex:
 
 ```python
 from pathlib import Path
@@ -210,7 +210,10 @@ summarize(removal).changes  # DELETE for both CLAUDE.md and .mcp.json
 apply_preview(removal)
 ```
 
-Only Claude's resources are affected. Codex's target was never previewed or
-applied here, and removing Claude's target cannot reach it — the same separation
-from [one target per agent](#one-target-per-agent) that let the developer offer,
+Only Claude's resources are affected. Codex's preview was built and shown
+earlier, but it was filtered out of `selected` and never reached
+`apply_preview`, so its target still holds whatever it held before this
+section — and removing Claude's target cannot reach it regardless, since the
+two targets never shared an index. That separation from
+[one target per agent](#one-target-per-agent) is what let the developer offer,
 apply and now remove agents independently.
