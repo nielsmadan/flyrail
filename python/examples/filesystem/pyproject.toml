@@ -9,7 +9,7 @@ description = "A notes word counter embedding Flyrail filesystem bundles."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["pyflyrail==0.1.0"]
+dependencies = ["pyflyrail==0.2.0"]
 
 [project.scripts]
 flyrail-notes = "flyrail_example_notes.cli:main"

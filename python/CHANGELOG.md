@@ -3,6 +3,19 @@
 All notable user-facing changes to Flyrail for Python. Package versions are independent from
 configuration bundle labels and shared format schema versions.
 
+## [0.2.0] - 2026-09-22
+
+
+### Features
+
+- Report installed agents
+- Summarize installation plans
+
+
+### Bug Fixes
+
+- Report every artifact and error a planned change covers
+
 ## [0.1.0] - 2026-09-20
 
 
@@ -21,5 +34,6 @@ configuration bundle labels and shared format schema versions.
 - Correct Windows filesystem semantics
 - Ignore inherited git context in the release helper
 
+[0.2.0]: https://github.com/nielsmadan/flyrail/compare/python-v0.1.0..python-v0.2.0
 [0.1.0]: https://github.com/nielsmadan/flyrail/tree/python-v0.1.0
 
