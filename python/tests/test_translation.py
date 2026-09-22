@@ -46,6 +46,7 @@ from flyrail import (
     render_skills,
     sync,
 )
+from flyrail.destinations import TRANSLATABLE_AGENTS, _user_directory, require_translatable
 
 VECTORS = json.loads((FIXTURES / "translations.json").read_text(encoding="utf-8"))
 
@@ -607,3 +608,19 @@ def test_copilot_opaque_alternate_reports_discovery_precedence(tmp_path: Path) -
     assert notice.kind is NoticeKind.ACTIVATION
     assert str(tmp_path / ".mcp.json") in notice.message
     assert str(tmp_path / ".github/mcp.json") in notice.message
+
+
+def test_every_translatable_agent_passes_the_gate(tmp_path: Path) -> None:
+    for agent in TRANSLATABLE_AGENTS:
+        selected = RenderContext(Target.project(agent, tmp_path), Platform.LINUX)
+        require_translatable(selected)
+
+
+def test_translatable_agents_are_a_subset_of_the_enum() -> None:
+    assert set(Agent) >= TRANSLATABLE_AGENTS
+
+
+def test_user_directory_covers_every_translatable_agent(tmp_path: Path) -> None:
+    for agent in TRANSLATABLE_AGENTS:
+        selected = RenderContext(Target.user(agent, home=tmp_path), Platform.LINUX)
+        assert _user_directory(selected) is not None

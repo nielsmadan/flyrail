@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 
 from flyrail._hook_translation import hook_artifacts
-from flyrail._mcp_translation import UnsupportedTranslation, mcp_content
+from flyrail._mcp_translation import mcp_content
 from flyrail._resource_plan import artifact_claim
 from flyrail.artifacts import (
     Family,
@@ -16,7 +16,12 @@ from flyrail.artifacts import (
 )
 from flyrail.bundle import Bundle
 from flyrail.content import FileContent, Key, SectionContent, StructuredContent
-from flyrail.destinations import RenderContext, instruction_destination, mcp_destination
+from flyrail.destinations import (
+    RenderContext,
+    UnsupportedTranslation,
+    instruction_destination,
+    mcp_destination,
+)
 from flyrail.rendered import (
     Dependency,
     Notice,

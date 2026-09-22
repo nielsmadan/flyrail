@@ -3,7 +3,7 @@ import json
 import shlex
 from pathlib import Path
 
-from flyrail._mcp_translation import UnsupportedTranslation, _asset
+from flyrail._mcp_translation import _asset
 from flyrail.artifacts import AssetRef, EnvRef, Family, HookArtifact, HookEvent, HookOutcome
 from flyrail.bundle import Bundle
 from flyrail.content import (
@@ -16,7 +16,7 @@ from flyrail.content import (
     StructuredContent,
     TreeContent,
 )
-from flyrail.destinations import RenderContext, _user_directory
+from flyrail.destinations import RenderContext, UnsupportedTranslation, _user_directory
 from flyrail.hooks import HookShell
 from flyrail.models import BundleEntry
 from flyrail.rendered import Dependency, DependencyMode, Notice, NoticeKind, RenderedArtifact
@@ -175,19 +175,25 @@ def hook_artifacts(
         raise UnsupportedTranslation(
             "hook-runtime", "Native hooks require an explicit Node 24+ executable."
         )
-    native_directory = (
-        _user_directory(context)
-        if context.target.scope is TargetScope.USER
-        else context.root
-        / {
-            Agent.CLAUDE: ".claude",
-            Agent.CODEX: ".codex",
-            Agent.CURSOR: ".cursor",
-            Agent.COPILOT: ".github",
-            Agent.OPENCODE: ".opencode",
-            Agent.PI: ".pi",
-        }[agent]
-    )
+    if context.target.scope is TargetScope.USER:
+        native_directory = _user_directory(context)
+        if native_directory is None:
+            raise UnsupportedTranslation(
+                "agent-unsupported",
+                f"Flyrail detects {agent.value} but has no verified configuration translation.",
+            )
+    else:
+        native_directory = (
+            context.root
+            / {
+                Agent.CLAUDE: ".claude",
+                Agent.CODEX: ".codex",
+                Agent.CURSOR: ".cursor",
+                Agent.COPILOT: ".github",
+                Agent.OPENCODE: ".opencode",
+                Agent.PI: ".pi",
+            }[agent]
+        )
     base = (
         (context.asset_root or context.root / ".flyrail-assets") / bundle.id / ".hooks" / str(agent)
     )

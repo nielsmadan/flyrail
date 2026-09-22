@@ -7,6 +7,12 @@ from flyrail.hooks import HookRuntime
 from flyrail.targets import Agent, Platform, Surface, Target, TargetScope, _relocation
 
 
+class UnsupportedTranslation(Exception):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _path(value: Path) -> Path:
     if not isinstance(value, Path) or not value.is_absolute():
         raise ValueError("render routes must be absolute Paths")
@@ -91,7 +97,7 @@ class RenderContext:
         return InstallationTarget(index_root, routing_context=self.routing_context)
 
 
-def _user_directory(context: RenderContext) -> Path:
+def _user_directory(context: RenderContext) -> Path | None:
     agent = context.audience.agent
     paths = {
         Agent.CLAUDE: ("CLAUDE_CONFIG_DIR", ".claude"),
@@ -101,7 +107,10 @@ def _user_directory(context: RenderContext) -> Path:
         Agent.CURSOR: ("", ".cursor"),
         Agent.COPILOT: ("COPILOT_HOME", ".copilot"),
     }
-    variable, suffix = paths[agent]
+    entry = paths.get(agent)
+    if entry is None:
+        return None
+    variable, suffix = entry
     if context.surface is Surface.VSCODE:
         variable = ""
     value = dict(context.target.environment).get(variable)
@@ -114,31 +123,31 @@ def instruction_destination(context: RenderContext) -> Path | None:
         return context.instruction_path
     agent = context.audience.agent
     if context.target.scope is TargetScope.PROJECT:
-        return (
-            context.root
-            / {
-                Agent.CLAUDE: "CLAUDE.md",
-                Agent.CODEX: "AGENTS.md",
-                Agent.OPENCODE: "AGENTS.md",
-                Agent.PI: "AGENTS.md",
-                Agent.CURSOR: "AGENTS.md",
-                Agent.COPILOT: ".github/copilot-instructions.md",
-            }[agent]
-        )
-    if agent is Agent.CURSOR:
-        return None
-    if context.surface is Surface.VSCODE:
-        return _user_directory(context) / "instructions"
-    return (
-        _user_directory(context)
-        / {
+        name = {
             Agent.CLAUDE: "CLAUDE.md",
             Agent.CODEX: "AGENTS.md",
             Agent.OPENCODE: "AGENTS.md",
             Agent.PI: "AGENTS.md",
-            Agent.COPILOT: "copilot-instructions.md",
-        }[agent]
-    )
+            Agent.CURSOR: "AGENTS.md",
+            Agent.COPILOT: ".github/copilot-instructions.md",
+        }.get(agent)
+        return None if name is None else context.root / name
+    if agent is Agent.CURSOR:
+        return None
+    if context.surface is Surface.VSCODE:
+        directory = _user_directory(context)
+        return None if directory is None else directory / "instructions"
+    name = {
+        Agent.CLAUDE: "CLAUDE.md",
+        Agent.CODEX: "AGENTS.md",
+        Agent.OPENCODE: "AGENTS.md",
+        Agent.PI: "AGENTS.md",
+        Agent.COPILOT: "copilot-instructions.md",
+    }.get(agent)
+    if name is None:
+        return None
+    directory = _user_directory(context)
+    return None if directory is None else directory / name
 
 
 def mcp_destination(context: RenderContext) -> Path | None:
@@ -148,17 +157,15 @@ def mcp_destination(context: RenderContext) -> Path | None:
     if context.target.scope is TargetScope.PROJECT:
         if context.surface is Surface.VSCODE:
             return context.root / ".vscode/mcp.json"
-        return (
-            context.root
-            / {
-                Agent.CLAUDE: ".mcp.json",
-                Agent.CODEX: ".codex/config.toml",
-                Agent.OPENCODE: "opencode.json",
-                Agent.PI: ".pi/mcp.json",
-                Agent.CURSOR: ".cursor/mcp.json",
-                Agent.COPILOT: ".mcp.json",
-            }[agent]
-        )
+        name = {
+            Agent.CLAUDE: ".mcp.json",
+            Agent.CODEX: ".codex/config.toml",
+            Agent.OPENCODE: "opencode.json",
+            Agent.PI: ".pi/mcp.json",
+            Agent.CURSOR: ".cursor/mcp.json",
+            Agent.COPILOT: ".mcp.json",
+        }.get(agent)
+        return None if name is None else context.root / name
     if context.surface is Surface.VSCODE:
         return None
     if agent is Agent.CLAUDE:
@@ -168,16 +175,17 @@ def mcp_destination(context: RenderContext) -> Path | None:
         configured = dict(context.target.environment).get("OPENCODE_CONFIG")
         if configured:
             return _relocation(configured, context.root)
-    return (
-        _user_directory(context)
-        / {
-            Agent.CODEX: "config.toml",
-            Agent.OPENCODE: "opencode.json",
-            Agent.PI: "mcp.json",
-            Agent.CURSOR: "mcp.json",
-            Agent.COPILOT: "mcp-config.json",
-        }[agent]
-    )
+    name = {
+        Agent.CODEX: "config.toml",
+        Agent.OPENCODE: "opencode.json",
+        Agent.PI: "mcp.json",
+        Agent.CURSOR: "mcp.json",
+        Agent.COPILOT: "mcp-config.json",
+    }.get(agent)
+    if name is None:
+        return None
+    directory = _user_directory(context)
+    return None if directory is None else directory / name
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,9 +213,30 @@ class Capability:
             object.__setattr__(self, name, snapshot)
 
 
+TRANSLATABLE_AGENTS = frozenset(
+    {Agent.CLAUDE, Agent.CODEX, Agent.OPENCODE, Agent.PI, Agent.CURSOR, Agent.COPILOT}
+)
+
+
+def require_translatable(context: RenderContext) -> None:
+    agent = context.audience.agent
+    if agent not in TRANSLATABLE_AGENTS:
+        raise UnsupportedTranslation(
+            "agent-unsupported",
+            f"Flyrail detects {agent.value} but has no verified configuration translation.",
+        )
+
+
 def capabilities(context: RenderContext) -> tuple[Capability, ...]:
     if type(context) is not RenderContext:
         raise TypeError("capabilities require a RenderContext")
+    if context.audience.agent not in TRANSLATABLE_AGENTS:
+        return (
+            Capability(Family.SKILLS, False, False),
+            Capability(Family.INSTRUCTIONS, False, False),
+            Capability(Family.MCP, False, False),
+            Capability(Family.HOOKS, False, False),
+        )
     return (
         Capability(Family.SKILLS, True, True),
         Capability(

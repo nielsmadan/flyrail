@@ -3,15 +3,9 @@ from pathlib import Path
 
 from flyrail.artifacts import AssetRef, Command, EnvRef, HttpTransport, McpArtifact
 from flyrail.content import DocumentFormat, Key, Selector, StructuredContent
-from flyrail.destinations import RenderContext
+from flyrail.destinations import RenderContext, UnsupportedTranslation
 from flyrail.targets import Agent, Platform, Surface
 from flyrail.values import freeze_value
-
-
-class UnsupportedTranslation(Exception):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 def _literal(value: str, context: RenderContext, field: str) -> str:
