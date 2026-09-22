@@ -203,7 +203,7 @@ def lifecycle(host: Host) -> None:
         "unchanged",
     ]
     assert statuses(host.call("uninstall", active)) == ["unchanged", "unchanged"]
-    assert set(path.name for path in first.iterdir()) == {"foreign-skill", "untracked.txt"}
+    assert {path.name for path in first.iterdir()} == {"foreign-skill", "untracked.txt"}
     assert not later.exists()
     assert flyrail.ResourceAuthority(later).state_root.is_dir()
     assert (first / "foreign-skill/SKILL.md").read_bytes() == b"foreign owned bytes"

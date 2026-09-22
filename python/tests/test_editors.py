@@ -1171,8 +1171,10 @@ def test_toml_dotted_objects_preserve_foreign_semantics(parts: tuple[str, ...]) 
     [
         None,
         b"# foreign\n[mcp]\n",
-        b'[mcp . "test"] # header\ncommand="old"\n'
-        b'[mcp . "test" . env] # nested\nX="before"\n# gap\n[foreign]\nv=1\n',
+        (
+            b'[mcp . "test"] # header\ncommand="old"\n'
+            b'[mcp . "test" . env] # nested\nX="before"\n# gap\n[foreign]\nv=1\n'
+        ),
     ],
 )
 def test_toml_nested_mcp_snapshots_match_published_bytes(raw: bytes | None) -> None:

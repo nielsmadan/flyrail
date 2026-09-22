@@ -61,7 +61,7 @@ cache-dir = ".cache/ruff"
 extend-exclude = [".cache", "dist"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "SIM", "RUF"]
+extend-select = ["E", "F", "I", "UP", "B", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
@@ -69,6 +69,20 @@ select = ["E", "F", "I", "UP", "B", "S", "SIM", "RUF"]
 "scripts/hook_package_probe.py" = ["S101"]
 "scripts/configuration_package_probe.py" = ["S101"]
 "scripts/typed_consumer.py" = ["S101"]
+# Malformed JSON/TOML documents raise ValueError by design; TypeError is reserved for public-API constructor misuse (see models.py).
+"src/flyrail/_config_manifest.py" = ["TRY004"]
+"src/flyrail/_json_document.py" = ["TRY004"]
+"src/flyrail/_manifest.py" = ["TRY004"]
+"src/flyrail/_resource_io.py" = ["TRY004"]
+"src/flyrail/_resource_plan.py" = ["TRY004"]
+"src/flyrail/_toml_document.py" = ["TRY004"]
+"src/flyrail/_toml_layout.py" = ["TRY004"]
+"src/flyrail/bundle.py" = ["TRY004"]
+"src/flyrail/editors.py" = ["TRY004"]
+"src/flyrail/values.py" = ["TRY004"]
+# Tests pin how naive datetimes encode and compare; an aware-datetime row sits beside each.
+"tests/test_config_models.py" = ["S101", "DTZ001"]
+"tests/test_editors.py" = ["S101", "DTZ001"]
 
 [tool.mypy]
 python_version = "3.11"

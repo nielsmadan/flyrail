@@ -266,11 +266,11 @@ class ZipSource:
         if root not in self.entries or self.entries[root] is not None:
             raise ValueError(f"skill source must be an existing directory: {path}")
         result: list[BundleEntry] = []
-        for path, info in self.entries.items():
-            if path == root:
+        for entry_path, info in self.entries.items():
+            if entry_path == root:
                 result.append(BundleEntry(name))
-            elif path.startswith(root + "/"):
-                relative = path[len(root) + 1 :]
+            elif entry_path.startswith(root + "/"):
+                relative = entry_path[len(root) + 1 :]
                 data = None if info is None else self.archive.read(info)
                 result.append(BundleEntry(name + "/" + relative, data, relative in executables))
         return tuple(result)
