@@ -21,6 +21,7 @@ from flyrail.destinations import (
     UnsupportedTranslation,
     instruction_destination,
     mcp_destination,
+    require_translatable,
 )
 from flyrail.rendered import (
     Dependency,
@@ -266,6 +267,8 @@ def render(bundle: Bundle, context: RenderContext) -> RenderedBundle:
             continue
         selected.add(artifact.id)
         try:
+            if not isinstance(artifact, HookArtifact):
+                require_translatable(context)
             if isinstance(artifact, SkillArtifact):
                 artifacts.append(
                     RenderedArtifact(

@@ -16,7 +16,13 @@ from flyrail.content import (
     StructuredContent,
     TreeContent,
 )
-from flyrail.destinations import RenderContext, UnsupportedTranslation, _user_directory
+from flyrail.destinations import (
+    RenderContext,
+    UnsupportedTranslation,
+    _user_directory,
+    require_translatable,
+    untranslatable_message,
+)
 from flyrail.hooks import HookShell
 from flyrail.models import BundleEntry
 from flyrail.rendered import Dependency, DependencyMode, Notice, NoticeKind, RenderedArtifact
@@ -46,6 +52,7 @@ def _json(value: object) -> str:
 
 
 def _supported(artifact: HookArtifact, context: RenderContext) -> None:
+    require_translatable(context)
     agent = context.audience.agent
     if context.surface is Surface.VSCODE:
         raise UnsupportedTranslation(
@@ -178,10 +185,7 @@ def hook_artifacts(
     if context.target.scope is TargetScope.USER:
         native_directory = _user_directory(context)
         if native_directory is None:
-            raise UnsupportedTranslation(
-                "agent-unsupported",
-                f"Flyrail detects {agent.value} but has no verified configuration translation.",
-            )
+            raise UnsupportedTranslation("agent-unsupported", untranslatable_message(agent))
     else:
         native_directory = (
             context.root

@@ -12,6 +12,7 @@ class Agent(StrEnum):
     PI = "pi"
     CURSOR = "cursor"
     COPILOT = "copilot"
+    DROID = "droid"
 
 
 class TargetScope(StrEnum):
@@ -39,6 +40,7 @@ _PROJECT = {
     Agent.PI: (".pi", "skills"),
     Agent.CURSOR: (".cursor", "skills"),
     Agent.COPILOT: (".github", "skills"),
+    Agent.DROID: (".factory", "skills"),
 }
 _USER = {
     **_PROJECT,

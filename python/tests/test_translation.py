@@ -16,8 +16,11 @@ from flyrail import (
     Command,
     DocumentFormat,
     EnvRef,
+    ErrorCode,
     Family,
     FileContent,
+    HookArtifact,
+    HookEvent,
     HttpTransport,
     InstallationTarget,
     InstructionArtifact,
@@ -26,6 +29,7 @@ from flyrail import (
     NativeArtifact,
     NoticeKind,
     ObjectValue,
+    ObservationState,
     OperationStatus,
     Platform,
     RenderContext,
@@ -37,14 +41,21 @@ from flyrail import (
     Target,
     TargetScope,
     apply_preview,
+    capabilities,
     freeze_value,
+    inspect,
     inspect_installation,
+    install,
+    instruction_destination,
+    mcp_destination,
     preview,
     remove,
     render,
     render_many,
     render_skills,
     sync,
+    uninstall,
+    update,
 )
 from flyrail.destinations import TRANSLATABLE_AGENTS, _user_directory, require_translatable
 
@@ -261,6 +272,11 @@ def test_skills_reuse_the_existing_presets(tmp_path: Path, agent: Agent, scope: 
     target = (
         Target.project(agent, tmp_path) if scope == "project" else Target.user(agent, home=tmp_path)
     )
+    if agent is Agent.DROID:
+        rendered = render(bundle, RenderContext(target, Platform.LINUX))
+        assert rendered.artifacts == ()
+        assert [notice.code for notice in rendered.notices] == ["agent-unsupported"]
+        return
     rendered = render(bundle, RenderContext(target, Platform.LINUX))
     assert rendered.artifacts == render_skills(bundle, target).artifacts
     installation = InstallationTarget(tmp_path / "index")
@@ -611,16 +627,249 @@ def test_copilot_opaque_alternate_reports_discovery_precedence(tmp_path: Path) -
 
 
 def test_every_translatable_agent_passes_the_gate(tmp_path: Path) -> None:
+    assert len(TRANSLATABLE_AGENTS) == 6
     for agent in TRANSLATABLE_AGENTS:
         selected = RenderContext(Target.project(agent, tmp_path), Platform.LINUX)
         require_translatable(selected)
 
 
-def test_translatable_agents_are_a_subset_of_the_enum() -> None:
-    assert set(Agent) >= TRANSLATABLE_AGENTS
+def test_droid_is_the_only_untranslatable_agent() -> None:
+    assert set(Agent) - TRANSLATABLE_AGENTS == {Agent.DROID}
 
 
 def test_user_directory_covers_every_translatable_agent(tmp_path: Path) -> None:
+    assert len(TRANSLATABLE_AGENTS) == 6
     for agent in TRANSLATABLE_AGENTS:
         selected = RenderContext(Target.user(agent, home=tmp_path), Platform.LINUX)
         assert _user_directory(selected) is not None
+
+
+def test_destination_gaps_are_exactly_the_documented_ones(tmp_path: Path) -> None:
+    assert len(TRANSLATABLE_AGENTS) == 6
+    gaps = set()
+    for agent in TRANSLATABLE_AGENTS:
+        for scope, target in (
+            (TargetScope.PROJECT, Target.project(agent, tmp_path)),
+            (TargetScope.USER, Target.user(agent, home=tmp_path)),
+        ):
+            for surface in (Surface.CLI, Surface.VSCODE):
+                if surface is Surface.VSCODE and agent is not Agent.COPILOT:
+                    continue
+                selected = RenderContext(target, Platform.LINUX, surface)
+                for name, destination in (
+                    ("user-directory", _user_directory(selected)),
+                    ("instructions", instruction_destination(selected)),
+                    ("mcp", mcp_destination(selected)),
+                ):
+                    if destination is None:
+                        gaps.add((agent, scope, surface, name))
+    assert gaps == {
+        (Agent.CURSOR, TargetScope.USER, Surface.CLI, "instructions"),
+        (Agent.COPILOT, TargetScope.USER, Surface.VSCODE, "mcp"),
+    }
+    relocated = RenderContext(
+        Target.user(Agent.CLAUDE, env={"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(tmp_path)}),
+        Platform.LINUX,
+    )
+    assert mcp_destination(relocated) is None
+
+
+def test_droid_is_not_translatable() -> None:
+    assert Agent.DROID not in TRANSLATABLE_AGENTS
+
+
+def test_droid_refuses_instructions_and_mcp(tmp_path: Path) -> None:
+    bundle = bundle_of(
+        InstructionArtifact("guide", "Be careful.\n"),
+        McpArtifact("tools", "tools", Command(["server"])),
+    )
+    selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    rendered = render(bundle, selected)
+    assert rendered.artifacts == ()
+    assert {notice.code for notice in rendered.notices} == {"agent-unsupported"}
+    assert {notice.artifact_id for notice in rendered.notices} == {"guide", "tools"}
+
+
+def test_droid_capabilities_report_nothing_supported(tmp_path: Path) -> None:
+    selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    reported = capabilities(selected)
+    assert [capability.family for capability in reported] == [
+        Family.SKILLS,
+        Family.INSTRUCTIONS,
+        Family.MCP,
+        Family.HOOKS,
+    ]
+    assert [(capability.portable, capability.native) for capability in reported] == [
+        (False, False)
+    ] * 4
+
+
+def test_droid_refuses_hooks(tmp_path: Path) -> None:
+    bundle = bundle_of(
+        HookArtifact("guard", HookEvent.SESSION_START, Command(["check"]), timeout_ms=1000)
+    )
+    selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    rendered = render(bundle, selected)
+    assert rendered.artifacts == ()
+    assert [notice.code for notice in rendered.notices] == ["agent-unsupported"]
+
+
+def test_droid_refuses_a_native_artifact(tmp_path: Path) -> None:
+    bundle = bundle_of(
+        NativeArtifact(
+            "raw",
+            Family.INSTRUCTIONS,
+            Audience(Agent.DROID, TargetScope.PROJECT, Surface.CLI),
+            "notes.md",
+            FileContent(b"hello\n"),
+        )
+    )
+    selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    rendered = render(bundle, selected)
+    assert rendered.artifacts == ()
+    assert [notice.code for notice in rendered.notices] == ["agent-unsupported"]
+
+
+def test_a_droid_preview_is_not_applicable(tmp_path: Path) -> None:
+    bundle = bundle_of(InstructionArtifact("guide", "Be careful.\n"))
+    selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    rendered = render(bundle, selected)
+    proposal = preview(bundle, rendered, InstallationTarget(tmp_path / "index"))
+    assert not proposal.applicable
+
+
+def test_destinations_are_none_for_an_untranslatable_agent(tmp_path: Path) -> None:
+    for scope in (Target.project(Agent.DROID, tmp_path), Target.user(Agent.DROID, home=tmp_path)):
+        selected = RenderContext(scope, Platform.LINUX)
+        assert instruction_destination(selected) is None
+        assert mcp_destination(selected) is None
+
+
+def test_render_skills_refuses_an_untranslatable_agent(tmp_path: Path) -> None:
+    bundle = Bundle.from_memory(
+        {
+            "schema_version": 1,
+            "id": "skills",
+            "version": "one",
+            "skills": [{"name": "review", "path": "review"}],
+        },
+        [
+            BundleEntry("review/SKILL.md", b"---\nname: review\n---\nCheck it.\n"),
+            BundleEntry("review/empty"),
+        ],
+    )
+    target = Target.project(Agent.DROID, tmp_path)
+    rendered = render_skills(bundle, target)
+    assert rendered.artifacts == ()
+    assert [notice.code for notice in rendered.notices] == ["agent-unsupported"]
+
+
+def test_render_skills_still_works_for_a_directory_target(tmp_path: Path) -> None:
+    bundle = Bundle.from_memory(
+        {
+            "schema_version": 1,
+            "id": "skills",
+            "version": "one",
+            "skills": [{"name": "review", "path": "review"}],
+        },
+        [
+            BundleEntry("review/SKILL.md", b"---\nname: review\n---\nCheck it.\n"),
+            BundleEntry("review/empty"),
+        ],
+    )
+    target = Target.directory(tmp_path)
+    rendered = render_skills(bundle, target)
+    assert [artifact.id for artifact in rendered.artifacts] == ["review"]
+    assert rendered.notices == ()
+
+
+def test_droid_notices_cover_only_the_artifacts_the_context_selects(tmp_path: Path) -> None:
+    bundle = bundle_of(
+        NativeArtifact(
+            "claude-only",
+            Family.INSTRUCTIONS,
+            Audience(Agent.CLAUDE, TargetScope.PROJECT, Surface.CLI),
+            "notes.md",
+            FileContent(b"hello\n"),
+        ),
+        InstructionArtifact("guide", "Be careful.\n"),
+    )
+    selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    rendered = render(bundle, selected)
+    assert [artifact.id for artifact in bundle.artifacts] == ["claude-only", "guide"]
+    assert rendered.artifacts == ()
+    assert [(notice.artifact_id, notice.code) for notice in rendered.notices] == [
+        ("guide", "agent-unsupported")
+    ]
+
+
+def test_render_many_blocks_every_route_when_one_context_is_droid(tmp_path: Path) -> None:
+    bundle = bundle_of(InstructionArtifact("guide", "Be careful.\n"))
+    supported = RenderContext(Target.project(Agent.CLAUDE, tmp_path), Platform.LINUX)
+    refused = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
+    assert len(render_many(bundle, [supported]).artifacts) == 1
+    mixed = render_many(bundle, [supported, refused])
+    assert mixed.artifacts == ()
+    assert mixed.dependencies == ()
+    assert codes(mixed) == {"agent-unsupported"}
+
+
+def skill_bundle() -> Bundle:
+    return Bundle.from_memory(
+        {
+            "schema_version": 1,
+            "id": "skills",
+            "version": "one",
+            "skills": [{"name": "review", "path": "review"}],
+        },
+        [
+            BundleEntry("review/SKILL.md", b"---\nname: review\n---\nCheck it.\n"),
+            BundleEntry("review/empty"),
+        ],
+    )
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_the_skill_lifecycle_refuses_droid_without_touching_its_root(
+    tmp_path: Path, scope: str
+) -> None:
+    root = tmp_path / scope
+    root.mkdir()
+    bundle = skill_bundle()
+    target = (
+        Target.project(Agent.DROID, root)
+        if scope == "project"
+        else Target.user(Agent.DROID, home=root)
+    )
+    for results in (
+        install(bundle, [target]),
+        update(bundle, [target]),
+        uninstall("skills", [target]),
+    ):
+        (result,) = results
+        assert result.status is OperationStatus.FAILED
+        assert result.error is not None
+        assert result.error.code is ErrorCode.UNSUPPORTED
+        assert "droid" in result.error.message
+        assert list(root.rglob("*")) == []
+    (inspected,) = inspect(bundle, [target])
+    assert inspected.observation.state is ObservationState.UNKNOWN
+    assert inspected.observation.error is not None
+    assert inspected.observation.error.code is ErrorCode.UNSUPPORTED
+    assert list(root.rglob("*")) == []
+
+
+def test_the_skill_lifecycle_still_installs_at_a_directory_target(tmp_path: Path) -> None:
+    root = tmp_path / "container"
+    root.mkdir()
+    bundle = skill_bundle()
+    target = Target.directory(root)
+    (installed,) = install(bundle, [target])
+    assert installed.status is OperationStatus.APPLIED
+    assert installed.error is None
+    assert (root / "review/SKILL.md").read_bytes() == b"---\nname: review\n---\nCheck it.\n"
+    (inspected,) = inspect(bundle, [target])
+    assert inspected.observation.state is ObservationState.INSTALLED
+    (removed,) = uninstall("skills", [target])
+    assert removed.status is OperationStatus.APPLIED
+    assert not (root / "review").exists()

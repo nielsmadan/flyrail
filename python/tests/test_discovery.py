@@ -34,6 +34,26 @@ def test_detects_agents_by_executable(tmp_path: Path) -> None:
     assert found[0].application is None
 
 
+def test_droid_is_detected_from_its_executable(tmp_path: Path) -> None:
+    binary = tmp_path / "droid"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    found = detect_agents(path=str(tmp_path), applications=())
+    assert [presence.agent for presence in found] == [Agent.DROID]
+    assert found[0].executable == binary
+    assert found[0].application is None
+
+
+def test_droid_is_absent_without_an_executable(tmp_path: Path) -> None:
+    binaries = tmp_path / "bin"
+    executable(binaries, "claude")
+    (binaries / "droid").write_text("#!/bin/sh\nexit 0\n")
+
+    found = detect_agents(path=str(binaries), applications=())
+
+    assert [presence.agent for presence in found] == [Agent.CLAUDE]
+
+
 def test_omits_agents_without_evidence(tmp_path: Path) -> None:
     binaries = tmp_path / "bin"
     executable(binaries, "claude")

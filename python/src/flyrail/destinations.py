@@ -218,13 +218,14 @@ TRANSLATABLE_AGENTS = frozenset(
 )
 
 
+def untranslatable_message(agent: Agent) -> str:
+    return f"Flyrail detects {agent.value} but has no verified configuration translation."
+
+
 def require_translatable(context: RenderContext) -> None:
     agent = context.audience.agent
     if agent not in TRANSLATABLE_AGENTS:
-        raise UnsupportedTranslation(
-            "agent-unsupported",
-            f"Flyrail detects {agent.value} but has no verified configuration translation.",
-        )
+        raise UnsupportedTranslation("agent-unsupported", untranslatable_message(agent))
 
 
 def capabilities(context: RenderContext) -> tuple[Capability, ...]:

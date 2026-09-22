@@ -128,6 +128,33 @@ evidence; it never selects, prints or prompts, so the caller decides which
 agents to offer. [The developer integration walkthrough](integration.md) builds
 on its result.
 
+A reported agent is not necessarily one Flyrail can render for. `droid` is detected
+but has no translation: `capabilities` reports every family unsupported, and `render`
+returns no artifacts and an `agent-unsupported` notice for every artifact the render
+context selects. An artifact the context does not select — a `NativeArtifact` whose
+`Audience` names another agent, scope, surface or platform — is skipped before the
+refusal and carries no notice. A host offering detected agents should check
+`capabilities` before presenting one as installable.
+`Target.project(Agent.DROID, ...)` and `Target.user(Agent.DROID, ...)`
+construct successfully so that rendering can report why droid is unsupported. No
+artifact is ever routed to or written at the resulting `root` — every translation
+refuses first — but it is not a verified Factory destination, and it does appear in
+`RenderedBundle.routing_context`, which `render_many` uses to tell routes apart.
+
+The skill lifecycle refuses an untranslatable agent target before it resolves or
+locks anything: `install`, `update` and `uninstall` return `OperationStatus.FAILED`
+with an `ErrorCode.UNSUPPORTED` error, `inspect` returns
+`ObservationState.UNKNOWN` with the same error, and no entry is created below the
+target root in either scope. `Target.directory(...)` targets, which carry no agent,
+are unaffected.
+
+`render_many` blocks as one logical installation: if any selected context refuses an
+artifact, the combined result carries the notices and no artifacts at all, including
+for the routes that would otherwise have rendered. Passing a `droid` context
+alongside a Claude one therefore yields zero artifacts. A host seeding its context
+list from `detect_agents` should filter out agents `capabilities` reports as
+unsupported before calling `render_many`.
+
 ## Plan summaries
 
 `ChangeAction` classifies one planned resource: `CREATE`, `UPDATE`, `DELETE`,

@@ -14,6 +14,7 @@ _EXECUTABLES = {
     Agent.PI: "pi",
     Agent.CURSOR: "cursor",
     Agent.COPILOT: "copilot",
+    Agent.DROID: "droid",
 }
 
 _APPLICATIONS = {

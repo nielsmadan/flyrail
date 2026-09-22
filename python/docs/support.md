@@ -14,7 +14,14 @@ adapter, not a support commitment.
 Bundle inputs describe skills, instructions, MCP registrations, hooks and their
 supporting assets. The general lifecycle accepts explicit rendered files, trees,
 sections and structured selections. Skill convenience presets select documented
-containers for six agents; see [destinations](inspection.md).
+containers for six agents; see [destinations](inspection.md). A seventh, `droid`,
+is reported by `detect_agents` and has no translation: rendering for it produces no
+artifacts and an `agent-unsupported` notice for every artifact the render context
+selects. Artifacts the context does not select, such as a native artifact authored
+for another audience, are skipped and carry no notice. The skill lifecycle refuses
+a droid target the same way: `install`, `update` and `uninstall` report `FAILED`
+with an `unsupported` error and `inspect` reports `UNKNOWN`, and none of them reads
+or writes anything below the droid root.
 
 Flyrail does not select installed agents or manage cloud configuration. Configuration
 current does not prove host discovery, activation, trust or runtime prerequisites.

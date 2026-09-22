@@ -12,6 +12,7 @@ from flyrail.authority import ResourceAuthority, _UnsafeDestination, state_path
 from flyrail.bundle import Bundle
 from flyrail.configuration import InstallationObservation, InstallationTarget
 from flyrail.content import TreeContent
+from flyrail.destinations import TRANSLATABLE_AGENTS, untranslatable_message
 from flyrail.editors import EditStatus
 from flyrail.models import BundleEntry
 from flyrail.observations import (
@@ -25,7 +26,7 @@ from flyrail.observations import (
     TargetError,
     TargetInspection,
 )
-from flyrail.rendered import RenderedArtifact, RenderedBundle
+from flyrail.rendered import Notice, NoticeKind, RenderedArtifact, RenderedBundle
 from flyrail.targets import Target
 
 
@@ -51,6 +52,11 @@ def skill_targets(identifier: str, targets: Iterable[Target]) -> tuple[SkillTarg
     known: dict[Path, int] = {}
     for target in values:
         root = target.root
+        agent = target.agent
+        if agent is not None and agent not in TRANSLATABLE_AGENTS:
+            refusal = TargetError(ErrorCode.UNSUPPORTED, untranslatable_message(agent), root)
+            result.append(SkillTarget(target, refusal, root, None))
+            continue
         try:
             root = ResourceAuthority(root).destination
             index = root.with_name(f".{root.name}.flyrail-index-{identifier}")
@@ -83,6 +89,21 @@ def render_skills(bundle: Bundle, target: Target) -> RenderedBundle:
     if not isinstance(bundle, Bundle) or type(target) is not Target:
         raise TypeError("skill rendering requires a Bundle and Target")
     _validate_skill_bundle(bundle)
+    agent = target.agent
+    if agent is not None and agent not in TRANSLATABLE_AGENTS:
+        return RenderedBundle(
+            (),
+            (),
+            [
+                Notice(
+                    skill.name,
+                    NoticeKind.UNSUPPORTED,
+                    untranslatable_message(agent),
+                    "agent-unsupported",
+                )
+                for skill in bundle.skills
+            ],
+        )
     destination = ResourceAuthority(target.root).destination
     rendered = []
     for skill in bundle.skills:

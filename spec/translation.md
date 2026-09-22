@@ -16,15 +16,19 @@ The Python entry points are `render(bundle, RenderContext(...))` and
 `render_many(bundle, contexts)`. The latter describes one logical installation
 consumed by several explicitly selected agents. A logical installation with any
 unsupported requested artifact returns no publishable artifacts and an unsupported
-notice. The lifecycle rejects it before locks, recovery or other writes, retaining
-previous content and pending recovery evidence. Registration current and host
-activation remain separate states.
+notice. That blocking spans every selected context, not only the refusing one: one
+untranslatable agent in the list zeroes the artifacts for the supported agents too.
+A host that seeds its context list from agent detection must filter out agents whose
+reported capabilities are unsupported before calling `render_many`. The lifecycle
+rejects it before locks, recovery or other writes, retaining previous content and
+pending recovery evidence. Registration current and host activation remain separate
+states.
 
 ## Destinations and surfaces
 
 Paths in the project columns are relative to the selected project root. User
-paths use the explicitly selected home. The six skill presets remain unchanged
-apart from the verified Copilot CLI relocation described below.
+paths use the explicitly selected home. The six supported skill presets remain
+unchanged apart from the verified Copilot CLI relocation described below.
 
 | Agent / surface | Project instructions | User instructions | Project MCP | User MCP |
 | --- | --- | --- | --- | --- |
@@ -35,6 +39,17 @@ apart from the verified Copilot CLI relocation described below.
 | Cursor CLI / IDE | `AGENTS.md` | Explicit caller-selected path required | `.cursor/mcp.json` | `.cursor/mcp.json` |
 | Copilot CLI | `.github/copilot-instructions.md` | `.copilot/copilot-instructions.md` | `.mcp.json` | `.copilot/mcp-config.json` |
 | Copilot VS Code | `.github/copilot-instructions.md` | `.copilot/instructions/<identity>.instructions.md` | `.vscode/mcp.json` | Explicit profile `mcp.json` required |
+
+`droid` is detectable but carries no row here: it has no supported destinations, and
+`render`/`render_many` refuse it unconditionally, returning no artifacts and an
+`agent-unsupported` notice for every requested artifact. Its absence from the table
+is deliberate, not an unlisted destination pending a fixture. A skill preset may
+resolve a droid container path — the Python implementation anchors one at
+`.factory/skills` so a target constructs — but that path is not a verified
+destination and is never used: every skill convenience entry point refuses a droid
+target before it resolves, locks, reads or writes anything below it, so an
+implementation must leave the droid root untouched in both scopes. The six presets
+listed above are the only supported ones.
 
 Claude, Codex, OpenCode, Pi, Cursor and Copilot project skill containers are
 `.claude/skills`, `.agents/skills`, `.opencode/skills`, `.pi/skills`,
