@@ -42,14 +42,14 @@ unchanged apart from the verified Copilot CLI relocation described below.
 
 `droid` is detectable but carries no row here: it has no supported destinations, and
 `render`/`render_many` refuse it unconditionally, returning no artifacts and an
-`agent-unsupported` notice for every requested artifact. Its absence from the table
-is deliberate, not an unlisted destination pending a fixture. A skill preset may
-resolve a droid container path — the Python implementation anchors one at
-`.factory/skills` so a target constructs — but that path is not a verified
-destination and is never used: every skill convenience entry point refuses a droid
-target before it resolves, locks, reads or writes anything below it, so an
-implementation must leave the droid root untouched in both scopes. The six presets
-listed above are the only supported ones.
+`agent-unsupported` notice for every artifact the render context selects. Its
+absence from the table is deliberate, not an unlisted destination pending a
+fixture. A skill preset may resolve a droid container path — the Python
+implementation anchors one at `.factory/skills` so a target constructs — but that
+path is not a verified destination and is never used: every skill convenience
+entry point refuses a droid target before it resolves, locks, reads or writes
+anything below it, so an implementation must leave the droid root untouched in
+both scopes. The six presets listed above are the only supported ones.
 
 Claude, Codex, OpenCode, Pi, Cursor and Copilot project skill containers are
 `.claude/skills`, `.agents/skills`, `.opencode/skills`, `.pi/skills`,
