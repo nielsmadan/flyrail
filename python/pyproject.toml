@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyflyrail"
-version = "0.2.0"
+version = "0.3.0"
 description = "A typed library for reversible coding-agent configuration bundles."
 readme = "README.md"
 requires-python = ">=3.11"
