@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from flyrail import Agent, AgentPresence, detect_agents
+from flyrail.discovery import _application_directories
 
 
 def executable(directory: Path, name: str) -> Path:
@@ -145,3 +146,24 @@ def test_presence_rejects_relative_evidence() -> None:
 def test_detect_rejects_invalid_arguments() -> None:
     with pytest.raises(TypeError, match="path"):
         detect_agents(path=os.sep.encode())  # type: ignore[arg-type]
+
+
+def test_presence_rejects_a_non_agent() -> None:
+    with pytest.raises(TypeError, match="requires an Agent"):
+        AgentPresence("claude", Path(os.sep) / "claude")  # type: ignore[arg-type]
+
+
+def test_presence_rejects_non_path_evidence() -> None:
+    with pytest.raises(TypeError, match="must be a Path"):
+        AgentPresence(Agent.CLAUDE, os.sep + "claude")  # type: ignore[arg-type]
+
+
+def test_detect_rejects_non_path_application_directories() -> None:
+    with pytest.raises(TypeError, match="must be Path values"):
+        detect_agents(applications=[os.sep + "Applications"])  # type: ignore[list-item]
+
+
+def test_default_application_directories_are_the_standard_pair() -> None:
+    expected = (Path("/Applications"), Path.home() / "Applications")
+    directories = _application_directories(None)
+    assert directories == (expected if sys.platform == "darwin" else ())
