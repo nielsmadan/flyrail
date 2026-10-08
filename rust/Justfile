@@ -1,0 +1,35 @@
+export CARGO_HOME := join(justfile_directory(), "../.cache/cargo-home")
+
+default:
+    @just --list
+
+check:
+    cargo fmt --check
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo test --workspace --lib
+
+check-integration:
+    @just check
+    test -x ../python/.venv/bin/python
+    cd ../python && .venv/bin/python -c "import flyrail, tomlkit"
+    FLYRAIL_DIFFERENTIAL_PYTHON=../python/.venv/bin/python cargo test --workspace
+
+check-examples:
+    cargo test -p flyrail-example-notes -p flyrail-example-checksum
+
+check-package: package-list
+    python3 scripts/package_qa.py
+
+package-list:
+    cargo package --list -p flyrail
+    cargo package --list -p flyrail-example-notes
+    cargo package --list -p flyrail-example-checksum
+
+format:
+    cargo fmt
+
+test:
+    cargo test --workspace
+
+lint:
+    cargo clippy --all-targets --all-features -- -D warnings

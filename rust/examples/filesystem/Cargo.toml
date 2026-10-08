@@ -1,0 +1,18 @@
+[package]
+name = "flyrail-example-notes"
+version = "0.4.0"
+edition.workspace = true
+license = "MIT"
+description = "A notes word counter using Flyrail filesystem bundles"
+readme = "README.md"
+
+[[bin]]
+name = "flyrail-notes"
+path = "src/main.rs"
+
+[dependencies]
+flyrail = { version = "0.1.0", path = "../.." }
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -1,7 +1,14 @@
 pre-commit:
+  parallel: true
   commands:
     check:
       run: just check
+    format:
+      glob: "*.rs"
+      run: CARGO_HOME=.cache/cargo-home cargo fmt --manifest-path rust/Cargo.toml -- --check {staged_files}
+    clippy:
+      glob: "*.rs"
+      run: CARGO_HOME=.cache/cargo-home cargo clippy --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
 
 pre-push:
   commands:

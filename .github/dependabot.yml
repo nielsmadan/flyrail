@@ -7,6 +7,15 @@ updates:
     groups:
       python-tooling:
         patterns: ['*']
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      rust-tooling:
+        patterns: ['*']
+        update-types: ['patch', 'minor']
   - package-ecosystem: github-actions
     directory: /
     schedule:

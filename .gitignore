@@ -9,6 +9,7 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+rust/target/
 build/
 dist/
 .DS_Store

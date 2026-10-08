@@ -398,6 +398,24 @@ def test_closed_models_reject_invalid_input(factory: Callable[[], Any]) -> None:
         factory()
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://prefix[::1]/",
+        "https://[::1]junk/",
+        "https://[::1]]/",
+    ],
+)
+def test_http_transport_rejects_malformed_bracket_authorities(url: str) -> None:
+    with pytest.raises(ValueError, match=r"^Invalid IPv6 URL$"):
+        HttpTransport(url)
+
+
+@pytest.mark.parametrize("url", ["https://\u212a.example/", "https://\uff45xample.test/"])
+def test_http_transport_accepts_safe_nfkc_changes(url: str) -> None:
+    assert HttpTransport(url).url == url
+
+
 def test_rendered_snapshot_hashes_destinations_modes_and_dependency_order(tmp_path: Path) -> None:
     support = RenderedArtifact(
         "support", Family.HOOKS, tmp_path / "support", FileContent(b"run", FileMode.EXECUTABLE)

@@ -114,6 +114,7 @@ class HttpTransport:
 
     def __post_init__(self) -> None:
         scalar_text(self.url, "MCP URL")
+        _validate_http_authority(self.url)
         parsed = urlsplit(self.url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("MCP URL must be an absolute HTTP or HTTPS URL")
@@ -125,6 +126,21 @@ class HttpTransport:
             raise ValueError("MCP URL port must be 1-65535")
         if self.bearer_token is not None and type(self.bearer_token) is not EnvRef:
             raise TypeError("bearer token must reference an environment variable")
+
+
+def _validate_http_authority(url: str) -> None:
+    _, separator, rest = url.partition(":")
+    if not separator or not rest.startswith("//"):
+        return
+    authority = re.split(r"[/#?]", rest[2:], maxsplit=1)[0]
+    host = authority.rsplit("@", maxsplit=1)[-1]
+    if "[" not in host and "]" not in host:
+        return
+    if not host.startswith("["):
+        raise ValueError("Invalid IPv6 URL")
+    _, closing, suffix = host[1:].partition("]")
+    if not closing or "[" in suffix or "]" in suffix or (suffix and not suffix.startswith(":")):
+        raise ValueError("Invalid IPv6 URL")
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,13 +10,15 @@ receipt and transaction formats in `spec/`.
 | Implementation | Status | Documentation |
 | --- | --- | --- |
 | Python | Alpha; Python 3.11+ | [API and quickstart](python/README.md) |
+| Rust | Alpha; Rust stable | [API and quickstart](rust/README.md) |
 
-Swift, Rust, Go and TypeScript implementations can use the same contracts and
-conformance fixtures. Their public APIs should be native to each language.
+Additional Swift, Go and TypeScript implementations can use the same contracts
+and conformance fixtures. Their public APIs should be native to each language.
 
 ## Repository
 
 - `python/`: package, tests, examples, documentation and Python tooling.
+- `rust/`: Rust crate and tooling.
 - `spec/`: language-independent formats, recovery protocol and shared fixtures.
 - `.github/`: repository CI and dependency maintenance.
 
@@ -30,17 +32,21 @@ See the [shared specifications](spec/README.md) and
 [implementation guidance](spec/porting.md) for ownership, interoperability and
 filesystem limits.
 
-The [combined checksum example](python/examples/packaged/README.md) ships all four
-families through real agent presets. Its status compares the bundled generation
-with installed content and reports host prerequisites and activation separately.
+The combined checksum examples for
+[Python](python/examples/packaged/README.md) and
+[Rust](rust/examples/packaged/README.md) ship all four families through real
+agent presets. Their status compares the bundled generation with installed
+content and reports host prerequisites and activation separately.
 
 ## Development
 
 `just setup` synchronizes the locked environment and installs the Git hooks.
-The root commands currently run the Python implementation:
+The root check commands run both implementations:
 
 ```sh
 just check
+just check-integration
+just check-package
 just audit-dependencies
 just check-workflow
 ```
@@ -49,8 +55,9 @@ Install the published Python distribution with `python -m pip install pyflyrail`
 the import package is `flyrail`.
 
 Without just, run `python3 python/scripts/check.py check` from this directory.
-See [Python development](python/docs/development.md) for tool setup and the
-individual build/test commands. Generated logs, test installations, reports and
-build outputs stay in ignored local directories.
+See [Python development](python/docs/development.md) and
+[Rust development](rust/docs/development.md) for tool setup and the individual
+build/test commands. Generated logs, test installations, reports and build
+outputs stay in ignored local directories.
 
 Licensed under the [MIT License](LICENSE).
