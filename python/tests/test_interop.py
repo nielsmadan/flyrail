@@ -506,7 +506,7 @@ def test_both_writers_refuse_foreign_linux_xattrs(tmp_path: Path, writer: str) -
     destination.write_bytes(b"foreign")
     destination.chmod(0o640)
     try:
-        os.setxattr(destination, "user.flyrail.interop", b"value")  # type: ignore[attr-defined]
+        os.setxattr(destination, "user.flyrail.interop", b"value")  # type: ignore[attr-defined,unused-ignore]
     except OSError as error:
         pytest.skip(f"filesystem does not support user xattrs: {error}")
     result, value = invoke(
@@ -525,7 +525,7 @@ def test_both_writers_refuse_foreign_linux_xattrs(tmp_path: Path, writer: str) -
     assert result.returncode == 0
     assert value["status"] == "failed"
     assert value["error"]["code"] == "unsupported"
-    assert os.getxattr(destination, "user.flyrail.interop") == b"value"  # type: ignore[attr-defined]
+    assert os.getxattr(destination, "user.flyrail.interop") == b"value"  # type: ignore[attr-defined,unused-ignore]
     assert destination.read_bytes() == b"foreign"
     assert destination.stat().st_mode & 0o777 == 0o640
 
