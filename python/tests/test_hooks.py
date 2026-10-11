@@ -77,7 +77,7 @@ def make_hook(
     *,
     script: str | None = None,
     tools: tuple[str, ...] = (),
-    timeout: int = 1000,
+    timeout: int = 3000,
     env: dict[str, str | EnvRef] | None = None,
     cwd: str | AssetRef | None = None,
     outcomes: tuple[HookOutcome, ...] | None = None,

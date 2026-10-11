@@ -27,6 +27,7 @@ def run_child(
     script: str,
     *,
     clock_step: int = 0,
+    use_real_child_timeout: bool = False,
     runtime_binary: str | None = None,
     **changes: Any,
 ) -> dict[str, Any]:
@@ -47,6 +48,7 @@ def run_child(
     request = {
         "runtime": str(runtime),
         "clockStep": clock_step,
+        "useRealChildTimeout": use_real_child_timeout,
         "config": {"host": "test", "handlers": [handler]},
         "input": {"version": 1, "event": "before-tool", "tool": "Bash", "input": {}, "context": {}},
     }
@@ -103,9 +105,12 @@ def run_child(
 def test_child_failure_bounds_are_distinct_from_decisions(
     tmp_path: Path, runtime_binary: str, script: str, code: str
 ) -> None:
-    assert run_child(tmp_path, script, runtime_binary=runtime_binary) == {
-        "error": f"flyrail-hook:{code}"
-    }
+    assert run_child(
+        tmp_path,
+        script,
+        use_real_child_timeout=code == "timeout",
+        runtime_binary=runtime_binary,
+    ) == {"error": f"flyrail-hook:{code}"}
 
 
 @pytest.mark.parametrize("field", ["argv", "cwd", "env"])
