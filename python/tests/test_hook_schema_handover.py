@@ -15,6 +15,7 @@ from flyrail import (
     Audience,
     Bundle,
     BundleIdentity,
+    DirectoryStore,
     Disposition,
     DocumentFormat,
     ErrorCode,
@@ -81,13 +82,13 @@ def test_cursor_schema_handover_uses_unowned_acquisition_policy(
     ctx = context(tmp_path, "cursor")
     if ctx.platform == "windows":
         pytest.skip("Cursor native shell platform boundary")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     original = bundle_of(make_hook())
     assert sync(original, render(original, ctx), target).status is OperationStatus.APPLIED
     path = tmp_path / ".cursor/hooks.json"
     if current != 1:
         path.write_text(re.sub(r'("version"\s*:\s*)1', rf"\g<1>{current}", path.read_text()))
-    before, previous = snapshot(tmp_path), receipt(path)
+    before, previous = snapshot(tmp_path), receipt(path, target.store)
     bundle = native_cursor(desired)
     rendered = render(bundle, ctx)
     assert rendered.supported
@@ -98,7 +99,7 @@ def test_cursor_schema_handover_uses_unowned_acquisition_policy(
         assert result.status is OperationStatus.FAILED
         assert result.error is not None and result.error.code is ErrorCode.CONFLICT
         assert snapshot(tmp_path) == before
-        assert receipt(path) == previous
+        assert receipt(path, target.store) == previous
         assert remove(original.id, target).status is OperationStatus.APPLIED
         if current == 1:
             assert not path.exists()
@@ -106,7 +107,9 @@ def test_cursor_schema_handover_uses_unowned_acquisition_policy(
             assert json.loads(path.read_text()) == {"version": current}
         return
     assert result.status is OperationStatus.APPLIED
-    owned = next(item for item in receipt(path).claims if item.artifact_id == "native-version")
+    owned = next(
+        item for item in receipt(path, target.store).claims if item.artifact_id == "native-version"
+    )
     assert owned.selection is not None
     assert owned.selection.disposition is (
         Disposition.ADOPTED if acquisition is Acquisition.ADOPT else Disposition.TAKEN_OVER
@@ -114,7 +117,7 @@ def test_cursor_schema_handover_uses_unowned_acquisition_policy(
     assert (owned.selection.baseline.value if owned.selection.baseline else None) == (
         Scalar(current) if acquisition is Acquisition.TAKEOVER else None
     )
-    assert receipt(path).provenance.schema_fields == ()
+    assert receipt(path, target.store).provenance.schema_fields == ()
     assert inspect_installation(bundle.id, target).is_current
     assert remove(bundle.id, target).status is OperationStatus.APPLIED
     if acquisition is Acquisition.TAKEOVER:
@@ -135,7 +138,7 @@ def test_cursor_schema_handover_preserves_first_baseline_and_document_provenance
     if original is not None:
         path.parent.mkdir()
         path.write_bytes(original)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     portable = bundle_of(make_hook())
     assert sync(portable, render(portable, ctx), target).status is OperationStatus.APPLIED
     bundle = native_cursor(1)
@@ -143,17 +146,21 @@ def test_cursor_schema_handover_preserves_first_baseline_and_document_provenance
         sync(bundle, render(bundle, ctx), target, acquisition=acquisition).status
         is OperationStatus.APPLIED
     )
-    first = next(item for item in receipt(path).claims if item.artifact_id == "native-version")
+    first = next(
+        item for item in receipt(path, target.store).claims if item.artifact_id == "native-version"
+    )
     assert first.selection is not None
     for value in [2, 3]:
         bundle = native_cursor(value)
         assert sync(bundle, render(bundle, ctx), target).status is OperationStatus.APPLIED
         current = next(
-            item for item in receipt(path).claims if item.artifact_id == "native-version"
+            item
+            for item in receipt(path, target.store).claims
+            if item.artifact_id == "native-version"
         )
         assert current.selection is not None
         assert current.selection.baseline == first.selection.baseline
-        assert receipt(path).provenance.schema_empty_document == (
+        assert receipt(path, target.store).provenance.schema_empty_document == (
             original if original is not None and not original.strip() else None
         )
         assert json.loads(path.read_text())["version"] == value
@@ -172,7 +179,8 @@ def test_cursor_schema_handover_cannot_capture_another_bundles_requirement(
     ctx = context(tmp_path, "cursor")
     if ctx.platform == "windows":
         pytest.skip("Cursor native shell platform boundary")
-    targets = [InstallationTarget(tmp_path / name) for name in ["first", "second"]]
+    store = DirectoryStore(tmp_path / "state")
+    targets = [InstallationTarget(store, (("index", name),)) for name in ["first", "second"]]
     bundles = [
         bundle_of(make_hook()),
         Bundle.from_artifacts(BundleIdentity("another", "1"), [make_hook()]),
@@ -180,13 +188,13 @@ def test_cursor_schema_handover_cannot_capture_another_bundles_requirement(
     for bundle, target in zip(bundles, targets, strict=True):
         assert sync(bundle, render(bundle, ctx), target).status is OperationStatus.APPLIED
     path = tmp_path / ".cursor/hooks.json"
-    before, previous = path.read_bytes(), receipt(path)
+    before, previous = path.read_bytes(), receipt(path, store)
     native = native_cursor(1)
     result = sync(native, render(native, ctx), targets[0], acquisition=acquisition)
     assert result.status is OperationStatus.FAILED
     assert result.error is not None and "schema overlaps" in result.error.message
     assert path.read_bytes() == before
-    assert receipt(path) == previous
+    assert receipt(path, store) == previous
     assert inspect_installation("another", targets[1]).is_current
     for bundle, target in zip(bundles, targets, strict=True):
         assert remove(bundle.id, target).status is OperationStatus.APPLIED
@@ -197,7 +205,7 @@ def test_explicit_jsonc_schema_handover_preserves_foreign_comments(tmp_path: Pat
     path = tmp_path / "hooks.json"
     original = b'{\n// foreign\n"values":[2,1],\n}\n'
     path.write_bytes(original)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     bundle = bundle_of(make_hook())
     artifact = schema_artifact(path)
     assert sync(bundle, RenderedBundle([artifact]), target).status is OperationStatus.APPLIED
@@ -230,7 +238,7 @@ def test_portable_cursor_requires_parseable_ordinary_json(tmp_path: Path, origin
     path = tmp_path / ".cursor/hooks.json"
     path.parent.mkdir()
     path.write_bytes(original)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     bundle = bundle_of(make_hook())
     rendered = render(bundle, ctx)
     result = sync(bundle, rendered, target, acquisition=Acquisition.TAKEOVER)

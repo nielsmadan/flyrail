@@ -1,36 +1,50 @@
 # Resource state encoding, schema 2
 
 All bundle input formats use the same resource receipts and installation indexes.
-A physical document, tree or skill container has one adjacent authority; see
-[resource authority](resource-authority.md) for canonicalization and naming.
-Receipts reconcile every owner's claims at that boundary, including missing content.
+A physical document, tree or skill container has one authority, held in the
+host's state store; see [resource authority](resource-authority.md) for
+canonicalization and naming. Receipts reconcile every owner's claims at that
+boundary, including missing content.
 
 ## Layout
+
+State lives in the host's [state store](state-store.md); flyrail never creates
+sibling metadata files for it. Each record and lock uses a fixed key:
+
+| Store key | Record |
+| --- | --- |
+| `index/<bundle-id>/<context-digest>` | `Index` |
+| `resource/<destination-key>/authority` | `ResourceRef` |
+| `resource/<destination-key>/receipt` | `Receipt` |
+| `resource/<destination-key>/journal` | `Journal` |
+
+Lock names follow the same scheme: `index/<bundle-id>/<context-digest>` for an
+index, `resource/<destination-key>` for a resource. `destination-key` is
+defined in [the state store contract](state-store.md#keys).
+
+A resource's private transaction directory stays on disk, beside the resource:
 
 ```text
 <resource-parent>/
     <resource>
-    .flyrail-<portable-basename-sha256>.state/
-        lock
-        authority.json
-        receipt.json
-        transaction.json
+    .flyrail-<portable-basename-sha256>-<transaction-id>.txn/
         staging/resource
         backup/resource
-<caller-selected-index>/
-    lock
-    index.json
 ```
 
 The hash uses the portable basename encoding from the authority specification,
-not the bundle ID. Resource and index locks are permanent. State entries are
-optional before first use. Uninstall may leave empty receipts and bookkeeping;
-an empty receipt grants no ownership. Unknown entries, unsafe links, ambiguous
-paths and invalid records prevent mutation.
-
-Atomic metadata preparation uses a sibling `.next` file. Its presence is
-recovery evidence, not permission to infer a committed record. The
-[transaction protocol](transaction-protocol.md) defines recognized preparations.
+over the resource's own basename only, not the full destination or the bundle
+ID. `transaction-id` is the transaction ID of the journal's intended receipt.
+Every journaled transaction mints that ID fresh, as the
+[transaction protocol](transaction-protocol.md#immutable-journal) requires, so
+each transaction, in any store, has its own directory. The transaction directory
+is created by `prepare` and removed by `cleanup`. Only a journal record in the
+host's store attributes a transaction directory to that store; a transaction
+directory that no journal in the store names is never reported, removed or
+treated as blocking.
+Store entries are optional before first use. Uninstall may leave an empty
+receipt; an empty receipt grants no ownership. Unknown entries, unsafe links,
+ambiguous paths and invalid records prevent mutation.
 
 ## Closed tagged records
 
@@ -59,7 +73,7 @@ digests are 64. Every schema field is integer `2`.
 
 | Record tag | Required fields |
 | --- | --- |
-| `ResourceRef` | `destination`, `kind`, `state_root`, `schema_version` |
+| `ResourceRef` | `destination`, `kind`, `schema_version` |
 | `Receipt` | `resource`, `transaction_id`, `claims`, `provenance`, `created_directories`, `schema_version` |
 | `OwnedClaim` | `claim`, `claim_id`, `bundle_id`, `artifact_id`, `version`, `bundle_digest`, `render_digest`, `selection`, `installed`, `disposition`, `baseline`, `requirements`, `stable_requirements`, `schema_requirements` |
 | `DocumentSchema` | `format`, `key`, `value` |
@@ -84,10 +98,10 @@ with values encoded by the state rules in this document.
 
 ## Receipt validation
 
-`authority.json` is a `ResourceRef`. Its state path must be derived from its
-canonical destination. The receipt's resource must match that header. Claim IDs
-are recomputed from physical destination, ownership kind and selector; artifact
-IDs only attribute the content.
+The authority record is a `ResourceRef`, held at
+`resource/<destination-key>/authority`. The receipt's resource must match it.
+Claim IDs are recomputed from physical destination, ownership kind and
+selector; artifact IDs only attribute the content.
 
 Claims must be mutually nonoverlapping and compatible with the resource kind.
 Shared section/structured claims use `selection` and leave whole `installed`
@@ -119,13 +133,13 @@ or changed metadata prevent pruning and relinquish that directory's evidence.
 
 Each membership entry pairs a `ResourceRef` with its claim ID sequence.
 `residual` contains resource references; traversal uses the union of current,
-pending, previous and residual membership. Duplicate IDs, contradictory resource
-kinds and inconsistent state paths are invalid.
+pending, previous and residual membership. Duplicate IDs and contradictory
+resource kinds at the same destination are invalid.
 
-The context digest binds the caller's canonical index path and sorted string
-context pairs through the state encoding. Readers require the requested bundle
-and context to match. The index locates claims; it never grants ownership or
-overrides a resource receipt. See [index lifecycle](configuration-state.md).
+The context digest binds the sorted string context pairs through the state
+encoding. Readers require the requested bundle and context to match. The index
+locates claims; it never grants ownership or overrides a resource receipt. See
+[index lifecycle](configuration-state.md).
 
 State hashes detect inconsistent data, not a malicious writer able to rewrite
 state and hashes together. Full synthetic records and executable recovery cases

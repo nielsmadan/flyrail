@@ -48,10 +48,14 @@ Whole file/tree claims use their explicit mode contract.
 | Windows (unsupported) | Owner/group/DACL snapshots and supported native document replacement; read-only, encrypted, compressed, sparse or alternate-stream resources refuse. Tree/container metadata must satisfy the supported private-descriptor contract. |
 
 Ancestor snapshots include identity, mode/ownership and security evidence.
-Existing state, staging and backup directories must pass private-access checks;
-Flyrail refuses unsafe directories without changing their permissions. New
-payload files are private before their first write. On Windows, state files and
-backup payloads also require private access themselves; placing a broadly readable
+Transaction, staging and backup directories must pass private-access checks;
+Flyrail refuses unsafe directories without changing their permissions. An
+existing `DirectoryStore` root, `records` or `locks` directory, or an existing
+`SQLiteStore` database file or its `.locks` directory, must pass the same check:
+every store operation raises `PermissionError` naming the path otherwise, and
+lifecycle calls report it as `IO_ERROR`. A custom `StateStore` is responsible for
+keeping its own storage private. New payload files are private before their
+first write. On Windows, backup payloads also require private access themselves; placing a broadly readable
 file under a private parent is insufficient.
 See Microsoft's [traverse-checking behavior](https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/bypass-traverse-checking).
 

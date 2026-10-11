@@ -14,6 +14,7 @@ from flyrail import (
     Bundle,
     BundleIdentity,
     Command,
+    DirectoryStore,
     EnvRef,
     InstructionArtifact,
     McpArtifact,
@@ -36,7 +37,7 @@ bundle = Bundle.from_artifacts(
 )
 context = RenderContext(Target.project("codex", root), Platform.LINUX)
 desired = render(bundle, context)
-target = context.installation(root / ".cache" / "project-tools")
+target = context.installation(DirectoryStore(root / ".cache" / "project-tools" / "flyrail"))
 result = sync(bundle, desired, target)
 observed = inspect_installation(bundle.id, target)
 configured_current = observed.matches(bundle, desired)

@@ -151,19 +151,17 @@ class Observation:
 class TargetInspection:
     target: Target
     root: Path
-    state_root: Path
     alias_of: int | None
     observation: Observation
 
     def __post_init__(self) -> None:
-        _target_value(self.target, self.root, self.state_root, self.alias_of, self.observation)
+        _target_value(self.target, self.root, self.alias_of, self.observation)
 
 
 @dataclass(frozen=True, slots=True)
 class TargetResult:
     target: Target
     root: Path
-    state_root: Path
     alias_of: int | None
     status: OperationStatus
     observation: Observation
@@ -171,7 +169,7 @@ class TargetResult:
     recovery_paths: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
-        _target_value(self.target, self.root, self.state_root, self.alias_of, self.observation)
+        _target_value(self.target, self.root, self.alias_of, self.observation)
         if not isinstance(self.status, OperationStatus) or (
             self.error is not None and type(self.error) is not TargetError
         ):
@@ -182,12 +180,10 @@ class TargetResult:
         object.__setattr__(self, "recovery_paths", paths)
 
 
-def _target_value(
-    target: Target, root: Path, state_root: Path, alias: int | None, observation: Observation
-) -> None:
+def _target_value(target: Target, root: Path, alias: int | None, observation: Observation) -> None:
     if type(target) is not Target or type(observation) is not Observation:
         raise TypeError("target summaries require an immutable target and observation")
-    if any(type(path) is not type(Path()) for path in (root, state_root)):
+    if type(root) is not type(Path()):
         raise TypeError("target summary paths must be concrete paths")
     if alias is not None and (type(alias) is not int or alias < 0):
         raise ValueError("target alias must be a nonnegative index")

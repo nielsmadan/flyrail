@@ -5,6 +5,7 @@ import pytest
 from flyrail import (
     Bundle,
     BundleIdentity,
+    DirectoryStore,
     Family,
     InstallationTarget,
     InstructionArtifact,
@@ -38,7 +39,7 @@ def test_adjacent_section_removal_preserves_other_owners_and_foreign_text(
                 for name in names
             ]
         )
-        target = InstallationTarget(tmp_path / ("index-" + names[0]))
+        target = InstallationTarget(DirectoryStore(tmp_path / ("index-" + names[0])))
         assert sync(bundle, rendered, target).status is OperationStatus.APPLIED
         installations.append((bundle, rendered, target))
     path.write_bytes(

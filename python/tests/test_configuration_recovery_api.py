@@ -6,15 +6,16 @@ from pathlib import Path
 
 import pytest
 from skill_helpers import make_bundle, snapshot
+from state_helpers import put, put_index
 from test_configuration_lifecycle import bundle, rendered
 from test_configuration_recovery import crash_worker
 
 from flyrail import (
     Acquisition,
+    DirectoryStore,
     ErrorCode,
     Family,
     FileContent,
-    InstallationResult,
     InstallationTarget,
     OperationStatus,
     RenderedArtifact,
@@ -33,9 +34,7 @@ from flyrail import (
     uninstall,
     update,
 )
-from flyrail._codec import encode
-from flyrail._resource_io import read
-from flyrail._resource_models import Index
+from flyrail._state import resource_key
 
 pytestmark = pytest.mark.integration
 
@@ -53,7 +52,7 @@ def run_crash(worker: Callable[[str, str], None], root: Path, boundary: str) -> 
 
 
 def test_recovery_preserves_absent_and_healthy_installations(tmp_path: Path) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     before = snapshot(tmp_path)
     assert recover_installation("team", target).status is OperationStatus.UNCHANGED
     assert snapshot(tmp_path) == before
@@ -72,7 +71,7 @@ def test_public_recovery_then_strict_preview_after_process_interruption(
 ) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).observation.is_current
     original = path.read_bytes()
     run_crash(crash_worker, tmp_path, boundary)
@@ -104,7 +103,7 @@ def test_public_recovery_then_strict_preview_after_process_interruption(
 def test_unrecognized_recovery_retains_evidence_until_reconciled(tmp_path: Path) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).observation.is_current
     original = path.read_bytes()
     run_crash(crash_worker, tmp_path, "prepared")
@@ -127,7 +126,7 @@ def test_missing_committed_receipt_preserves_index_and_payload_for_every_public_
     tmp_path: Path, kind: str, membership: str
 ) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     path.write_bytes(
         b"# original\n\n<!-- flyrail:guide:start -->\nbaseline\n<!-- flyrail:guide:end -->\n"
     )
@@ -139,20 +138,21 @@ def test_missing_committed_receipt_preserves_index_and_payload_for_every_public_
         )
     )
     assert sync(bundle(), desired, target, acquisition=Acquisition.TAKEOVER).observation.is_current
-    index_path = target.index_root / "index.json"
     index = preview_removal("team", target).index
     assert index is not None and index.current is not None
     if membership == "previous":
-        index_path.write_bytes(encode(replace(index, current=None, previous=index.current)))
-    receipt_path = ResourceAuthority(path).state_root / "receipt.json"
-    saved_receipt = receipt_path.read_bytes()
-    receipt_path.unlink()
+        put_index(target, "team", replace(index, current=None, previous=index.current))
+    destination = ResourceAuthority(path).destination
+    receipt_key = resource_key(destination, "receipt")
+    saved_receipt = target.store.read(receipt_key)
+    assert saved_receipt is not None
+    assert target.store.delete(receipt_key, expected=saved_receipt)
     before = snapshot(tmp_path)
     observation = inspect_installation("team", target)
     assert not observation.is_current
     error = observation.resources[0].error
     assert error is not None and error.code is ErrorCode.INVALID_STATE
-    assert error.path == receipt_path and "receipt is missing" in error.message
+    assert error.path == destination and "receipt is missing" in error.message
     for proposal in (
         preview(bundle(), desired, target, acquisition=Acquisition.TAKEOVER, replace_modified=True),
         preview_removal("team", target, replace_modified=True),
@@ -167,7 +167,7 @@ def test_missing_committed_receipt_preserves_index_and_payload_for_every_public_
     ):
         assert result.status is OperationStatus.FAILED and result.error == error
     assert snapshot(tmp_path) == before
-    receipt_path.write_bytes(saved_receipt)
+    put(target.store, receipt_key, saved_receipt)
     assert remove("team", target).status is OperationStatus.APPLIED
     assert path.read_bytes() == (
         b"# original\n\n<!-- flyrail:guide:start -->\nbaseline\n<!-- flyrail:guide:end -->\n"
@@ -175,17 +175,20 @@ def test_missing_committed_receipt_preserves_index_and_payload_for_every_public_
 
 
 def test_skill_wrappers_report_missing_receipt(tmp_path: Path) -> None:
+    store = DirectoryStore(tmp_path / "state")
     source = make_bundle(tmp_path / "source")
     target = Target.directory(tmp_path / "skills")
-    assert install(source, [target])[0].status is OperationStatus.APPLIED
-    (ResourceAuthority(target.root).state_root / "receipt.json").unlink()
+    assert install(source, [target], store=store)[0].status is OperationStatus.APPLIED
+    receipt_key = resource_key(ResourceAuthority(target.root).destination, "receipt")
+    saved_receipt = store.read(receipt_key)
+    assert saved_receipt is not None and store.delete(receipt_key, expected=saved_receipt)
     before = snapshot(tmp_path)
-    observation = inspect(source, [target])[0].observation
+    observation = inspect(source, [target], store=store)[0].observation
     assert not observation.is_current and observation.error is not None
     for result in (
-        install(source, [target])[0],
-        update(source, [target])[0],
-        uninstall("team", [target])[0],
+        install(source, [target], store=store)[0],
+        update(source, [target], store=store)[0],
+        uninstall("team", [target], store=store)[0],
     ):
         assert result.status is OperationStatus.FAILED
         assert result.error is not None and "receipt is missing" in result.error.message
@@ -195,8 +198,9 @@ def test_skill_wrappers_report_missing_receipt(tmp_path: Path) -> None:
 def test_valid_retirement_receipt_reconciles_an_independent_index(tmp_path: Path) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    first = InstallationTarget(tmp_path / "first")
-    second = InstallationTarget(tmp_path / "second")
+    store = DirectoryStore(tmp_path / "state")
+    first = InstallationTarget(store, (("index", "first"),))
+    second = InstallationTarget(store, (("index", "second"),))
     assert sync(bundle(), rendered(path), first).observation.is_current
     assert sync(bundle(), rendered(path), second).observation.is_current
     assert remove("team", first).status is OperationStatus.APPLIED
@@ -210,113 +214,45 @@ def test_valid_retirement_receipt_reconciles_an_independent_index(tmp_path: Path
 
 
 def index_crash_worker(root: str, boundary: str) -> None:
-    target = InstallationTarget(Path(root) / "index")
-    original_replace = os.replace
+    target = InstallationTarget(DirectoryStore(Path(root) / "index"))
+    original_write = target.store.write
     count = 0
 
-    def replace_metadata(source: Path, destination: Path) -> None:
+    def write(key: str, value: bytes, *, expected: bytes | None) -> bool:
         nonlocal count
-        if source == target.index_root / "index.json.next":
+        if key.startswith("index/"):
             count += 1
-            if count == (1 if boundary == "pending" else 2):
+            if count == 2:
                 os._exit(77)
-        original_replace(source, destination)
+        return original_write(key, value, expected=expected)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(os, "replace", replace_metadata)
+        patch.setattr(target.store, "write", write)
         sync(bundle(), rendered(Path(root) / "AGENTS.md"), target)
 
 
-def test_missing_receipt_after_first_install_completion_preserves_prepared_evidence(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "AGENTS.md"
-    path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
-    run_crash(index_crash_worker, tmp_path, "completed")
-    index_path = target.index_root / "index.json"
-    prepared_path = target.index_root / "index.json.next"
-    current = read(index_path, Index)
-    prepared = read(prepared_path, Index)
-    assert current is not None and current.current is None and current.previous is None
-    assert current.pending is not None
-    assert prepared is not None and prepared.current == current.pending
-    state = ResourceAuthority(path).state_root
-    assert {item.name for item in state.iterdir() if item.is_file()} == {
-        "lock",
-        "authority.json",
-        "receipt.json",
-    }
-    receipt_path = state / "receipt.json"
-    saved_receipt = receipt_path.read_bytes()
-    receipt_path.unlink()
-    before = snapshot(tmp_path)
-    observation = inspect_installation("team", target)
-    assert observation.pending and len(observation.resources) == 1
-    error = observation.resources[0].error
-    assert error is not None and error.code is ErrorCode.INVALID_STATE
-    assert error.path == receipt_path and "receipt is missing" in error.message
-    assert snapshot(tmp_path) == before
-    for proposal in (
-        preview(bundle(), rendered(path), target, replace_modified=True),
-        preview_removal("team", target, replace_modified=True),
-    ):
-        assert not proposal.applicable and proposal.resources[0].error == error
-        assert snapshot(tmp_path) == before
-        result = apply_preview(proposal)
-        assert result.status is OperationStatus.FAILED and result.error is not None
-        assert result.observation.resources[0].error == error
-        assert snapshot(tmp_path) == before
-    operations: tuple[Callable[[], InstallationResult], ...] = (
-        lambda: sync(bundle(), rendered(path), target, replace_modified=True),
-        lambda: remove("team", target, replace_modified=True),
-        lambda: recover_installation("team", target),
-    )
-    for operation in operations:
-        result = operation()
-        assert result.status is OperationStatus.FAILED and result.error == error
-        assert result.observation.pending and result.observation.resources[0].error == error
-        assert snapshot(tmp_path) == before
-    receipt_path.write_bytes(saved_receipt)
-    assert remove("team", target).status is OperationStatus.APPLIED
-    assert path.read_bytes() == b"# foreign\n"
-
-
-@pytest.mark.parametrize("boundary", ["pending", "completed", "prepared", "committed"])
+@pytest.mark.parametrize("boundary", ["completed", "prepared", "committed"])
 def test_first_install_recovery_keeps_prepared_index_references_for_source_free_removal(
     tmp_path: Path, boundary: str
 ) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
-    worker = index_crash_worker if boundary in {"pending", "completed"} else crash_worker
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
+    worker = index_crash_worker if boundary == "completed" else crash_worker
     run_crash(worker, tmp_path, boundary)
     observation = inspect_installation("team", target)
     assert observation.pending and len(observation.resources) == 1
     assert observation.resources[0].destination == path and observation.resources[0].error is None
     recovered = recover_installation("team", target)
-    assert recovered.status is OperationStatus.APPLIED and recovered.error is None
+    assert recovered.status is (
+        OperationStatus.UNCHANGED if boundary == "completed" else OperationStatus.APPLIED
+    )
+    assert recovered.error is None
     assert recovered.observation.pending and len(recovered.observation.resources) == 1
-    if boundary in {"pending", "prepared"}:
+    if boundary == "prepared":
         assert path.read_bytes() == b"# foreign\n"
     else:
         assert b"<!-- flyrail:guide:start -->" in path.read_bytes()
     assert remove("team", target).status is OperationStatus.APPLIED
     assert path.read_bytes() == b"# foreign\n"
     assert not inspect_installation("team", target).pending
-
-
-def test_unrecognized_prepared_index_keeps_all_references(tmp_path: Path) -> None:
-    path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
-    assert sync(bundle(), rendered(path), target).observation.is_current
-    proposal = preview(bundle("2"), rendered(tmp_path / "other"), target)
-    assert proposal.index is not None and proposal.generation is not None
-    prepared = replace(proposal.index, current=proposal.generation)
-    (target.index_root / "index.json.next").write_bytes(encode(prepared))
-    before = snapshot(tmp_path)
-    result = recover_installation("team", target)
-    assert result.status is OperationStatus.FAILED
-    assert result.error is not None and result.error.code is ErrorCode.RECOVERY_NEEDED
-    assert {item.destination for item in result.observation.resources} == {path, tmp_path / "other"}
-    assert snapshot(tmp_path) == before

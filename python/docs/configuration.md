@@ -44,9 +44,8 @@ portable typed encoding.
 Each `RenderedArtifact` names an absolute destination; `subtree` selects an owned
 tree inside a skill container, and `require_existing` binds an existing-resource
 precondition through publication.
-`ResourceAuthority` performs read-only canonicalization and exposes the sibling
-state path and lock path. `Claim` computes physical ownership identity and
-conservative overlap. These are data/observation primitives; construction does not
+`ResourceAuthority` performs read-only canonicalization. `Claim` computes
+physical ownership identity and conservative overlap. These are data/observation primitives; construction does not
 admit an ownership claim or create management state. The general
 [lifecycle](lifecycle.md) owns receipts, indexes, locks, recovery and publication.
 

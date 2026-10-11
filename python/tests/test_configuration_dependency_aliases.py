@@ -6,6 +6,7 @@ from test_configuration_lifecycle import bundle
 from flyrail import (
     Dependency,
     DependencyMode,
+    DirectoryStore,
     Family,
     FileContent,
     InstallationTarget,
@@ -30,7 +31,7 @@ def test_dependencies_on_physical_aliases_survive_install_update_and_removal(
     tmp_path: Path, mode: DependencyMode, consumer_count: int, partial: bool
 ) -> None:
     consumer = tmp_path / "consumer"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
 
     def output(version: str) -> RenderedBundle:
         launcher = tmp_path / (

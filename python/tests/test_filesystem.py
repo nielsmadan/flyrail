@@ -9,31 +9,37 @@ from unittest.mock import Mock
 import pytest
 from skill_helpers import make_bundle, snapshot
 
-from flyrail import Bundle, OperationStatus, Target, inspect, install, uninstall, update
+from flyrail import (
+    Bundle,
+    MemoryStore,
+    OperationStatus,
+    Target,
+    inspect,
+    install,
+    update,
+)
 from flyrail import _filesystem as filesystem
-from flyrail._observation import ObservationFailure
 from flyrail.observations import ErrorCode
 
 
 @pytest.mark.parametrize("version", [(3, 11, 9), (3, 12, 3)])
-@pytest.mark.parametrize("operation", ["install", "update", "uninstall"])
+@pytest.mark.parametrize("operation", ["install", "update"])
 def test_old_windows_python_rejects_mutations_before_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: tuple[int, int, int], operation: str
 ) -> None:
     source = tmp_path / "source"
     make_bundle(source)
     targets = [Target.directory(tmp_path / name / "skills") for name in ("one", "two")]
+    store = MemoryStore()
     before = snapshot(tmp_path)
     monkeypatch.setattr(filesystem, "sys", SimpleNamespace(platform="win32", version_info=version))
     bundle = Bundle.from_directory(source)
-    assert all(result.observation.error is None for result in inspect(bundle, targets))
+    assert all(result.observation.error is None for result in inspect(bundle, targets, store=store))
 
     if operation == "install":
-        results = install(bundle, targets)
-    elif operation == "update":
-        results = update(bundle, targets)
+        results = install(bundle, targets, store=store)
     else:
-        results = uninstall(bundle.id, targets)
+        results = update(bundle, targets, store=store)
 
     assert len(results) == 2
     for result in results:
@@ -43,6 +49,7 @@ def test_old_windows_python_rejects_mutations_before_writes(
         assert result.observation.error is None
         assert result.recovery_paths == ()
     assert snapshot(tmp_path) == before
+    assert list(store.keys("")) == []
 
 
 @pytest.mark.parametrize(
@@ -62,17 +69,7 @@ def test_private_directory_platform_guard_accepts_supported_versions(
     version: tuple[int, int, int],
 ) -> None:
     monkeypatch.setattr(filesystem, "sys", SimpleNamespace(platform=platform, version_info=version))
-    lock = Mock()
-    monkeypatch.setattr(filesystem, "_lock", lock)
-    state = tmp_path / "state"
-
-    with filesystem.target_lock(state, 0):
-        assert (state / "lock").is_file()
-        assert lock.call_count == 1
-
-    assert lock.call_count == 2
-    assert lock.call_args.kwargs == {"release": True}
-    assert (state / "lock").read_bytes() == (b"\0" if platform == "win32" else b"")
+    filesystem.require_private_directories(tmp_path / "state")
 
 
 @pytest.mark.parametrize("kind", ["empty", "nonempty", "file"])
@@ -128,51 +125,3 @@ def test_windows_adapter_uses_os_rename(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(filesystem, "os", SimpleNamespace(name="nt", rename=rename))
     filesystem.rename_exclusive(tmp_path / "a", tmp_path / "b")
     rename.assert_called_once_with(tmp_path / "a", tmp_path / "b")
-
-
-def test_windows_lock_uses_non_payload_byte_and_never_blocks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[tuple[int, int, int]] = []
-    with (tmp_path / "lock").open("w+b") as stream:
-        stream.write(b"data")
-        stream.flush()
-
-        def lock(fd: int, mode: int, size: int) -> None:
-            calls.append((os.lseek(fd, 0, os.SEEK_CUR), mode, size))
-
-        with monkeypatch.context() as patch:
-            patch.setitem(
-                sys.modules, "msvcrt", SimpleNamespace(locking=lock, LK_NBLCK=2, LK_UNLCK=0)
-            )
-            patch.setattr(sys, "platform", "win32")
-            filesystem._lock(stream.fileno())
-            stream.seek(3)
-            filesystem._lock(stream.fileno(), release=True)
-    assert calls == [(1 << 30, 2, 1), (1 << 30, 0, 1)]
-
-
-def test_lock_io_error_is_not_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    lock = Mock(side_effect=OSError(errno.EIO, "device failure"))
-    monkeypatch.setattr(filesystem, "_lock", lock)
-    with pytest.raises(OSError) as caught, filesystem.target_lock(tmp_path / "state", 0.1):
-        pytest.fail("failed locking must not enter the context")
-    assert caught.value.errno == errno.EIO
-    assert lock.call_count == 1
-
-
-def test_replaced_lock_is_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    original = os.fstat
-
-    def wrong_identity(fd: int) -> SimpleNamespace:
-        metadata = original(fd)
-        return SimpleNamespace(
-            st_dev=metadata.st_dev,
-            st_ino=metadata.st_ino + 1,
-            st_size=metadata.st_size,
-        )
-
-    monkeypatch.setattr(os, "fstat", wrong_identity)
-    with pytest.raises(ObservationFailure) as caught, filesystem.target_lock(tmp_path / "state", 0):
-        pytest.fail("replaced locking file must not enter the context")
-    assert caught.value.error.code is ErrorCode.CONCURRENT_CHANGE

@@ -1,14 +1,15 @@
 import json
 import os
-import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from state_helpers import canonical_json, journal_directory, put
 from test_configuration_lifecycle import bundle, rendered
 
 from flyrail import (
+    DirectoryStore,
     ErrorCode,
     InstallationTarget,
     OperationStatus,
@@ -22,9 +23,10 @@ from flyrail import _lifecycle as lifecycle
 from flyrail import _resource_io as io
 from flyrail import _security as security
 from flyrail._codec import encode
-from flyrail._filesystem import target_lock
 from flyrail._observation import ObservationFailure, Observer
-from flyrail._resource_models import Ancestor, Receipt, ResourceRef, Revision
+from flyrail._resource_models import Receipt, ResourceRef, Revision
+from flyrail._state import read_record, resource_key
+from flyrail.authority import transaction_path
 
 
 @pytest.mark.parametrize(
@@ -82,71 +84,11 @@ def test_observation_refuses_inconsistent_filesystem_views(
     )
 
 
-def test_lock_timeout_and_later_retry_keep_one_permanent_lock_inode(tmp_path: Path) -> None:
-    state = tmp_path / "index"
-    with target_lock(state, 0):
-        inode = (state / "lock").stat().st_ino
-        with pytest.raises(ObservationFailure) as caught, target_lock(state, 0.025):
-            pytest.fail("contending lock entered")
-        assert caught.value.error.code is ErrorCode.BUSY
-    entered = threading.Event()
-    release = threading.Event()
-
-    def worker() -> None:
-        with target_lock(state, 1):
-            entered.set()
-            release.wait(2)
-
-    thread = threading.Thread(target=worker)
-    thread.start()
-    assert entered.wait(2)
-    release.set()
-    with target_lock(state, 1):
-        assert (state / "lock").stat().st_ino == inode
-    thread.join(2)
-    assert not thread.is_alive()
-
-
-@pytest.mark.parametrize("seam", ["existing-next", "payload", "ancestor"])
-def test_metadata_atomic_write_preserves_original_on_stale_preparation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam: str
-) -> None:
-    path = tmp_path / "metadata.json"
-    path.write_bytes(encode(Revision()))
-    prior = path.read_bytes()
-    if seam == "existing-next":
-        path.with_name(path.name + ".next").write_bytes(b"retained")
-    original_observe = io.observe
-    original_ancestors = io.ancestors
-    if seam == "payload":
-
-        def changed(selected: Path) -> Revision:
-            if selected.name.endswith(".next"):
-                selected.write_bytes(b"intervening metadata")
-            return original_observe(selected)
-
-        monkeypatch.setattr(io, "observe", changed)
-    if seam == "ancestor":
-        calls = 0
-
-        def parents(selected: Path) -> tuple[Ancestor, ...]:
-            nonlocal calls
-            calls += 1
-            values = original_ancestors(selected)
-            return values[:-1] if calls >= 4 else values
-
-        monkeypatch.setattr(io, "ancestors", parents)
-    with pytest.raises(ObservationFailure):
-        io.atomic(path, Revision())
-    assert path.read_bytes() == prior
-    assert path.with_name(path.name + ".next").is_file()
-
-
 @pytest.mark.parametrize("change", ["ancestor-mode", "ancestor-xattr", "added-ancestor"])
 def test_immutable_preview_binds_full_ancestor_metadata(tmp_path: Path, change: str) -> None:
     parent = tmp_path / "project"
     parent.mkdir()
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     path = parent / "child" / "AGENTS.md" if change == "added-ancestor" else parent / "AGENTS.md"
     plan = preview(bundle(), rendered(path), target)
     if change == "ancestor-mode":
@@ -187,7 +129,7 @@ def test_immutable_preview_binds_full_ancestor_metadata(tmp_path: Path, change: 
         "schema",
         "revision",
         "ancestors",
-        "unknown-state",
+        "unknown-transaction-data",
         "different-receipt",
     ],
 )
@@ -196,18 +138,22 @@ def test_corrupt_journal_retains_full_evidence_and_reports_incomplete(
 ) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"foreign")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
+    store = target.store
 
-    def crash(journal: Any) -> None:
+    def crash(store: Any, journal: Any) -> None:
         raise SystemExit("after preparation")
 
     with monkeypatch.context() as patch:
         patch.setattr(lifecycle, "publish", crash)
         with pytest.raises(SystemExit):
             sync(bundle(), rendered(path), target)
-    state = ResourceAuthority(path).state_root
-    journal = state / "transaction.json"
-    raw = json.loads(journal.read_bytes())
+    destination = ResourceAuthority(path).destination
+    journal = resource_key(destination, "journal")
+    stored = store.read(journal)
+    assert stored is not None
+    state = journal_directory(store, destination)
+    raw = json.loads(stored)
     fields = raw["fields"]
     if damage in {"resource", "previous", "receipt"}:
         fields[damage] = []
@@ -217,19 +163,26 @@ def test_corrupt_journal_retains_full_evidence_and_reports_incomplete(
         fields["backup"]["fields"]["nodes"] = []
     elif damage == "ancestors":
         fields["ancestors"] = [[]]
-    elif damage == "unknown-state":
+    elif damage == "unknown-transaction-data":
         (state / "unknown").write_bytes(b"retained unknown")
     else:
-        header = io.read(state / "authority.json", ResourceRef)
+        header = read_record(store, resource_key(destination, "authority"), ResourceRef)
         assert header is not None
-        (state / "receipt.json").write_bytes(encode(Receipt(header, "f" * 32)))
-    journal.write_text(json.dumps(raw))
+        put(store, resource_key(destination, "receipt"), encode(Receipt(header, "f" * 32)))
+    put(store, journal, canonical_json(raw))
     result = remove("team", target)
-    if damage == "unknown-state":
-        assert result.status is OperationStatus.FAILED
+    assert result.status is OperationStatus.INCOMPLETE
+    if damage in {"unknown-transaction-data", "different-receipt"}:
+        assert result.resources[0].recovery_paths == (state,)
     else:
-        assert result.status is OperationStatus.INCOMPLETE and result.resources[0].recovery_paths
-    assert path.read_bytes() == b"foreign" and json.loads(journal.read_bytes()) == raw
+        assert result.error is not None and result.error.code is ErrorCode.INVALID_STATE
+        assert result.resources[0].recovery_paths == ()
+    assert (state / "staging" / "resource").is_file()
+    if damage == "unknown-transaction-data":
+        assert (state / "unknown").read_bytes() == b"retained unknown"
+    retained = store.read(journal)
+    assert path.read_bytes() == b"foreign" and retained is not None
+    assert json.loads(retained) == raw
 
 
 def test_unsupported_staged_security_is_retained_without_publication(
@@ -247,8 +200,11 @@ def test_unsupported_staged_security_is_retained_without_publication(
         )
 
     monkeypatch.setattr(io, "security", changed)
-    result = sync(bundle(), rendered(destination), InstallationTarget(tmp_path / "index"))
-    assert result.status is OperationStatus.INCOMPLETE and result.resources[0].recovery_paths
+    result = sync(
+        bundle(), rendered(destination), InstallationTarget(DirectoryStore(tmp_path / "index"))
+    )
+    assert result.status is OperationStatus.FAILED and result.resources[0].recovery_paths == ()
+    assert result.error is not None and result.error.code is ErrorCode.UNSUPPORTED
     assert destination.read_bytes() == b"foreign"
 
 
@@ -258,10 +214,14 @@ def test_management_outputs_cannot_overlap_bundle_sources(tmp_path: Path, locati
 
     destination = tmp_path / "AGENTS.md"
     source = (
-        tmp_path / "source" if location == "index" else ResourceAuthority(destination).state_root
+        tmp_path / "source"
+        if location == "index"
+        else transaction_path(ResourceAuthority(destination).destination, "a" * 32)
     )
     snapshot = make_bundle(source)
-    target = InstallationTarget(source / "index" if location == "index" else tmp_path / "index")
+    target = InstallationTarget(
+        DirectoryStore(source / "index" if location == "index" else tmp_path / "index")
+    )
     original = {
         path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
     }
@@ -286,7 +246,9 @@ def test_staging_content_changed_before_journaling_is_not_published(
         return original(path)
 
     monkeypatch.setattr(io, "observe", observe)
-    result = sync(bundle(), rendered(destination), InstallationTarget(tmp_path / "index"))
-    assert result.status is OperationStatus.INCOMPLETE and result.error is not None
+    result = sync(
+        bundle(), rendered(destination), InstallationTarget(DirectoryStore(tmp_path / "index"))
+    )
+    assert result.status is OperationStatus.FAILED and result.error is not None
     assert result.error.code is ErrorCode.CONCURRENT_CHANGE
     assert destination.read_bytes() == b"foreign"

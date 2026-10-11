@@ -17,16 +17,24 @@ To install the current checkout instead, run `python -m pip install .` from `pyt
 The following example uses the same public import in either installation:
 
 ```python
-from flyrail import Bundle, Target, inspect, install, uninstall, update
+from flyrail import Bundle, DirectoryStore, Target, inspect, install, uninstall, update
 
 bundle = Bundle.from_directory("examples/filesystem/bundle")
 targets = [Target.directory(".cache/demo-skills")]
+store = DirectoryStore(".cache/demo-skills-state")
 
-installed = install(bundle, targets)
-current = all(result.observation.is_current for result in inspect(bundle, targets))
-updated = update(bundle, targets, lock_timeout=0.25)
-removed = uninstall(bundle.id, targets)
+installed = install(bundle, targets, store=store)
+current = all(result.observation.is_current for result in inspect(bundle, targets, store=store))
+updated = update(bundle, targets, store=store, lock_timeout=0.25)
+removed = uninstall(bundle.id, targets, store=store)
 ```
+
+There is no default state store: construct one explicitly (for example a
+`DirectoryStore` in the application's own state directory) and pass it to every
+lifecycle call. `MemoryStore` suits tests and dry runs; `SQLiteStore` suits an
+application that already keeps its own state in SQLite. See
+[the public API](https://github.com/nielsmadan/flyrail/blob/main/python/docs/api.md#state-stores)
+for the full contract.
 
 `Target.directory` names the skill container itself. This example installs
 `.cache/demo-skills/notes-summary/SKILL.md`. Use `Bundle.from_package("your_package")`
@@ -53,7 +61,8 @@ Uninstall uses the bundle ID and receipts, without requiring source files.
 
 For portable instructions, MCP, hooks and supporting assets, use `render(bundle, context)`
 with an explicit `RenderContext`. It returns a `RenderedBundle` for
-`preview`/`apply_preview` or `sync` with an `InstallationTarget`.
+`preview`/`apply_preview` or `sync` with an `InstallationTarget` built from the
+same explicit store.
 [Translation](https://github.com/nielsmadan/flyrail/blob/main/python/docs/translation.md)
 explains capabilities, native alternatives and exact unsupported boundaries.
 `inspect_installation` and `remove` use the private index without source bytes.

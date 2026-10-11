@@ -11,6 +11,7 @@ from flyrail import (
     Bundle,
     BundleEntry,
     BundleIdentity,
+    DirectoryStore,
     DocumentFormat,
     ErrorCode,
     Family,
@@ -25,6 +26,7 @@ from flyrail import (
     ResourceAuthority,
     SectionContent,
     Selector,
+    StateStore,
     StructuredContent,
     Target,
     TreeContent,
@@ -41,6 +43,7 @@ from flyrail import (
 )
 from flyrail._codec import decode
 from flyrail._resource_models import Receipt
+from flyrail._state import resource_key
 
 pytestmark = pytest.mark.integration
 
@@ -67,8 +70,10 @@ def rendered(
     )
 
 
-def receipt(path: Path) -> Receipt:
-    value = decode((ResourceAuthority(path).state_root / "receipt.json").read_bytes())
+def receipt(path: Path, store: StateStore) -> Receipt:
+    data = store.read(resource_key(ResourceAuthority(path).destination, "receipt"))
+    assert data is not None
+    value = decode(data)
     assert isinstance(value, Receipt)
     return value
 
@@ -77,7 +82,7 @@ def test_generated_preview_is_readonly_and_owns_only_section(tmp_path: Path) -> 
     destination = tmp_path / "AGENTS.md"
     destination.write_bytes(b"# Foreign\ncredential=synthetic-private-value\n")
     destination.chmod(0o600)
-    target = InstallationTarget(tmp_path / "index", [("surface", "application")])
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"), [("surface", "application")])
     original = snapshot(tmp_path)
     plan = preview(bundle(), rendered(destination), target)
     assert plan.applicable and snapshot(tmp_path) == original
@@ -100,7 +105,8 @@ def test_multi_owner_structured_lifecycle_and_creation_provenance(
     tmp_path: Path, format: DocumentFormat
 ) -> None:
     path = tmp_path / f"config.{format}"
-    targets = [InstallationTarget(tmp_path / name) for name in ("index-a", "index-b")]
+    store = DirectoryStore(tmp_path / "state")
+    targets = [InstallationTarget(store, (("index", name),)) for name in ("index-a", "index-b")]
     bundles = [bundle(identifier=name) for name in ("a", "b")]
     renders = [
         RenderedBundle(
@@ -119,12 +125,12 @@ def test_multi_owner_structured_lifecycle_and_creation_provenance(
     ]
     assert sync(bundles[0], renders[0], targets[0]).status is OperationStatus.APPLIED
     assert sync(bundles[1], renders[1], targets[1]).status is OperationStatus.APPLIED
-    assert len(receipt(path).claims) == 2
+    assert len(receipt(path, store).claims) == 2
     assert remove("a", targets[0]).status is OperationStatus.APPLIED
     assert inspect_installation("b", targets[1]).is_current
     assert remove("b", targets[1]).status is OperationStatus.APPLIED
     assert path.exists() is False
-    assert ResourceAuthority(path).lock_path.is_file()
+    assert store.read(resource_key(ResourceAuthority(path).destination, "authority"))
 
 
 @pytest.mark.parametrize("acquisition", [Acquisition.TAKEOVER, Acquisition.ADOPT])
@@ -134,20 +140,20 @@ def test_acquisition_rename_updates_and_first_baseline(
     path = tmp_path / "AGENTS.md"
     original = b"# Project\n\n<!-- flyrail:guide:start -->\noriginal\n<!-- flyrail:guide:end -->\n"
     path.write_bytes(original)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path, "original"), target).status is OperationStatus.FAILED
     assert (
         sync(bundle(), rendered(path, "original"), target, acquisition=acquisition).status
         is OperationStatus.APPLIED
     )
-    first = receipt(path).claims[0]
+    first = receipt(path, target.store).claims[0]
     assert first.selection is not None
     for version in ["2", "3"]:
         assert (
             sync(bundle(version), rendered(path, version, "renamed"), target).status
             is OperationStatus.APPLIED
         )
-        owned = receipt(path).claims[0]
+        owned = receipt(path, target.store).claims[0]
         assert owned.artifact_id == "renamed"
         assert owned.selection is not None and owned.selection.baseline == first.selection.baseline
     assert remove("team", target).status is OperationStatus.APPLIED
@@ -160,7 +166,7 @@ def test_replacement_preserves_original_takeover_and_current_chmod(tmp_path: Pat
     path = tmp_path / "AGENTS.md"
     original = b"<!-- flyrail:guide:start -->\noriginal\n<!-- flyrail:guide:end -->\n"
     path.write_bytes(original)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert (
         sync(bundle(), rendered(path), target, acquisition=Acquisition.TAKEOVER).status
         is OperationStatus.APPLIED
@@ -183,7 +189,7 @@ def test_modified_retirement_keeps_residual_across_desired_generations(
     tmp_path: Path, mutation: str
 ) -> None:
     old, new = tmp_path / "old.md", tmp_path / "new.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(old), target).status is OperationStatus.APPLIED
     if mutation == "missing":
         old.unlink()
@@ -196,7 +202,7 @@ def test_modified_retirement_keeps_residual_across_desired_generations(
     status = inspect_installation("team", target)
     assert len(status.resources) == 1 and status.resources[0].claims[0].status == "modified"
     assert remove("team", target).status is OperationStatus.FAILED
-    assert len(receipt(old).claims) == 1
+    assert len(receipt(old, target.store).claims) == 1
 
 
 def test_retarget_takes_fresh_baseline_and_restores_old(tmp_path: Path) -> None:
@@ -205,7 +211,7 @@ def test_retarget_takes_fresh_baseline_and_restores_old(tmp_path: Path) -> None:
     second = first.replace(b"first", b"second")
     a.write_bytes(first)
     b.write_bytes(second)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert (
         sync(bundle(), rendered(a), target, acquisition=Acquisition.TAKEOVER).status
         is OperationStatus.APPLIED
@@ -222,7 +228,7 @@ def test_retarget_takes_fresh_baseline_and_restores_old(tmp_path: Path) -> None:
 def test_required_existing_is_not_a_caller_exists_race(tmp_path: Path) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"foreign")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired = rendered(path, existing=True)
     path.unlink()
     plan = preview(bundle(), desired, target)
@@ -267,7 +273,7 @@ def test_whole_content_takeover_adoption_and_removal(
             )
         ]
     )
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     before = path.read_bytes() if kind == "file" else (owned / "run").read_bytes()
     result = sync(bundle(), desired, target, acquisition=acquisition)
     assert result.status is (
@@ -285,27 +291,32 @@ def test_whole_content_takeover_adoption_and_removal(
 def test_skill_adapter_snapshots_modes_aliases_hashes_and_source_free_removal(
     tmp_path: Path,
 ) -> None:
+    store = DirectoryStore(tmp_path / "state")
     first = make_bundle(tmp_path / "source", executable=True)
     target = Target.directory(tmp_path / "skills")
-    assert inspect(first, [target])[0].observation.state == "absent"
-    results = install(first, [target, target])
+    assert inspect(first, [target], store=store)[0].observation.state == "absent"
+    results = install(first, [target, target], store=store)
     assert [r.status for r in results] == [OperationStatus.APPLIED] * 2
     assert results[1].alias_of == 0
     shutil.rmtree(tmp_path / "source")
-    assert inspect(first, [target])[0].observation.is_current
+    assert inspect(first, [target], store=store)[0].observation.is_current
     second = make_bundle(tmp_path / "new-source", version="2", data=b"changed", executable=True)
-    assert install(second, [target])[0].error.code is ErrorCode.UPDATE_REQUIRED  # type: ignore[union-attr]
-    assert update(second, [target])[0].status is OperationStatus.APPLIED
+    refused = install(second, [target], store=store)[0]
+    assert refused.error is not None and refused.error.code is ErrorCode.UPDATE_REQUIRED
+    assert update(second, [target], store=store)[0].status is OperationStatus.APPLIED
     (target.root / "review" / "SKILL.md").write_bytes(b"user")
-    assert uninstall("team", [target])[0].status is OperationStatus.FAILED
-    assert update(second, [target], replace_modified=True)[0].status is OperationStatus.APPLIED
-    assert uninstall("team", [target])[0].status is OperationStatus.APPLIED
+    assert uninstall("team", [target], store=store)[0].status is OperationStatus.FAILED
+    assert (
+        update(second, [target], replace_modified=True, store=store)[0].status
+        is OperationStatus.APPLIED
+    )
+    assert uninstall("team", [target], store=store)[0].status is OperationStatus.APPLIED
     assert (target.root / "review").exists() is False
 
 
 def test_bundle_inside_project_can_edit_other_file_but_not_source(tmp_path: Path) -> None:
     selected = make_bundle(tmp_path / "project" / "bundle")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert (
         sync(selected, rendered(tmp_path / "project" / "AGENTS.md"), target).status
         is OperationStatus.APPLIED
@@ -323,6 +334,6 @@ def test_complete_conflict_preflight_keeps_other_resource_unpublished(tmp_path: 
             RenderedArtifact("b", Family.INSTRUCTIONS, b, FileContent(b"new")),
         ]
     )
-    result = sync(bundle(), desired, InstallationTarget(tmp_path / "index"))
+    result = sync(bundle(), desired, InstallationTarget(DirectoryStore(tmp_path / "index")))
     assert result.status is OperationStatus.FAILED and a.exists() is False
     assert b.read_bytes() == b"foreign"

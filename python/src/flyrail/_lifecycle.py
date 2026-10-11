@@ -1,29 +1,39 @@
 import math
-import os
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from flyrail._filesystem import target_lock
-from flyrail._observation import ObservationFailure, Observer
+from flyrail._codec import encode
+from flyrail._filesystem import require_private_directories
+from flyrail._observation import ObservationFailure
 from flyrail._resource_io import (
     admit,
     ancestors,
-    atomic,
     failure,
-    observe,
-    read,
     require,
     unsupported,
     validate_kind,
-    validate_state,
 )
-from flyrail._resource_models import Ancestor, Generation, Index, Receipt, ResourceRef, Revision
+from flyrail._resource_models import Ancestor, Generation, Index, Receipt, ResourceRef
 from flyrail._resource_plan import artifact_claim, plan_resource, resource, summary
-from flyrail._resource_transaction import cleanup, prepare, publish, recover
+from flyrail._resource_transaction import cleanup, pending_recovery, prepare, publish, recover
+from flyrail._state import (
+    destination_key,
+    index_key,
+    read_record,
+    resource_key,
+    store_lock,
+    write_record,
+)
 from flyrail._validation import portable_path_key, validate_identifier
-from flyrail.authority import Claim, _UnsafeDestination
+from flyrail.authority import (
+    Claim,
+    _management_name,
+    _physical_directory,
+    _UnsafeDestination,
+    transaction_path,
+)
 from flyrail.bundle import Bundle
 from flyrail.configuration import (
     InstallationObservation,
@@ -38,11 +48,18 @@ from flyrail.editors import Acquisition, EditStatus
 from flyrail.models import OperationStatus
 from flyrail.observations import ErrorCode, TargetError
 from flyrail.rendered import DependencyMode, NoticeKind, RenderedArtifact, RenderedBundle
+from flyrail.stores import StateStore, StoreBusy
 
 
-def error_detail(error: OSError | ObservationFailure | ValueError) -> TargetError:
+class StoreOverlap(ValueError):
+    pass
+
+
+def error_detail(error: OSError | ObservationFailure | ValueError | StoreBusy) -> TargetError:
     if isinstance(error, ObservationFailure):
         return error.error
+    if isinstance(error, StoreBusy):
+        return TargetError(ErrorCode.BUSY, str(error))
     if isinstance(error, _UnsafeDestination):
         return TargetError(ErrorCode.UNSAFE_PATH, str(error), error.path)
     if isinstance(error, OSError):
@@ -55,55 +72,19 @@ def error_detail(error: OSError | ObservationFailure | ValueError) -> TargetErro
     return TargetError(ErrorCode.INVALID_STATE, str(error))
 
 
-def _index_records(
-    identifier: str, target: InstallationTarget
-) -> tuple[Index | None, Index | None]:
-    observer = Observer()
-    observer.managed_directory(target.index_root)
-    for child in observer.directory(target.index_root):
-        if child.name not in {"lock", "index.json", "index.json.next"}:
-            raise failure(ErrorCode.INVALID_STATE, "unknown installation index entry", child)
-        observer.file(child)
-    observer.finish()
-    result = read(target.index_root / "index.json", Index)
-    pending = read(target.index_root / "index.json.next", Index)
-    for value in (result, pending):
-        if value is not None and (
-            value.bundle_id != identifier or value.context_digest != target.context_digest
-        ):
-            raise failure(
-                ErrorCode.INVALID_STATE, "installation index context disagrees", target.index_root
-            )
-    return result, pending
+def _index(identifier: str, target: InstallationTarget) -> Index | None:
+    result = read_record(target.store, index_key(identifier, target.context_digest), Index)
+    if result is not None and (
+        result.bundle_id != identifier or result.context_digest != target.context_digest
+    ):
+        raise failure(
+            ErrorCode.INVALID_STATE, "installation index context disagrees", target.store.location
+        )
+    return result
 
 
-def _index(identifier: str, target: InstallationTarget) -> tuple[Index | None, Index | None]:
-    result, pending = _index_records(identifier, target)
-    if pending is None:
-        return result, None
-    base = result or Index(identifier, target.context_digest)
-    return replace(
-        base,
-        residual=tuple(
-            sorted(set(base.residual) | set(pending.resources), key=lambda ref: str(ref.state_root))
-        ),
-    ), pending
-
-
-def _completes_pending_index(current: Index | None, prepared: Index | None) -> bool:
-    return (
-        current is not None
-        and bool(current.pending or current.previous or current.residual)
-        and prepared == Index(current.bundle_id, current.context_digest, current.pending)
-    )
-
-
-def _expects_receipt(index: Index | None, prepared: Index | None, ref: ResourceRef) -> bool:
-    generations: tuple[Generation | None, ...] = (
-        () if index is None else (index.current, index.previous)
-    )
-    if prepared is not None and _completes_pending_index(index, prepared):
-        generations += (prepared.current,)
+def _expects_receipt(index: Index | None, ref: ResourceRef) -> bool:
+    generations = () if index is None else (index.current, index.previous)
     return any(
         ref == member
         for generation in generations
@@ -116,23 +97,39 @@ def _missing_receipt(ref: ResourceRef) -> TargetError:
     return TargetError(
         ErrorCode.INVALID_STATE,
         "recorded ownership receipt is missing; restore metadata before retrying",
-        ref.state_root / "receipt.json",
+        ref.destination,
     )
 
 
-def _check_receipt(index: Index | None, prepared: Index | None, ref: ResourceRef) -> None:
+def _check_receipt(store: StateStore, index: Index | None, ref: ResourceRef) -> None:
     if (
-        _expects_receipt(index, prepared, ref)
-        and read(ref.state_root / "receipt.json", Receipt) is None
+        _expects_receipt(index, ref)
+        and read_record(store, resource_key(ref.destination, "receipt"), Receipt) is None
     ):
         error = _missing_receipt(ref)
-        raise failure(error.code, error.message, ref.state_root / "receipt.json")
+        raise failure(error.code, error.message, error.path)
 
 
 def _overlap(left: Path, right: Path) -> bool:
     first = tuple(portable_path_key(part) for part in left.parts)
     second = tuple(portable_path_key(part) for part in right.parts)
     return first[: min(len(first), len(second))] == second[: min(len(first), len(second))]
+
+
+def _overlaps_transaction(path: Path, destination: Path) -> bool:
+    parent = tuple(portable_path_key(part) for part in destination.parent.parts)
+    selected = tuple(portable_path_key(part) for part in path.parts)
+    if len(selected) <= len(parent):
+        return selected == parent[: len(selected)]
+    return selected[: len(parent)] == parent and _management_name(path.parts[len(parent)])
+
+
+def _physical_location(path: Path) -> Path:
+    resolved = path.resolve()
+    existing = resolved
+    while not existing.is_dir():
+        existing = existing.parent
+    return _physical_directory(existing).joinpath(*resolved.parts[len(existing.parts) :])
 
 
 def _references(
@@ -142,9 +139,11 @@ def _references(
     bundle: Bundle | None,
     resolved: dict[str, ResourceRef] | None = None,
 ) -> tuple[ResourceRef, ...]:
+    location = target.store.location
+    store = None if location is None else _physical_location(location)
     for source in () if bundle is None else bundle.source_roots:
-        if _overlap(source, target.index_root):
-            raise ValueError("installation index overlaps bundle source")
+        if store is not None and _overlap(source, store):
+            raise ValueError("state store overlaps bundle source")
     if resolved is None:
         resolved = {artifact.id: resource(artifact) for artifact in rendered.artifacts}
     outputs: dict[ResourceRef, list[Path]] = {}
@@ -156,16 +155,16 @@ def _references(
     refs = set(resolved.values())
     if index is not None:
         refs.update(index.resources)
-    result = tuple(sorted(refs, key=lambda ref: str(ref.state_root)))
+    result = tuple(sorted(refs, key=lambda ref: str(ref.destination)))
     if len({ref.destination for ref in result}) != len(result):
         raise ValueError("resource kinds disagree at the same destination")
     for ref in result:
-        if _overlap(ref.destination, target.index_root) or _overlap(
-            ref.state_root, target.index_root
+        if store is not None and (
+            _overlap(ref.destination, store) or _overlaps_transaction(store, ref.destination)
         ):
-            raise ValueError("installation index overlaps a resource or authority")
+            raise StoreOverlap("state store overlaps a resource or authority")
         for source in () if bundle is None else bundle.source_roots:
-            if _overlap(source, ref.state_root):
+            if _overlaps_transaction(source, ref.destination):
                 raise ValueError("resource authority overlaps bundle source")
             if any(_overlap(source, output) for output in outputs.get(ref, ())):
                 raise ValueError("resource output overlaps bundle source")
@@ -223,7 +222,7 @@ def _order(
     while pending:
         ready = sorted(
             (ref for ref in pending if not any(a == ref and b in pending for a, b in edges)),
-            key=lambda ref: str(ref.state_root),
+            key=lambda ref: str(ref.destination),
         )
         if not ready:
             raise ValueError("cyclic resource dependencies")
@@ -240,7 +239,7 @@ def _preview(
     acquisition: Acquisition,
     replace_modified: bool,
 ) -> LifecyclePreview:
-    index, prepared = _index(identifier, target)
+    index = _index(identifier, target)
     resolved = {artifact.id: resource(artifact) for artifact in rendered.artifacts}
     refs = _references(rendered, index, target, bundle, resolved)
     by_id = {artifact.id: artifact for artifact in rendered.artifacts}
@@ -287,6 +286,7 @@ def _preview(
     stable_requirements = {key: tuple(sorted(value)) for key, value in stable_contracts.items()}
     plans = tuple(
         plan_resource(
+            target.store,
             ref,
             identifier,
             bundle,
@@ -301,7 +301,7 @@ def _preview(
     )
     plans = tuple(
         replace(plan, after=plan.before, error=_missing_receipt(plan.resource))
-        if plan.previous is None and _expects_receipt(index, prepared, plan.resource)
+        if plan.previous is None and _expects_receipt(index, plan.resource)
         else plan
         for plan in plans
     )
@@ -332,12 +332,6 @@ def _preview(
         if any(notice.kind is NoticeKind.UNSUPPORTED for notice in rendered.notices)
         else None
     )
-    if (target.index_root / "index.json.next").exists():
-        error = TargetError(
-            ErrorCode.RECOVERY_NEEDED,
-            "installation index has prepared metadata",
-            target.index_root / "index.json.next",
-        )
     return LifecyclePreview(
         identifier,
         bundle,
@@ -346,8 +340,6 @@ def _preview(
         acquisition,
         replace_modified,
         index,
-        observe(target.index_root),
-        ancestors(target.index_root / "index.json"),
         generation,
         plans
         if any(plan.error is not None for plan in plans)
@@ -366,7 +358,7 @@ def _public_preview(
 ) -> LifecyclePreview:
     try:
         return _preview(identifier, bundle, rendered, target, acquisition, replace_modified)
-    except (OSError, ObservationFailure, _UnsafeDestination) as error:
+    except (OSError, ObservationFailure, _UnsafeDestination, StoreBusy) as error:
         return LifecyclePreview(
             identifier,
             bundle,
@@ -375,8 +367,6 @@ def _public_preview(
             acquisition,
             replace_modified,
             None,
-            None,
-            (),
             None,
             (),
             error_detail(error),
@@ -421,19 +411,16 @@ def inspect_installation(bundle_id: str, target: InstallationTarget) -> Installa
         raise TypeError("target must be an InstallationTarget")
     resources: list[ResourceObservation] = []
     try:
-        index, prepared = _index(bundle_id, target)
+        index = _index(bundle_id, target)
         for ref in () if index is None else index.resources:
             try:
-                _check_receipt(index, prepared, ref)
-                resources.append(summary(ref))
+                _check_receipt(target.store, index, ref)
+                resources.append(summary(target.store, ref))
             except (OSError, ObservationFailure, ValueError) as error:
-                resources.append(
-                    ResourceObservation(ref.destination, ref.state_root, error=error_detail(error))
-                )
+                resources.append(ResourceObservation(ref.destination, error=error_detail(error)))
         current = index.current if index else None
-        pending = (target.index_root / "index.json.next").exists() or (
-            index is not None
-            and (index.pending is not None or bool(index.residual) or index.previous is not None)
+        pending = index is not None and (
+            index.pending is not None or bool(index.residual) or index.previous is not None
         )
         actual = {
             (item.destination, claim.claim_id)
@@ -474,7 +461,7 @@ def inspect_installation(bundle_id: str, target: InstallationTarget) -> Installa
             current.bundle_digest if current else None,
             current.render_digest if current else None,
         )
-    except (OSError, ObservationFailure, ValueError) as error:
+    except (OSError, ObservationFailure, ValueError, StoreBusy) as error:
         return InstallationObservation(
             bundle_id, target, tuple(resources), False, False, error=error_detail(error)
         )
@@ -493,45 +480,35 @@ def locks(
 ) -> Iterator[tuple[Ancestor, ...]]:
     created: list[Ancestor] = []
 
-    def record(path: Path) -> None:
-        created.append(ancestors(path / "lock")[-1])
+    def create_parents(path: Path) -> None:
+        for parent in reversed(path.parents):
+            if not parent.exists():
+                parent.mkdir(mode=0o700)
+                created.append(ancestors(parent / "child")[-1])
 
+    ordered = sorted(refs, key=lambda item: str(item.destination))
+    for ref in ordered:
+        require_private_directories(ref.destination.parent)
+    location = target.store.location
+    if location is not None:
+        create_parents(_physical_location(location))
     with ExitStack() as stack:
-        stack.enter_context(target_lock(target.index_root, timeout, on_created=record))
-        current, prepared = _index_records(identifier, target)
-        if prepared is not None:
-            _promote_prepared_index(target, current, prepared)
-        for ref in sorted(refs, key=lambda item: str(item.state_root)):
+        stack.enter_context(
+            store_lock(target.store, index_key(identifier, target.context_digest), timeout)
+        )
+        for ref in ordered:
             validate_kind(ref)
-            stack.enter_context(target_lock(ref.state_root, timeout, on_created=record))
-            admit(ref)
+            stack.enter_context(
+                store_lock(target.store, f"resource/{destination_key(ref.destination)}", timeout)
+            )
+            create_parents(ref.destination)
+            admit(target.store, ref)
         yield tuple(created)
 
 
-def _state_matches(path: Path, expected: Revision, initial: bool) -> Revision:
-    current = observe(path)
-    if initial:
-        if current != expected:
-            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview metadata changed", path)
-        return current
-    allowed = {"", "lock", "authority.json"}
-    before = {node.path: node for node in expected.nodes}
-    after = {node.path: node for node in current.nodes}
-    if (
-        any(after.get(key) != value for key, value in before.items())
-        or not (after.keys() - before.keys()) <= allowed
-    ):
-        raise failure(ErrorCode.CONCURRENT_CHANGE, "preview metadata changed", path)
-    return current
-
-
-def _fresh(
-    preview: LifecyclePreview, *, initial: bool, created: tuple[Ancestor, ...] = ()
-) -> LifecyclePreview:
-    if preview.index_revision is None:
-        raise failure(
-            ErrorCode.INVALID_STATE, "preview metadata was not observed", preview.target.index_root
-        )
+def _fresh(preview: LifecyclePreview, *, created: tuple[Ancestor, ...] = ()) -> LifecyclePreview:
+    _require_index(preview, preview.index)
+    store = preview.target.store
 
     def checked(path: Path, expected: tuple[Ancestor, ...]) -> tuple[Ancestor, ...]:
         current = ancestors(path)
@@ -543,37 +520,44 @@ def _fresh(
             raise failure(ErrorCode.CONCURRENT_CHANGE, "preview ancestor changed", path)
         return approved
 
-    index_revision = _state_matches(preview.target.index_root, preview.index_revision, initial)
-    index_ancestors = checked(preview.target.index_root / "index.json", preview.index_ancestors)
     resources = []
     for plan in preview.resources:
-        require(plan.resource.destination, plan.before)
-        state_revision = _state_matches(plan.resource.state_root, plan.state_revision, initial)
-        approved = checked(plan.resource.state_root / "transaction.json", plan.ancestors)
-        resources.append(replace(plan, state_revision=state_revision, ancestors=approved))
-    return replace(
-        preview,
-        index_revision=index_revision,
-        index_ancestors=index_ancestors,
-        resources=tuple(resources),
-    )
+        destination = plan.resource.destination
+        require(destination, plan.before)
+        if store.read(resource_key(destination, "receipt")) != (
+            None if plan.previous is None else encode(plan.previous)
+        ):
+            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview receipt changed", destination)
+        if (store.read(resource_key(destination, "journal")) is not None) != bool(
+            plan.recovery_paths
+        ):
+            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview recovery changed", destination)
+        approved = checked(
+            transaction_path(destination, plan.receipt.transaction_id) / "staging", plan.ancestors
+        )
+        resources.append(replace(plan, ancestors=approved))
+    return replace(preview, resources=tuple(resources))
 
 
-def _require_index(preview: LifecyclePreview, revision: Revision) -> None:
-    require(preview.target.index_root, revision)
-    if ancestors(preview.target.index_root / "index.json") != preview.index_ancestors:
+def _require_index(preview: LifecyclePreview, expected: Index | None) -> None:
+    target = preview.target
+    if target.store.read(index_key(preview.bundle_id, target.context_digest)) != (
+        None if expected is None else encode(expected)
+    ):
         raise failure(
-            ErrorCode.CONCURRENT_CHANGE,
-            "installation index ancestor changed",
-            preview.target.index_root,
+            ErrorCode.CONCURRENT_CHANGE, "installation index changed", target.store.location
         )
 
 
-def recovery_paths(ref: ResourceRef) -> tuple[Path, ...]:
+def recovery_paths(
+    store: StateStore, ref: ResourceRef, transaction_id: str | None = None
+) -> tuple[Path, ...]:
     try:
-        return validate_state(ref)
-    except (OSError, ObservationFailure, ValueError):
-        return (ref.state_root,)
+        return pending_recovery(store, ref)
+    except (OSError, ObservationFailure):
+        if transaction_id is None:
+            return ()
+        return (transaction_path(ref.destination, transaction_id),)
 
 
 def _run(preview: LifecyclePreview) -> InstallationResult:
@@ -589,7 +573,7 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
         return InstallationResult(
             OperationStatus.FAILED, inspect_installation(identifier, target), error=detail
         )
-    preview = _fresh(preview, initial=False)
+    preview = _fresh(preview)
     previous = preview.index
     pending = Index(
         identifier,
@@ -618,8 +602,8 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
         return InstallationResult(
             OperationStatus.UNCHANGED, inspect_installation(identifier, target)
         )
-    atomic(target.index_root / "index.json", pending, expected_ancestors=preview.index_ancestors)
-    pending_revision = observe(target.index_root)
+    key = index_key(identifier, target.context_digest)
+    write_record(target.store, key, pending, expected=preview.index)
     failed: TargetError | None = None
     for plan in preview.resources:
         if plan.previous == plan.receipt and plan.before == plan.after:
@@ -628,27 +612,30 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
         committed = False
         journal = None
         try:
-            _require_index(preview, pending_revision)
-            journal = prepare(plan)
-            _require_index(preview, pending_revision)
-            publish(journal)
+            _require_index(preview, pending)
+            journal = prepare(target.store, plan)
+            _require_index(preview, pending)
+            publish(target.store, journal)
             committed = True
-            cleanup(journal)
+            cleanup(target.store, journal)
             results.append(ResourceResult(plan.resource, OperationStatus.APPLIED))
-        except (OSError, ObservationFailure, ValueError) as error:
+        except (OSError, ObservationFailure, ValueError, StoreBusy) as error:
             failed = error_detail(error)
             try:
                 committed = committed or (
                     journal is not None
-                    and read(plan.resource.state_root / "receipt.json", Receipt) == journal.receipt
+                    and read_record(
+                        target.store, resource_key(plan.resource.destination, "receipt"), Receipt
+                    )
+                    == journal.receipt
                 )
-                recover(plan.resource)
+                recover(target.store, plan.resource)
             except (OSError, ObservationFailure, ValueError) as recovery_error:
                 failed = replace(
                     failed,
                     message=failed.message + "; recovery: " + error_detail(recovery_error).message,
                 )
-            paths = recovery_paths(plan.resource)
+            paths = recovery_paths(target.store, plan.resource, plan.receipt.transaction_id)
             status = (
                 OperationStatus.APPLIED
                 if committed
@@ -658,13 +645,13 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
             break
     if failed is None:
         try:
-            _require_index(preview, pending_revision)
-            atomic(
-                target.index_root / "index.json",
+            write_record(
+                target.store,
+                key,
                 Index(identifier, target.context_digest, preview.generation),
-                expected_ancestors=preview.index_ancestors,
+                expected=pending,
             )
-        except (OSError, ObservationFailure, ValueError) as error:
+        except (OSError, ObservationFailure, ValueError, StoreBusy) as error:
             failed = error_detail(error)
     applied = any(item.status is OperationStatus.APPLIED for item in results)
     status = (
@@ -703,15 +690,15 @@ def apply_preview(preview: LifecyclePreview, *, lock_timeout: float = 0) -> Inst
     if not preview.rendered.supported:
         return _unsupported_result(preview.bundle_id, preview.rendered, preview.target)
     try:
-        _fresh(preview, initial=True)
+        _fresh(preview)
         with locks(
             preview.bundle_id,
             preview.target,
             tuple(plan.resource for plan in preview.resources),
             lock_timeout,
         ) as created:
-            return _run(_fresh(preview, initial=False, created=created))
-    except (OSError, ObservationFailure, ValueError) as error:
+            return _run(_fresh(preview, created=created))
+    except (OSError, ObservationFailure, ValueError, StoreBusy) as error:
         return InstallationResult(
             OperationStatus.FAILED,
             inspect_installation(preview.bundle_id, preview.target),
@@ -730,47 +717,22 @@ def _unsupported_result(
     )
 
 
-def _promote_prepared_index(
-    target: InstallationTarget, current: Index | None, prepared: Index
-) -> bool:
-    if prepared == current:
-        return False
-    if _completes_pending_index(current, prepared):
-        return False
-    previous = current.current if current else None
-    previous_refs = set(current.resources) if current else set()
-    desired_refs = {ref for ref, _ in prepared.pending.membership} if prepared.pending else set()
-    if (
-        prepared.current == previous
-        and prepared.previous == previous
-        and set(prepared.residual) == previous_refs | desired_refs
-    ):
-        return True
-    raise failure(
-        ErrorCode.RECOVERY_NEEDED,
-        "unrecognized installation index preparation retained",
-        target.index_root / "index.json.next",
-    )
-
-
 def _recover_locked(
     identifier: str, target: InstallationTarget, index: Index | None, refs: tuple[ResourceRef, ...]
 ) -> InstallationResult:
-    if _index(identifier, target)[0] != index:
+    if _index(identifier, target) != index:
         raise failure(
-            ErrorCode.CONCURRENT_CHANGE, "index changed while acquiring locks", target.index_root
+            ErrorCode.CONCURRENT_CHANGE,
+            "index changed while acquiring locks",
+            target.store.location,
         )
-    current, prepared = _index_records(identifier, target)
-    promote = _promote_prepared_index(target, current, prepared) if prepared is not None else False
-    revision = observe(target.index_root)
-    parents = ancestors(target.index_root / "index.json")
     for ref in refs:
-        _check_receipt(index, prepared, ref)
+        _check_receipt(target.store, index, ref)
     results: list[ResourceResult] = []
     for ref in refs:
         try:
-            pending = bool(validate_state(ref))
-            recover(ref)
+            pending = bool(pending_recovery(target.store, ref))
+            recover(target.store, ref)
             results.append(
                 ResourceResult(
                     ref, OperationStatus.APPLIED if pending else OperationStatus.UNCHANGED
@@ -778,7 +740,10 @@ def _recover_locked(
             )
         except (OSError, ObservationFailure, ValueError) as error:
             result = ResourceResult(
-                ref, OperationStatus.INCOMPLETE, error_detail(error), recovery_paths(ref)
+                ref,
+                OperationStatus.INCOMPLETE,
+                error_detail(error),
+                recovery_paths(target.store, ref),
             )
             return InstallationResult(
                 OperationStatus.INCOMPLETE,
@@ -786,18 +751,7 @@ def _recover_locked(
                 (*results, result),
                 result.error,
             )
-    if prepared is not None:
-        require(target.index_root, revision)
-        if ancestors(target.index_root / "index.json") != parents:
-            raise failure(ErrorCode.CONCURRENT_CHANGE, "index ancestor changed", target.index_root)
-        next_path = target.index_root / "index.json.next"
-        if promote:
-            os.replace(next_path, target.index_root / "index.json")
-        else:
-            next_path.unlink()
-    changed = prepared is not None or any(
-        result.status is OperationStatus.APPLIED for result in results
-    )
+    changed = any(result.status is OperationStatus.APPLIED for result in results)
     return InstallationResult(
         OperationStatus.APPLIED if changed else OperationStatus.UNCHANGED,
         inspect_installation(identifier, target),
@@ -813,7 +767,7 @@ def recover_installation(
         raise TypeError("target must be an InstallationTarget")
     _timeout(lock_timeout)
     try:
-        index, _ = _index(bundle_id, target)
+        index = _index(bundle_id, target)
         if index is None:
             return InstallationResult(
                 OperationStatus.UNCHANGED, inspect_installation(bundle_id, target)
@@ -821,7 +775,7 @@ def recover_installation(
         refs = _references(RenderedBundle(()), index, target, None)
         with locks(bundle_id, target, refs, lock_timeout):
             return _recover_locked(bundle_id, target, index, refs)
-    except (OSError, ObservationFailure, ValueError) as error:
+    except (OSError, ObservationFailure, ValueError, StoreBusy) as error:
         return InstallationResult(
             OperationStatus.FAILED,
             inspect_installation(bundle_id, target),
@@ -842,7 +796,7 @@ def _sync(
     if not rendered.supported:
         return _unsupported_result(identifier, rendered, target)
     try:
-        index, _ = _index(identifier, target)
+        index = _index(identifier, target)
         refs = _references(rendered, index, target, bundle)
         with locks(identifier, target, refs, lock_timeout):
             recovered = _recover_locked(identifier, target, index, refs)
@@ -851,7 +805,7 @@ def _sync(
             return _run(
                 _preview(identifier, bundle, rendered, target, acquisition, replace_modified)
             )
-    except (OSError, ObservationFailure, ValueError) as error:
+    except (OSError, ObservationFailure, ValueError, StoreBusy) as error:
         return InstallationResult(
             OperationStatus.FAILED,
             inspect_installation(identifier, target),

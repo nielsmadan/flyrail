@@ -13,6 +13,7 @@ from flyrail import (
     BundleIdentity,
     Command,
     Dependency,
+    DirectoryStore,
     DocumentEdit,
     DocumentFormat,
     DocumentRequest,
@@ -156,7 +157,7 @@ def consume_lifecycle(bundle: Bundle) -> None:
     original = b"# Private project instructions\r\n"
     path.write_bytes(original)
     target = InstallationTarget(
-        "generated-index",
+        DirectoryStore("generated-index"),
         [("consumer", "typed-example")],
         routing_context=[("surface", "generated-instructions")],
     )
@@ -211,7 +212,7 @@ def consume_translation() -> None:
     desired = render(bundle, context)
     assert_type(desired, RenderedBundle)
     assert desired.supported
-    target = context.installation(Path.cwd() / "translated-index")
+    target = context.installation(DirectoryStore(Path.cwd() / "translated-index"))
     assert_type(target, InstallationTarget)
     result = sync(bundle, desired, target)
     assert_type(result, InstallationResult)
@@ -227,7 +228,7 @@ def consume_translation() -> None:
 
 def consume_copilot_translation() -> None:
     root = Path.cwd() / "copilot-project"
-    target = InstallationTarget(Path.cwd() / "copilot-index")
+    target = InstallationTarget(DirectoryStore(Path.cwd() / "copilot-index"))
     platform = Platform.WINDOWS if sys.platform == "win32" else Platform.LINUX
     contexts = [
         RenderContext(Target.project(agent, root), platform) for agent in ["claude", "copilot"]
@@ -262,23 +263,26 @@ def consume_copilot_translation() -> None:
 
 
 def consume(bundle: Bundle, target: Target) -> None:
+    store = DirectoryStore("typed-state")
     assert_type(bundle.identity, BundleIdentity)
     assert_type(bundle.entries, tuple[BundleEntry, ...])
     assert_type(bundle.skills, tuple[SkillSpec, ...])
-    observations = inspect(bundle, [target])
+    observations = inspect(bundle, [target], store=store)
     assert_type(observations, tuple[TargetInspection, ...])
     assert_type(observations[0].observation, Observation)
     assert_type(observations[0].observation.installed, Installation | None)
     installed = observations[0].observation.installed
     if installed is not None:
         assert_type(installed.entries, tuple[InventoryEntry, ...])
-    results = install(bundle, [target])
+    results = install(bundle, [target], store=store)
     assert_type(results, tuple[TargetResult, ...])
     assert_type(results[0].status, OperationStatus)
     assert results[0].status is OperationStatus.APPLIED
-    assert_type(update(bundle, [target], replace_modified=False), tuple[TargetResult, ...])
-    assert_type(uninstall(bundle.id, [target]), tuple[TargetResult, ...])
-    assert uninstall(bundle.id, [target])[0].status is OperationStatus.UNCHANGED
+    assert_type(
+        update(bundle, [target], store=store, replace_modified=False), tuple[TargetResult, ...]
+    )
+    assert_type(uninstall(bundle.id, [target], store=store), tuple[TargetResult, ...])
+    assert uninstall(bundle.id, [target], store=store)[0].status is OperationStatus.UNCHANGED
 
 
 if __name__ == "__main__":

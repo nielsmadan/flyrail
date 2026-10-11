@@ -1,17 +1,18 @@
 import errno
-import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+from state_helpers import index_record, put
 from test_configuration_lifecycle import bundle, rendered
 
 from flyrail import (
     Bundle,
     BundleEntry,
     BundleIdentity,
+    DirectoryStore,
     Family,
     InstallationTarget,
     OperationStatus,
@@ -36,7 +37,11 @@ from flyrail import (
 from flyrail import _lifecycle as lifecycle
 from flyrail import _resource_transaction as tx
 from flyrail._codec import encode
+from flyrail._resource_models import Index
+from flyrail._state import resource_key
+from flyrail.authority import transaction_path
 from flyrail.configuration import ResourcePlan
+from flyrail.stores import StateStore
 
 
 @pytest.mark.parametrize(
@@ -48,14 +53,15 @@ from flyrail.configuration import ResourcePlan
         ("before", []),
         ("require_existing", []),
         ("error", []),
-        ("state_revision", []),
     ],
 )
 def test_preview_resource_rejects_borrowed_mutable_state(
     tmp_path: Path, field: str, value: Any
 ) -> None:
     plan = preview(
-        bundle(), rendered(tmp_path / "file"), InstallationTarget(tmp_path / "index")
+        bundle(),
+        rendered(tmp_path / "file"),
+        InstallationTarget(DirectoryStore(tmp_path / "index")),
     ).resources[0]
     with pytest.raises((TypeError, ValueError)):
         replace(plan, **{field: value})
@@ -72,14 +78,17 @@ def test_preview_resource_rejects_borrowed_mutable_state(
         ("replace_modified", []),
         ("index", []),
         ("generation", []),
-        ("index_revision", []),
         ("error", []),
     ],
 )
 def test_preview_rejects_mutable_or_inconsistent_public_inputs(
     tmp_path: Path, field: str, value: Any
 ) -> None:
-    plan = preview(bundle(), rendered(tmp_path / "file"), InstallationTarget(tmp_path / "index"))
+    plan = preview(
+        bundle(),
+        rendered(tmp_path / "file"),
+        InstallationTarget(DirectoryStore(tmp_path / "index")),
+    )
     with pytest.raises((TypeError, ValueError)):
         replace(plan, **{field: value})
 
@@ -89,7 +98,11 @@ def test_preview_rejects_mutable_or_inconsistent_public_inputs(
 def test_public_summary_values_reject_mutable_payloads(
     tmp_path: Path, kind: str, field: str
 ) -> None:
-    result = sync(bundle(), rendered(tmp_path / "file"), InstallationTarget(tmp_path / "index"))
+    result = sync(
+        bundle(),
+        rendered(tmp_path / "file"),
+        InstallationTarget(DirectoryStore(tmp_path / "index")),
+    )
     values: dict[str, Any] = {
         "index": result.observation,
         "resource": result.observation.resources[0],
@@ -125,7 +138,8 @@ def test_public_summary_values_reject_mutable_payloads(
     ],
 )
 def test_public_entrypoints_reject_wrong_values(tmp_path: Path, operation: str) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    store = DirectoryStore(tmp_path / "state")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired = rendered(tmp_path / "file")
     invalid: Any = []
     calls: dict[str, Callable[[], object]] = {
@@ -135,10 +149,10 @@ def test_public_entrypoints_reject_wrong_values(tmp_path: Path, operation: str) 
         "preview-removal": lambda: preview_removal("team", invalid),
         "inspect": lambda: inspect_installation("team", invalid),
         "sync": lambda: sync(invalid, desired, target),
-        "skill-install": lambda: install(invalid, []),
-        "skill-update": lambda: update(invalid, []),
+        "skill-install": lambda: install(invalid, [], store=store),
+        "skill-update": lambda: update(invalid, [], store=store),
         "skills": lambda: render_skills(invalid, Target.directory(tmp_path / "skills")),
-        "skill-inspect": lambda: inspect(invalid, []),
+        "skill-inspect": lambda: inspect(invalid, [], store=store),
     }
     with pytest.raises((TypeError, ValueError)):
         calls[operation]()
@@ -146,42 +160,43 @@ def test_public_entrypoints_reject_wrong_values(tmp_path: Path, operation: str) 
 
 
 @pytest.mark.parametrize(
-    "seam", ["pending-index", "final-index", "journal-next", "receipt-next", "before-journal"]
+    "seam", ["pending-index", "final-index", "journal-write", "receipt-write", "before-journal"]
 )
 def test_index_and_metadata_replacement_failures_preserve_membership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam: str
 ) -> None:
     path = tmp_path / "file"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     if seam != "pending-index":
         assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
-    original_replace = os.replace
+    original_write = target.store.write
     count = 0
 
-    def failing(source: Path, destination: Path) -> None:
+    def write(key: str, value: bytes, *, expected: bytes | None) -> bool:
         nonlocal count
-        if destination.name == "index.json":
+        if (seam == "journal-write" and key.endswith("/journal")) or (
+            seam == "receipt-write" and key.endswith("/receipt")
+        ):
+            raise OSError(errno.EIO, "injected record store failure")
+        if key.startswith("index/"):
             count += 1
-        should_fail = (
-            (seam == "pending-index" and destination.name == "index.json")
-            or (seam == "final-index" and destination.name == "index.json" and count == 2)
-            or (seam == "journal-next" and destination.name == "transaction.json")
-            or (seam == "receipt-next" and destination.name == "receipt.json")
-        )
-        if should_fail:
-            raise OSError(errno.EIO, "injected atomic replacement failure")
-        original_replace(source, destination)
+            if (seam == "pending-index" and count == 1) or (seam == "final-index" and count == 2):
+                raise OSError(errno.EIO, "injected index store failure")
+        return original_write(key, value, expected=expected)
 
-    monkeypatch.setattr(os, "replace", failing)
+    monkeypatch.setattr(target.store, "write", write)
     original_prepare = tx.prepare
+    unrecorded: list[Path] = []
 
-    def interrupted(plan: ResourcePlan) -> tx.Journal:
+    def interrupted(store: StateStore, plan: ResourcePlan) -> tx.Journal:
         if seam == "before-journal":
-            state = plan.resource.state_root / "staging"
-            state.mkdir(exist_ok=True)
+            directory = transaction_path(plan.resource.destination, plan.receipt.transaction_id)
+            state = directory / "staging"
+            state.mkdir(parents=True, exist_ok=True)
+            unrecorded.append(directory)
             (state / "unknown").write_bytes(b"retained")
             raise OSError(errno.EIO, "interrupted staging")
-        return original_prepare(plan)
+        return original_prepare(store, plan)
 
     monkeypatch.setattr(lifecycle, "prepare", interrupted)
     result = sync(bundle("2"), rendered(path, "second"), target)
@@ -190,14 +205,16 @@ def test_index_and_metadata_replacement_failures_preserve_membership(
         OperationStatus.PARTIAL,
         OperationStatus.INCOMPLETE,
     }
-    monkeypatch.setattr(os, "replace", original_replace)
+    if seam == "final-index":
+        retained = index_record(target, "team")
+        assert result.status is OperationStatus.PARTIAL
+        assert isinstance(retained, Index) and retained.pending is not None
+    monkeypatch.setattr(target.store, "write", original_write)
     monkeypatch.setattr(lifecycle, "prepare", tx.prepare)
     if seam == "before-journal":
         retry = remove("team", target)
-        assert retry.status is OperationStatus.INCOMPLETE
-        assert (
-            ResourceAuthority(path).state_root / "staging" / "unknown"
-        ).read_bytes() == b"retained"
+        assert retry.status is OperationStatus.APPLIED
+        assert (unrecorded[0] / "staging" / "unknown").read_bytes() == b"retained"
     else:
         retry = remove("team", target)
         assert retry.status in {OperationStatus.APPLIED, OperationStatus.UNCHANGED}
@@ -205,19 +222,20 @@ def test_index_and_metadata_replacement_failures_preserve_membership(
 
 
 def test_schema2_skill_uses_same_authority_and_other_owner_is_protected(tmp_path: Path) -> None:
+    store = DirectoryStore(tmp_path / "state")
     tree = TreeContent([BundleEntry("SKILL.md", b"skill")])
     b = Bundle.from_artifacts(
         BundleIdentity("team", "1"), [SkillArtifact("artifact", "example", tree)]
     )
     target = Target.directory(tmp_path / "skills")
-    assert install(b, [target])[0].status is OperationStatus.APPLIED
-    assert inspect(b, [target])[0].observation.is_current
+    assert install(b, [target], store=store)[0].status is OperationStatus.APPLIED
+    assert inspect(b, [target], store=store)[0].observation.is_current
     other = Bundle.from_artifacts(
         BundleIdentity("other", "1"), [SkillArtifact("artifact", "example", tree)]
     )
-    assert install(other, [target])[0].status is OperationStatus.FAILED
-    assert inspect(other, [target])[0].observation.conflicts
-    assert uninstall("team", [target])[0].status is OperationStatus.APPLIED
+    assert install(other, [target], store=store)[0].status is OperationStatus.FAILED
+    assert inspect(other, [target], store=store)[0].observation.conflicts
+    assert uninstall("team", [target], store=store)[0].status is OperationStatus.APPLIED
 
 
 @pytest.mark.parametrize(
@@ -225,18 +243,16 @@ def test_schema2_skill_uses_same_authority_and_other_owner_is_protected(tmp_path
     [
         "index-overlap",
         "resource-kind",
-        "unknown-state",
         "header-mismatch",
-        "authority-next",
         "missing-index-receipt",
     ],
 )
 def test_resource_identity_and_reserved_state_checks(tmp_path: Path, target_kind: str) -> None:
     path = tmp_path / "file"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     if target_kind == "index-overlap":
         with pytest.raises(ValueError):
-            sync(bundle(), rendered(path), InstallationTarget(path / "index"))
+            sync(bundle(), rendered(path), InstallationTarget(DirectoryStore(path / "index")))
         return
     if target_kind == "resource-kind":
         desired = RenderedBundle(
@@ -249,30 +265,28 @@ def test_resource_identity_and_reserved_state_checks(tmp_path: Path, target_kind
             sync(bundle(), desired, target)
         return
     assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
-    state = ResourceAuthority(path).state_root
-    if target_kind == "unknown-state":
-        (state / "unknown").write_bytes(b"state")
-    elif target_kind == "header-mismatch":
+    destination = ResourceAuthority(path).destination
+    if target_kind == "header-mismatch":
         other = (
             preview(
-                bundle(), rendered(tmp_path / "other"), InstallationTarget(tmp_path / "other-index")
+                bundle(),
+                rendered(tmp_path / "other"),
+                InstallationTarget(DirectoryStore(tmp_path / "other-index")),
             )
             .resources[0]
             .resource
         )
-        (state / "authority.json").write_bytes(encode(other))
-    elif target_kind == "authority-next":
-        (state / "authority.json").rename(state / "authority.json.next")
-        assert sync(bundle(), rendered(path), target).status is OperationStatus.UNCHANGED
-        return
+        put(target.store, resource_key(destination, "authority"), encode(other))
     else:
-        (state / "receipt.json").unlink()
-        index = (target.index_root / "index.json").read_bytes()
+        receipt_key = resource_key(destination, "receipt")
+        stored = target.store.read(receipt_key)
+        assert stored is not None and target.store.delete(receipt_key, expected=stored)
+        index = index_record(target, "team")
         before = path.read_bytes()
         result = remove("team", target)
         assert result.status is OperationStatus.FAILED
         assert result.error is not None and "receipt is missing" in result.error.message
-        assert (target.index_root / "index.json").read_bytes() == index
+        assert index_record(target, "team") == index
         assert path.read_bytes() == before
         return
     before = path.read_bytes()
@@ -297,22 +311,7 @@ def test_nested_subtree_parents_are_created_without_owning_foreign_container(
             )
         ]
     )
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), desired, target).status is OperationStatus.APPLIED
     assert remove("team", target).status is OperationStatus.APPLIED
     assert (path / "foreign").read_bytes() == b"keep"
-
-
-def test_prepared_index_marks_status_pending_and_requires_fresh_sync(tmp_path: Path) -> None:
-    path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
-    assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
-    payload = (target.index_root / "index.json").read_bytes()
-    (target.index_root / "index.json.next").write_bytes(payload)
-    observed = inspect_installation("team", target)
-    assert observed.pending and not observed.is_current
-    planned = preview(bundle(), rendered(path), target)
-    assert not planned.applicable and planned.error is not None
-    assert apply_preview(planned).status is OperationStatus.FAILED
-    assert sync(bundle(), rendered(path), target).status is OperationStatus.UNCHANGED
-    assert inspect_installation("team", target).is_current

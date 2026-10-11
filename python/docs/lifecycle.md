@@ -1,9 +1,13 @@
 # Installation, update and removal
 
 Flyrail synchronizes an immutable bundle and explicit rendering into a logical
-`InstallationTarget`. One resource receipt owns a physical document, tree or
-skill container across callers and bundles. A separate private index locates the
-resources belonging to one installation, including interrupted or retired claims.
+`InstallationTarget`, backed by the application's `StateStore`. One resource
+receipt owns a physical document, tree or skill container across callers and
+bundles, within that store. A separate private index, held in the same store,
+locates the resources belonging to one installation, including interrupted or
+retired claims. Authority records are permanent within a store: nothing ever
+deletes one, so a failed child admission keeps excluding an enclosing tree, and
+a failed tree admission keeps excluding every descendant it already reserved.
 
 ## Planning and applying
 
@@ -43,8 +47,18 @@ between an application's existence check and the later write.
 | `TAKEOVER` | Record the original selected content and position. | Restore that first baseline. |
 | `ADOPT` | Require the desired selection to match. | Remove adopted content without restoring it. |
 
-Acquisition cannot take another bundle's claim. Sections use exact boundary lines;
-structured selections use keys or unambiguous stable array members. The
+Acquisition cannot take another bundle's claim, and this holds within one store
+only: content recorded in a different store is foreign to flyrail, which
+recognizes neither its claims nor its authority records as fences. Applications
+sharing one store share its receipts and fences.
+Content installed through a store the application has since lost or replaced
+becomes foreign the same way, even though flyrail itself wrote it: default
+`CONFLICT` acquisition refuses it, and explicit `Acquisition.ADOPT` re-owns
+content that matches exactly, per the table above. A later edit by another
+application to content this store still records as owned is reported as a
+modification like any other change, not overwritten without
+`replace_modified=True`. Sections use exact boundary lines; structured
+selections use keys or unambiguous stable array members. The
 [editor contract](../../spec/document-editing.md) defines matching and restoration.
 
 A changed or missing owned unit blocks its resource by default, including a
@@ -88,14 +102,41 @@ It does not assert that an agent has loaded the configuration.
 | `FAILED` | The requested operation failed without a successful resource commit or reported incomplete resource recovery. |
 | `INCOMPLETE` | Recovery data remains unresolved; retain the reported paths. |
 
+A nonempty `recovery_paths` names the transaction directory recorded by the
+resource's journal — `P/.flyrail-<hash>-<transaction-id>.txn` beside destination
+`P/N` — left behind when a write was interrupted after its journal was written;
+the next successful recovery removes it, not the caller. A write that fails
+before its journal is written removes its own staged data and transaction
+directory in the same call. A transaction directory that no journal in the store
+names belongs to another store, or holds data a failed write could not
+recognize: flyrail never reports, removes or waits on it, and deleting it is the
+host's decision.
+
 Inspect the aggregate error, final observation and each resource result. A resource
 whose receipt committed stays `APPLIED` if cleanup later fails. A subsequent
 mutation performs cleanup only for that committed transaction.
 
 Removal is source-free. Intact created/adopted claims are deleted and intact
 takeovers restored; foreign content survives. Empty resource receipts and permanent
-authority/lock directories may remain. Applications must keep state/index paths
-ignored independently of their disposable configuration files.
+authority records may remain in the store. Applications must keep the store's
+location ignored independently of their disposable configuration files.
+
+Flyrail never deletes an authority record, so a resource keeps fencing its
+ancestors and descendants after removal; see
+[resource authority](../../spec/resource-authority.md). To clear one, delete its
+record from the store directly while no flyrail operation runs against it:
+
+```python
+import hashlib
+import unicodedata
+
+from flyrail import ResourceAuthority
+
+destination = ResourceAuthority(path).destination.as_posix()
+digest = hashlib.sha256(unicodedata.normalize("NFC", destination.casefold()).encode()).hexdigest()
+key = f"resource/{digest}/authority"
+store.delete(key, expected=store.read(key))
+```
 
 A resource referenced by a committed current or previous generation, including a
 recognized prepared completion of the pending generation, requires its ownership

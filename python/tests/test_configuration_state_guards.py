@@ -5,11 +5,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from state_helpers import canonical_json, put
 from test_configuration_lifecycle import bundle, rendered
 
 from flyrail import (
     Acquisition,
     Ancestor,
+    DirectoryStore,
     ErrorCode,
     Family,
     FileContent,
@@ -27,7 +29,7 @@ from flyrail import (
 )
 from flyrail._codec import encode
 from flyrail._resource_models import ResourceRef
-from flyrail.authority import state_path
+from flyrail._state import index_key, resource_key
 from flyrail.observations import (
     Conflict,
     Installation,
@@ -71,7 +73,7 @@ def test_invalid_complete_ownership_records_preserve_every_byte(
 ) -> None:
     destination = tmp_path / "resource"
     destination.write_bytes(b"original baseline")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     content = RenderedBundle(
         [RenderedArtifact("file", Family.HOOKS, destination, FileContent(b"owned"))]
     )
@@ -79,8 +81,10 @@ def test_invalid_complete_ownership_records_preserve_every_byte(
         sync(bundle(), content, target, acquisition=Acquisition.TAKEOVER).status
         is OperationStatus.APPLIED
     )
-    path = ResourceAuthority(destination).state_root / "receipt.json"
-    record = json.loads(path.read_bytes())
+    key = resource_key(ResourceAuthority(destination).destination, "receipt")
+    stored = target.store.read(key)
+    assert stored is not None
+    record = json.loads(stored)
     fields = record["fields"]
     owned = fields["claims"][0]["fields"]
     revision = owned["installed"]["fields"]
@@ -131,12 +135,13 @@ def test_invalid_complete_ownership_records_preserve_every_byte(
         owned["requirements"] = [[{"path": str(tmp_path / "dependency")}, "a" * 64]] * 2
     else:
         revision["nodes"] = []
-    path.write_text(json.dumps(record))
+    put(target.store, key, canonical_json(record))
     rejected = remove("team", target)
     assert rejected.status is OperationStatus.FAILED
     assert rejected.error is not None and rejected.error.code is ErrorCode.INVALID_STATE
     assert destination.read_bytes() == b"owned"
-    assert json.loads(path.read_bytes()) == record
+    retained = target.store.read(key)
+    assert retained is not None and json.loads(retained) == record
 
 
 @pytest.mark.parametrize(
@@ -146,7 +151,6 @@ def test_invalid_complete_ownership_records_preserve_every_byte(
         "duplicate-id",
         "index-generation",
         "residual-type",
-        "unknown-index-entry",
         "stale-generation",
     ],
 )
@@ -154,10 +158,12 @@ def test_index_generation_is_verified_without_authorizing_new_ownership(
     tmp_path: Path, damage: str
 ) -> None:
     destination = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(destination), target).status is OperationStatus.APPLIED
-    path = target.index_root / "index.json"
-    raw = json.loads(path.read_bytes())
+    key = index_key("team", target.context_digest)
+    stored = target.store.read(key)
+    assert stored is not None
+    raw = json.loads(stored)
     fields = raw["fields"]
     membership = fields["current"]["fields"]["membership"]
     if damage == "membership-ref":
@@ -168,11 +174,9 @@ def test_index_generation_is_verified_without_authorizing_new_ownership(
         fields["previous"] = []
     elif damage == "residual-type":
         fields["residual"] = [[]]
-    elif damage == "unknown-index-entry":
-        (target.index_root / "other").write_bytes(b"retained")
     else:
         fields["current"]["fields"]["version"] = "stale"
-    path.write_text(json.dumps(raw))
+    put(target.store, key, canonical_json(raw))
     from flyrail import inspect_installation
 
     observation = inspect_installation("team", target)
@@ -221,10 +225,8 @@ def test_public_status_values_cannot_retain_mutable_caller_data(
         "modification": Modification("team", "skill", ModificationKind.MISSING),
         "conflict": Conflict("skill", None),
         "observation": observed,
-        "inspection": TargetInspection(target, target.root, tmp_path / "state", None, observed),
-        "result": TargetResult(
-            target, target.root, tmp_path / "state", None, OperationStatus.UNCHANGED, observed
-        ),
+        "inspection": TargetInspection(target, target.root, None, observed),
+        "result": TargetResult(target, target.root, None, OperationStatus.UNCHANGED, observed),
         "ancestor": Ancestor(tmp_path, 1, 2, 0o755, 3, 4),
     }
     with pytest.raises((TypeError, ValueError)):
@@ -232,45 +234,37 @@ def test_public_status_values_cannot_retain_mutable_caller_data(
 
 
 def test_skill_context_aliases_and_corrupt_receipts_have_typed_results(tmp_path: Path) -> None:
+    store = DirectoryStore(tmp_path / "state")
     from skill_helpers import make_bundle
 
     b = make_bundle(tmp_path / "bundle")
     target = Target.directory(tmp_path / "skills")
     alias = Target.user("claude", home=tmp_path, env={"CLAUDE_CONFIG_DIR": str(tmp_path)})
-    assert install(b, [target])[0].status is OperationStatus.APPLIED
-    results = inspect(b, [target, alias])
+    assert install(b, [target], store=store)[0].status is OperationStatus.APPLIED
+    results = inspect(b, [target, alias], store=store)
     assert results[1].alias_of == 0 and results[1].observation.is_current
     assert results[0].observation.installed is not None
     assert any(entry.is_directory for entry in results[0].observation.installed.entries)
-    state = ResourceAuthority(target.root).state_root
-    (state / "receipt.json").write_bytes(b"{}")
-    rejected = inspect(b, [target])[0]
+    put(store, resource_key(ResourceAuthority(target.root).destination, "receipt"), b"{}")
+    rejected = inspect(b, [target], store=store)[0]
     assert rejected.observation.state is ObservationState.UNKNOWN
-    assert install(b, [target])[0].status is OperationStatus.FAILED
+    assert install(b, [target], store=store)[0].status is OperationStatus.FAILED
 
 
 @pytest.mark.parametrize("invalid", [[], ["not a target"]])
 def test_skill_empty_or_invalid_target_set_is_rejected(tmp_path: Path, invalid: Any) -> None:
     with pytest.raises((TypeError, ValueError)):
-        install(bundle(), invalid)
+        install(bundle(), invalid, store=DirectoryStore(tmp_path / "state"))
 
 
 def test_codec_refuses_mutable_values_and_noncanonical_destination(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         encode({"borrowed": []})
-    ref = ResourceRef(
-        tmp_path / "resource",
-        ResourceKind.DOCUMENT,
-        ResourceAuthority(tmp_path / "resource").state_root,
-    )
+    ref = ResourceRef(tmp_path / "resource", ResourceKind.DOCUMENT)
     moved = tmp_path / "directory"
     moved.mkdir()
     (moved / "link").symlink_to(tmp_path / "resource")
-    redirected = replace(
-        ref,
-        destination=moved / "link",
-        state_root=state_path(moved / "link"),
-    )
+    redirected = replace(ref, destination=moved / "link")
     with pytest.raises(ValueError):
         _ = redirected.authority
 

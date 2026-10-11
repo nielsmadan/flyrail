@@ -1,6 +1,6 @@
 # Public Python API
 
-[Bundles and rendered content](#bundles-and-rendered-content) · [Configuration lifecycle](#configuration-lifecycle) · [Agent discovery](#agent-discovery) · [Plan summaries](#plan-summaries) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
+[Bundles and rendered content](#bundles-and-rendered-content) · [State stores](#state-stores) · [Configuration lifecycle](#configuration-lifecycle) · [Agent discovery](#agent-discovery) · [Plan summaries](#plan-summaries) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
 
 Import supported names from `flyrail`. Bundles, previews, observations and results
 are immutable snapshots. The library is synchronous; the application chooses
@@ -21,15 +21,60 @@ explicit `RenderContext`; `render_many` combines several contexts for one logica
 installation. `capabilities` distinguishes portable semantics and native routing.
 Unsupported notices block lifecycle mutation before lock/recovery admission.
 
-`InstallationTarget` names a private logical index and snapshots string context
-pairs. Reuse the same index and context for future inspection, updates and removal.
-Choose one index per bundle installation. It records resource membership; each
-physical resource has its own shared ownership authority.
+`InstallationTarget(store, context=())` names one installation: within `store`,
+the pair of bundle ID and `context` is its identity. Reuse the same store and
+context for future inspection, updates and removal. `InstallationTarget(store)`
+with an empty context names a single installation per bundle in that store — two
+such targets sharing a store collide. It records resource membership; each
+physical resource has its own shared ownership authority, held in the same store.
 
-The optional keyword-only `routing_context` captures additional routing pairs in
-an immutable preview. It does not change the persistent index identity. Use
-`context` for installation identity and `routing_context` for the route selected
-for a particular call.
+`RenderContext.installation(store, context=None)` builds a target from a render
+context. Without an explicit `context` it uses the stable entries of that render
+context's `routing_context` — `agent`, `scope`, `surface` and `root` — so
+per-agent or per-scope installations sharing one store stay separate, while a
+changed hook runtime, asset root, platform or environment keeps the same
+installation. Pass an explicit `context` instead when an identity must survive
+a change to those entries, such as a harness relocating a project root or user
+home.
+
+The optional keyword-only `routing_context` on `InstallationTarget` itself
+captures additional routing pairs in an immutable preview. It does not change
+the persistent installation identity. Use `context` for installation identity
+and `routing_context` for the route selected for a particular call.
+
+## State stores
+
+Flyrail keeps no persistent state of its own. Every index, receipt, journal and
+lock lives in a `StateStore` the application constructs and passes explicitly —
+there is no default store and no default location. `StateStore` exposes `read`,
+`write`, `delete`, `keys` and `lock`; `write` and `delete` are compare-and-set
+against an `expected` value, and `lock` is a context manager that waits up to a
+timeout before raising `StoreBusy(name)`. See the shared
+[state store contract](../../spec/state-store.md) for every operation's exact
+guarantees.
+
+Three built-ins cover the common cases:
+
+| Store | Use when |
+| --- | --- |
+| `DirectoryStore(path)` | Most applications; one file per record under `path`. |
+| `SQLiteStore(path)` | The application already keeps its own state in SQLite. `path` names a separate database file of flyrail's own — it never shares the application's connection. |
+| `MemoryStore()` | Tests and dry runs; nothing survives the process. |
+
+A store decides what flyrail deletes and restores, so keep it private to the
+user running flyrail. `DirectoryStore` and `SQLiteStore` raise `PermissionError`
+for an existing location that is not private to its owner; lifecycle calls report
+it as `IO_ERROR`.
+
+`store.location` names a store's filesystem footprint (a `Path`, or `None` for
+`MemoryStore`); a destination, transaction directory or bundle source that
+overlaps it is refused. A custom store implements `StateStore` directly and must
+pass `flyrail.testing.check_store`. The kit checks single-process semantics
+through two handles of one store: compare-and-set writes and deletes, value
+round-trips, key listing and validation, and lock exclusion with bounded waits.
+It does not verify cross-process lock exclusion or durability, which a store's
+own tests must cover. It needs a store with nothing under the `conformance/` key
+prefix and leaves the keys it writes there.
 
 ## Configuration lifecycle
 
@@ -53,6 +98,7 @@ from pathlib import Path
 from flyrail import (
     Bundle,
     BundleIdentity,
+    DirectoryStore,
     Family,
     InstallationTarget,
     InstructionArtifact,
@@ -80,7 +126,8 @@ rendered = RenderedBundle(
         ),
     ]
 )
-target = InstallationTarget(root / ".cache" / "project-guide")
+store = DirectoryStore(root / ".cache" / "project-guide" / "flyrail")
+target = InstallationTarget(store)
 proposal = preview(bundle, rendered, target)
 result = apply_preview(proposal)
 observation = inspect_installation(bundle.id, target)
@@ -187,8 +234,9 @@ it. [The developer integration walkthrough](integration.md) prints one per agent
 
 `Target.directory`, `Target.project` and `Target.user` select skill containers.
 `install`, `update`, `uninstall` and `inspect` adapt skill-only bundles to the
-same resource lifecycle. They accept a nonempty target iterable and return ordered
-tuples, retaining alias attribution. They do not translate non-skill artifacts.
+same resource lifecycle. Each takes a nonempty target iterable and an explicit
+keyword-only `store`, and returns ordered tuples, retaining alias attribution.
+They do not translate non-skill artifacts.
 Expected filesystem failures produce results for the affected targets; independent
 targets continue in request order. Invalid arguments and unsupported skill bundle
 contents are validated before mutation.

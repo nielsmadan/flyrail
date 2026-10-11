@@ -4,9 +4,9 @@ from pathlib import Path
 
 from flyrail._codec import register
 from flyrail._filesystem import rename_exclusive
+from flyrail._observation import ObservationFailure, Observer
 from flyrail._resource_io import (
     ancestors,
-    atomic,
     cleanup_revision,
     destroy,
     failure,
@@ -14,16 +14,22 @@ from flyrail._resource_io import (
     observe,
     private_revision,
     protect,
-    read,
     require,
-    validate_state,
     write_revision,
 )
 from flyrail._resource_models import Ancestor, Receipt, ResourceRef, Revision, sequence
 from flyrail._security import ensure_private, principals, replace_file, set_security
-from flyrail.authority import hierarchy_conflicts
+from flyrail._state import (
+    delete_record,
+    hierarchy_conflicts,
+    read_record,
+    resource_key,
+    write_record,
+)
+from flyrail.authority import transaction_path
 from flyrail.configuration import ResourcePlan
 from flyrail.observations import ErrorCode
+from flyrail.stores import StateStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,106 +71,180 @@ class Journal:
 register(Journal)
 
 
-def paths(ref: ResourceRef) -> tuple[Path, Path, Path]:
-    return (
-        ref.state_root / "transaction.json",
-        ref.state_root / "staging" / "resource",
-        ref.state_root / "backup" / "resource",
-    )
+def transaction_directory(journal: Journal) -> Path:
+    return transaction_path(journal.resource.destination, journal.receipt.transaction_id)
 
 
-def _layout(ref: ResourceRef) -> None:
-    validate_state(ref)
-    for parent in ("staging", "backup"):
-        root = ref.state_root / parent
-        if root.exists():
-            names = {path.name for path in root.iterdir()}
-            if not names <= {"resource"}:
-                raise failure(ErrorCode.RECOVERY_NEEDED, "unknown transaction data", root)
+def paths(directory: Path) -> tuple[Path, Path]:
+    return directory / "staging" / "resource", directory / "backup" / "resource"
 
 
-def transaction_ancestors(ref: ResourceRef) -> tuple[Ancestor, ...]:
-    _, staged, backup = paths(ref)
+def _journal_key(ref: ResourceRef) -> str:
+    return resource_key(ref.destination, "journal")
+
+
+def _receipt_key(ref: ResourceRef) -> str:
+    return resource_key(ref.destination, "receipt")
+
+
+def _layout(directory: Path) -> None:
+    observer = Observer()
+    observer.managed_directory(directory)
+    for child in observer.directory(directory):
+        if child.name not in {"staging", "backup"}:
+            raise failure(ErrorCode.RECOVERY_NEEDED, "unknown transaction data", child)
+        if not {path.name for path in observer.directory(child)} <= {"resource"}:
+            raise failure(ErrorCode.RECOVERY_NEEDED, "unknown transaction data", child)
+    observer.finish()
+
+
+def transaction_ancestors(directory: Path) -> tuple[Ancestor, ...]:
+    staged, backup = paths(directory)
     return tuple(dict.fromkeys((*ancestors(staged), *ancestors(backup))))
 
 
-def _ancestors(journal: Journal) -> None:
-    current = transaction_ancestors(journal.resource)
-    if current != journal.ancestors:
-        raise failure(
-            ErrorCode.CONCURRENT_CHANGE, "resource ancestor changed", journal.resource.destination
-        )
-    for path in (
-        journal.resource.state_root,
-        paths(journal.resource)[1].parent,
-        paths(journal.resource)[2].parent,
-    ):
-        ensure_private(path)
-    conflicts = hierarchy_conflicts(
-        journal.resource.authority, whole_tree=journal.resource.kind != "document"
+def _transient(path: Path, directory: Path) -> bool:
+    return path == directory or directory in path.parents
+
+
+def _ancestors(store: StateStore, journal: Journal) -> None:
+    ref = journal.resource
+    directory = transaction_directory(journal)
+    current = transaction_ancestors(directory)
+    retained = tuple(
+        item
+        for item in journal.ancestors
+        if item in current or not _transient(item.path, directory)
     )
+    if current != retained:
+        raise failure(ErrorCode.CONCURRENT_CHANGE, "resource ancestor changed", ref.destination)
+    for path in (directory, directory / "staging", directory / "backup"):
+        if path.exists():
+            ensure_private(path)
+    conflicts = hierarchy_conflicts(store, ref.authority, whole_tree=ref.kind != "document")
     if conflicts:
         raise failure(ErrorCode.CONFLICT, "resource hierarchy reservation changed", conflicts[0])
 
 
-def _receipt(journal: Journal) -> Receipt | None:
-    return read(journal.resource.state_root / "receipt.json", Receipt)
+def _receipt(store: StateStore, journal: Journal) -> Receipt | None:
+    return read_record(store, _receipt_key(journal.resource), Receipt)
 
 
-def _journal(journal: Journal) -> None:
-    if read(paths(journal.resource)[0], Journal) != journal:
+def _journal(store: StateStore, journal: Journal) -> None:
+    if read_record(store, _journal_key(journal.resource), Journal) != journal:
         raise failure(
-            ErrorCode.RECOVERY_NEEDED, "transaction record changed", paths(journal.resource)[0]
+            ErrorCode.RECOVERY_NEEDED,
+            "transaction record changed",
+            transaction_directory(journal),
         )
 
 
-def prepare(plan: ResourcePlan) -> Journal:
+def _remove_directories(
+    directory: Path, *, ignored: tuple[type[OSError], ...] = (FileNotFoundError,)
+) -> None:
+    for path in (directory / "staging", directory / "backup", directory):
+        try:
+            path.rmdir()
+        except ignored:
+            continue
+
+
+def _discard(directory: Path, revisions: tuple[Revision, ...]) -> None:
+    staged = paths(directory)[0]
+    try:
+        current = observe(staged)
+        if current.nodes and current in revisions:
+            destroy(staged, current)
+    except (OSError, ObservationFailure, ValueError):
+        return
+    _remove_directories(directory, ignored=(OSError,))
+
+
+def pending_recovery(store: StateStore, ref: ResourceRef) -> tuple[Path, ...]:
+    journal = read_record(store, _journal_key(ref), Journal)
+    return () if journal is None else (transaction_directory(journal),)
+
+
+def prepare(store: StateStore, plan: ResourcePlan) -> Journal:
     ref = plan.resource
-    if ancestors(paths(ref)[0]) != plan.ancestors:
+    directory = transaction_path(ref.destination, plan.receipt.transaction_id)
+    if ancestors(directory / "staging") != plan.ancestors:
         raise failure(ErrorCode.CONCURRENT_CHANGE, "resource ancestor changed", ref.destination)
-    require(ref.state_root, plan.state_revision)
     require(ref.destination, plan.before)
     if plan.require_existing and not plan.before.nodes:
         raise failure(
             ErrorCode.CONCURRENT_CHANGE, "required existing resource disappeared", ref.destination
         )
-    if read(ref.state_root / "receipt.json", Receipt) != plan.previous:
+    if read_record(store, _receipt_key(ref), Receipt) != plan.previous:
         raise failure(
-            ErrorCode.CONCURRENT_CHANGE, "receipt changed during preparation", ref.state_root
+            ErrorCode.CONCURRENT_CHANGE, "receipt changed during preparation", ref.destination
         )
-    journal_path, staged_path, backup_path = paths(ref)
-    ensure_private(ref.state_root)
+    retained = read_record(store, _journal_key(ref), Journal)
+    if retained is not None:
+        raise failure(
+            ErrorCode.RECOVERY_NEEDED,
+            "transaction record retained",
+            transaction_directory(retained),
+        )
+    try:
+        directory.mkdir(mode=0o700)
+    except FileExistsError as error:
+        raise failure(
+            ErrorCode.RECOVERY_NEEDED, "unrecognized transaction data retained", directory
+        ) from error
+    written: Revision | None = None
+    try:
+        storage_ancestors = _storage(plan, directory)
+        if plan.after != plan.before:
+            written = write_revision(paths(directory)[0], plan.after)
+        journal = _journal_for(
+            store, plan, directory, storage_ancestors, plan.before if written is None else written
+        )
+    except Exception:
+        _discard(directory, () if written is None else (written,))
+        raise
+    try:
+        write_record(store, _journal_key(ref), journal, expected=None)
+    except Exception:
+        _discard(directory, (journal.staged, journal.published))
+        raise
+    return journal
+
+
+def _storage(plan: ResourcePlan, directory: Path) -> tuple[Ancestor, ...]:
+    staged_path, backup_path = paths(directory)
+    ensure_private(directory)
     storage = []
     for path in (staged_path.parent, backup_path.parent):
-        previous = next(
-            (node for node in plan.state_revision.nodes if node.path == path.name), None
-        )
-        if previous is None:
-            path.mkdir(mode=0o700)
-            expected = observe(path)
-        else:
-            expected = Revision((replace(previous, path=""),))
-        require(path, expected)
+        path.mkdir(mode=0o700)
+        expected = observe(path)
         ensure_private(path)
         storage.append((path, expected))
-    storage_ancestors = transaction_ancestors(ref)
+    storage_ancestors = transaction_ancestors(directory)
     for path, expected in storage:
         require(path, expected)
-    if (
-        tuple(
-            item
-            for item in storage_ancestors
-            if item.path not in (staged_path.parent, backup_path.parent)
+    created = (directory, staged_path.parent, backup_path.parent)
+    if tuple(item for item in storage_ancestors if item.path not in created) != plan.ancestors:
+        raise failure(
+            ErrorCode.CONCURRENT_CHANGE, "resource ancestor changed", plan.resource.destination
         )
-        != plan.ancestors
-    ):
-        raise failure(ErrorCode.CONCURRENT_CHANGE, "resource ancestor changed", ref.destination)
-    staged = plan.before if plan.after == plan.before else write_revision(staged_path, plan.after)
+    return storage_ancestors
+
+
+def _journal_for(
+    store: StateStore,
+    plan: ResourcePlan,
+    directory: Path,
+    storage_ancestors: tuple[Ancestor, ...],
+    staged: Revision,
+) -> Journal:
+    ref = plan.resource
+    staged_path = paths(directory)[0]
     published = staged
     backup = plan.before
     if os.name == "nt" and plan.before != plan.after and plan.before.nodes:
         template = (
-            staged.nodes[0].security if staged.nodes else observe(ref.state_root).nodes[0].security
+            staged.nodes[0].security if staged.nodes else observe(directory).nodes[0].security
         )
         if any(principals(node.security) != principals(template) for node in plan.before.nodes):
             import errno
@@ -205,49 +285,40 @@ def prepare(plan: ResourcePlan) -> Journal:
         backup,
         storage_ancestors,
     )
-    _ancestors(journal)
+    _ancestors(store, journal)
     require(ref.destination, plan.before)
-    atomic(journal_path, journal)
     return journal
 
 
-def publish_receipt(journal: Journal) -> None:
-    _journal(journal)
-    _layout(journal.resource)
-    _ancestors(journal)
-    require(paths(journal.resource)[1], Revision())
+def publish_receipt(store: StateStore, journal: Journal) -> None:
+    _journal(store, journal)
+    _layout(transaction_directory(journal))
+    _ancestors(store, journal)
+    staged, backup = paths(transaction_directory(journal))
+    require(staged, Revision())
     require(journal.resource.destination, journal.published)
-    require(
-        paths(journal.resource)[2],
-        journal.backup if journal.before != journal.staged else Revision(),
-    )
-    for name in ("authority.json.next", "transaction.json.next", "receipt.json.next"):
-        path = journal.resource.state_root / name
-        if path.exists():
-            raise failure(
-                ErrorCode.RECOVERY_NEEDED, "unexpected metadata preparation before commit", path
-            )
-    if _receipt(journal) != journal.previous:
+    require(backup, journal.backup if journal.before != journal.staged else Revision())
+    if _receipt(store, journal) != journal.previous:
         raise failure(
             ErrorCode.CONCURRENT_CHANGE,
             "receipt changed before commit",
-            journal.resource.state_root,
+            journal.resource.destination,
         )
-    atomic(journal.resource.state_root / "receipt.json", journal.receipt)
+    write_record(store, _receipt_key(journal.resource), journal.receipt, expected=journal.previous)
 
 
-def publish(journal: Journal) -> None:
+def publish(store: StateStore, journal: Journal) -> None:
     ref = journal.resource
-    _, staged, backup = paths(ref)
-    _journal(journal)
-    _ancestors(journal)
+    staged, backup = paths(transaction_directory(journal))
+    _journal(store, journal)
+    _ancestors(store, journal)
     require(ref.destination, journal.before)
     if journal.before != journal.staged:
         require(staged, journal.staged)
         if journal.backup != journal.before:
             protect(ref.destination, journal.before, journal.backup.nodes[0].security)
             require(ref.destination, journal.backup)
-            _ancestors(journal)
+            _ancestors(store, journal)
             require(ref.destination, journal.backup)
         if os.name == "nt" and journal.before.data is not None and journal.staged.data is not None:
             replace_file(ref.destination, staged, backup)
@@ -268,16 +339,17 @@ def publish(journal: Journal) -> None:
                 require(staged, journal.staged)
                 rename_exclusive(staged, ref.destination)
         require(ref.destination, journal.published)
-    _ancestors(journal)
+    _ancestors(store, journal)
     require(ref.destination, journal.published)
-    publish_receipt(journal)
+    publish_receipt(store, journal)
 
 
-def cleanup(journal: Journal) -> None:
-    _journal(journal)
-    _layout(journal.resource)
-    _ancestors(journal)
-    _, staged, backup = paths(journal.resource)
+def cleanup(store: StateStore, journal: Journal) -> None:
+    directory = transaction_directory(journal)
+    _journal(store, journal)
+    _layout(directory)
+    _ancestors(store, journal)
+    staged, backup = paths(directory)
     for path, revisions in (
         (staged, (journal.staged, journal.published)),
         (backup, (journal.backup, journal.before)),
@@ -287,23 +359,19 @@ def cleanup(journal: Journal) -> None:
             if not any(cleanup_revision(current, revision) for revision in revisions):
                 raise failure(ErrorCode.RECOVERY_NEEDED, "unexpected cleanup revision", path)
             destroy(path, current)
-    next_receipt = journal.resource.state_root / "receipt.json.next"
-    if next_receipt.exists():
-        if read(next_receipt, Receipt) != journal.receipt:
-            raise failure(ErrorCode.RECOVERY_NEEDED, "staged receipt changed", next_receipt)
-        next_receipt.unlink()
-    _journal(journal)
-    paths(journal.resource)[0].unlink()
+    _remove_directories(directory)
+    delete_record(store, _journal_key(journal.resource), expected=journal)
 
 
-def rollback(journal: Journal) -> None:
+def rollback(store: StateStore, journal: Journal) -> None:
     ref = journal.resource
-    _, stage_path, backup_path = paths(ref)
-    _layout(ref)
-    _ancestors(journal)
+    directory = transaction_directory(journal)
+    stage_path, backup_path = paths(directory)
+    _layout(directory)
+    _ancestors(store, journal)
     actual, staged, backup = observe(ref.destination), observe(stage_path), observe(backup_path)
     if actual == journal.before and not backup.nodes:
-        cleanup(journal)
+        cleanup(store, journal)
         return
     if staged.nodes and staged not in (journal.staged, journal.published):
         raise failure(ErrorCode.RECOVERY_NEEDED, "unexpected staged revision", stage_path)
@@ -343,30 +411,31 @@ def rollback(journal: Journal) -> None:
         raise failure(
             ErrorCode.RECOVERY_NEEDED, "cannot restore complete previous revision", ref.destination
         )
-    cleanup(journal)
+    cleanup(store, journal)
 
 
-def recover(ref: ResourceRef) -> None:
-    pending = validate_state(ref)
-    if not pending:
-        return
-    journal_path = paths(ref)[0]
-    journal = read(journal_path, Journal)
+def recover(store: StateStore, ref: ResourceRef) -> None:
+    journal = read_record(store, _journal_key(ref), Journal)
     if journal is None:
-        candidate = read(ref.state_root / "transaction.json.next", Journal)
-        if candidate is not None and candidate.resource == ref:
-            os.replace(ref.state_root / "transaction.json.next", journal_path)
-            journal = candidate
-    if journal is None or journal.resource != ref:
+        return
+    if journal.resource != ref:
         raise failure(
-            ErrorCode.RECOVERY_NEEDED, "unrecognized preparation data retained", pending[0]
+            ErrorCode.RECOVERY_NEEDED,
+            "transaction record disagrees",
+            transaction_directory(journal),
         )
-    current = _receipt(journal)
+    if journal.receipt == journal.previous:
+        raise failure(
+            ErrorCode.RECOVERY_NEEDED,
+            "transaction record repeats the previous receipt",
+            transaction_directory(journal),
+        )
+    current = _receipt(store, journal)
     if current == journal.receipt:
-        cleanup(journal)
+        cleanup(store, journal)
     elif current == journal.previous:
-        rollback(journal)
+        rollback(store, journal)
     else:
         raise failure(
-            ErrorCode.RECOVERY_NEEDED, "receipt disagrees with transaction", ref.state_root
+            ErrorCode.RECOVERY_NEEDED, "receipt disagrees with transaction", ref.destination
         )

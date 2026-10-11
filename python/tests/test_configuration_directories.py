@@ -6,6 +6,7 @@ from test_configuration_lifecycle import bundle, receipt
 
 from flyrail import (
     BundleEntry,
+    DirectoryStore,
     Family,
     InstallationTarget,
     OperationStatus,
@@ -43,10 +44,14 @@ def test_created_container_parents_belong_to_shared_provenance_until_last_owner(
     root = tmp_path / "skills"
     if foreign == "preexisting":
         (root / "namespace").mkdir(parents=True)
-    a, b = InstallationTarget(tmp_path / "a"), InstallationTarget(tmp_path / "b")
+    store = DirectoryStore(tmp_path / "state")
+    a, b = (
+        InstallationTarget(store, (("index", "a"),)),
+        InstallationTarget(store, (("index", "b"),)),
+    )
     assert sync(bundle(identifier="a"), skill(root, "a"), a).status is OperationStatus.APPLIED
     assert sync(bundle(identifier="b"), skill(root, "b"), b).status is OperationStatus.APPLIED
-    markers = receipt(root).created_directories
+    markers = receipt(root, store).created_directories
     if foreign == "preexisting":
         assert markers == ()
     else:
@@ -70,7 +75,7 @@ def test_created_container_parents_belong_to_shared_provenance_until_last_owner(
     assert remove("a", a).status is OperationStatus.APPLIED
     assert (root / "namespace" / "b" / "SKILL.md").read_bytes() == b"skill"
     assert remove("b", b).status is OperationStatus.APPLIED
-    assert receipt(root).created_directories == ()
+    assert receipt(root, store).created_directories == ()
     if foreign == "none":
         assert not root.exists()
     elif foreign == "root-identity":
@@ -85,14 +90,14 @@ def test_directory_evidence_updates_to_published_identity_after_content_update(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "skills"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), skill(root, "review"), target).status is OperationStatus.APPLIED
-    first = receipt(root).created_directories
+    first = receipt(root, target.store).created_directories
     assert (
         sync(bundle("2"), skill(root, "review", b"updated"), target).status
         is OperationStatus.APPLIED
     )
-    second = receipt(root).created_directories
+    second = receipt(root, target.store).created_directories
     actual = {node.path: node for node in observe(root).nodes}
     assert all(node == actual[node.path] for node in second)
     assert tuple(node.inode for node in first) != tuple(node.inode for node in second)
@@ -104,11 +109,11 @@ def test_modified_subtree_retains_created_parent_evidence_for_explicit_retry(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "skills"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), skill(root, "review"), target).status is OperationStatus.APPLIED
-    original = receipt(root)
+    original = receipt(root, target.store)
     (root / "namespace" / "review" / "SKILL.md").write_bytes(b"local changes")
     assert remove("team", target).status is OperationStatus.FAILED
-    assert receipt(root) == original
+    assert receipt(root, target.store) == original
     assert remove("team", target, replace_modified=True).status is OperationStatus.APPLIED
     assert not root.exists()

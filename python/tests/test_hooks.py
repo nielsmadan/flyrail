@@ -14,6 +14,7 @@ from flyrail import (
     Bundle,
     BundleIdentity,
     Command,
+    DirectoryStore,
     EnvRef,
     HookArtifact,
     HookEvent,
@@ -116,7 +117,7 @@ def install(
     ctx = context(root, agent, scope=scope)
     rendered = render(bundle, ctx)
     assert rendered.supported, rendered.notices
-    target = ctx.installation(root / "index")
+    target = ctx.installation(DirectoryStore(root / "index"))
     result = sync(bundle, rendered, target)
     assert result.status is OperationStatus.APPLIED, result
     return bundle, ctx, rendered, target

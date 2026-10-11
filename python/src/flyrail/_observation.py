@@ -14,7 +14,7 @@ from flyrail.observations import ErrorCode, TargetError
 
 
 class ObservationFailure(Exception):
-    def __init__(self, code: ErrorCode, message: str, path: Path) -> None:
+    def __init__(self, code: ErrorCode, message: str, path: Path | None) -> None:
         super().__init__(message)
         self.error = TargetError(code, message, path)
 

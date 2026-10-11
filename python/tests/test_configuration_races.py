@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from state_helpers import index_record, put, put_index
 from test_configuration_lifecycle import bundle, rendered
 
 from flyrail import (
     BundleEntry,
+    DirectoryStore,
     ErrorCode,
     Family,
     FileContent,
@@ -25,10 +27,10 @@ from flyrail import (
     sync,
 )
 from flyrail._codec import decode, encode
-from flyrail._filesystem import target_lock
 from flyrail._observation import ObservationFailure
 from flyrail._resource_io import admit
 from flyrail._resource_models import Index
+from flyrail._state import destination_key, resource_key, store_lock, write_record
 
 
 @pytest.mark.parametrize(
@@ -40,10 +42,10 @@ def test_preview_rejects_every_observed_revision_change(tmp_path: Path, change: 
     parent.mkdir()
     path = parent / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
     plan = preview(bundle("2"), rendered(path, "second"), target)
-    state = ResourceAuthority(path).state_root
+    destination = ResourceAuthority(path).destination
     if change in {"foreign", "owned"}:
         path.write_bytes(
             path.read_bytes().replace(
@@ -51,13 +53,16 @@ def test_preview_rejects_every_observed_revision_change(tmp_path: Path, change: 
             )
         )
     elif change == "receipt":
-        value = decode((state / "receipt.json").read_bytes())
-        (state / "receipt.json").write_bytes(encode(replace(value, transaction_id="f" * 32)))  # type: ignore[type-var]
+        key = resource_key(destination, "receipt")
+        data = target.store.read(key)
+        assert data is not None
+        value = decode(data)
+        put(target.store, key, encode(replace(value, transaction_id="f" * 32)))  # type: ignore[type-var]
     elif change == "index":
-        value = decode((target.index_root / "index.json").read_bytes())
+        value = index_record(target, "team")
         assert isinstance(value, Index) and value.current
-        (target.index_root / "index.json").write_bytes(
-            encode(replace(value, current=replace(value.current, version="different")))
+        put_index(
+            target, "team", replace(value, current=replace(value.current, version="different"))
         )
     elif change == "mode":
         path.chmod(0o400)
@@ -66,7 +71,7 @@ def test_preview_rejects_every_observed_revision_change(tmp_path: Path, change: 
         parent.mkdir()
         path.write_bytes(b"replacement")
     elif change == "recovery":
-        (state / "transaction.json").write_bytes(b"{}")
+        put(target.store, resource_key(destination, "journal"), b"{}")
     elif change == "hardlink":
         os.link(path, tmp_path / "linked")
     else:
@@ -83,16 +88,18 @@ def test_preview_rejects_every_observed_revision_change(tmp_path: Path, change: 
     path.chmod(0o600)
 
 
-def reservation_worker(destination: str, kind: str, channel: Any) -> None:
+def reservation_worker(state: str, destination: str, kind: str, channel: Any) -> None:
+    store = DirectoryStore(state)
     authority = ResourceAuthority(destination)
-    ref = ResourceRef(authority.destination, ResourceKind(kind), authority.state_root)
+    ref = ResourceRef(authority.destination, ResourceKind(kind))
     try:
-        with target_lock(ref.state_root, 0):
+        with store_lock(store, "resource/" + destination_key(ref.destination), 0):
+            write_record(store, resource_key(ref.destination, "authority"), ref, expected=None)
             channel.send("reserved")
             if not channel.poll(10):
                 raise RuntimeError("barrier timed out")
             channel.recv()
-            admit(ref)
+            admit(store, ref)
         channel.send("admitted")
     except ObservationFailure as error:
         channel.send(str(error.error.code))
@@ -106,10 +113,13 @@ def test_real_process_reservations_register_before_hierarchy_validation(
 ) -> None:
     tree = tmp_path / "tree"
     tree.mkdir()
+    state = tmp_path / "state"
     ctx = mp.get_context("spawn")
     channels = [ctx.Pipe(), ctx.Pipe()]
     processes = [
-        ctx.Process(target=reservation_worker, args=(str(path), kind, channels[index][1]))
+        ctx.Process(
+            target=reservation_worker, args=(str(state), str(path), kind, channels[index][1])
+        )
         for index, (path, kind) in enumerate([(tree, "tree"), (tree / "child", "document")])
     ]
     first = 1 if order == "child-first" else 0
@@ -134,8 +144,9 @@ def test_real_process_reservations_register_before_hierarchy_validation(
         for process in processes:
             process.join(10)
             assert process.exitcode == 0
-        assert ResourceAuthority(tree).lock_path.is_file()
-        assert ResourceAuthority(tree / "child").lock_path.is_file()
+        store = DirectoryStore(state)
+        assert store.read(resource_key(ResourceAuthority(tree).destination, "authority"))
+        assert store.read(resource_key(ResourceAuthority(tree / "child").destination, "authority"))
     finally:
         for process in processes:
             if process.is_alive():
@@ -149,18 +160,22 @@ def test_real_process_reservations_register_before_hierarchy_validation(
 def test_tombstoned_empty_fences_still_exclude_other_boundaries(tmp_path: Path) -> None:
     tree = tmp_path / "tree"
     tree.mkdir()
-    state = ResourceAuthority(tree).state_root
-    state.mkdir()
+    store = DirectoryStore(tmp_path / "index")
+    canonical = ResourceAuthority(tree).destination
+    write_record(
+        store,
+        resource_key(canonical, "authority"),
+        ResourceRef(canonical, ResourceKind.TREE),
+        expected=None,
+    )
     child = RenderedBundle(
         [RenderedArtifact("child", Family.INSTRUCTIONS, tree / "child", FileContent(b"x"))]
     )
-    result = sync(bundle(), child, InstallationTarget(tmp_path / "index"))
+    result = sync(bundle(), child, InstallationTarget(store))
     assert result.status is OperationStatus.FAILED and result.error.code is ErrorCode.CONFLICT  # type: ignore[union-attr]
-    assert ResourceAuthority(tree / "child").state_root.is_dir()
+    assert store.read(resource_key(canonical / "child", "authority")) is not None
     desired = RenderedBundle(
         [RenderedArtifact("tree", Family.SKILLS, tree, TreeContent([BundleEntry("x", b"x")]))]
     )
-    assert (
-        sync(bundle(), desired, InstallationTarget(tmp_path / "other-index")).status
-        is OperationStatus.FAILED
-    )
+    other = InstallationTarget(store, (("installation", "other"),))
+    assert sync(bundle(), desired, other).status is OperationStatus.FAILED

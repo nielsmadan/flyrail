@@ -2,8 +2,10 @@
 
 Every supported bundle input uses the
 [schema-2 state encoding](receipt-format.md). One physical document, tree or
-skill container is the authority, lock, receipt and journal domain. The caller's
-logical installation index is separate membership bookkeeping.
+skill container is the authority, lock, receipt and journal domain, each held
+at its own `resource/<destination-key>/*` key in the host's
+[state store](state-store.md). The caller's logical installation index is
+separate membership bookkeeping, held at `index/<bundle-id>/<context-digest>`.
 
 ## Ownership
 
@@ -65,12 +67,17 @@ Pending first-install resources can lack receipts before committing. A valid
 retained receipt with no matching claims can reflect completed retirement by
 another logical index and does not constitute a missing receipt.
 
-The index's permanent lock is acquired before resource locks, which use a
-deterministic authority-path order. Its context fingerprint binds explicit
-installation identity separately from the route selected for an individual call.
-Equivalent skill routes bind the same physical container identity; their agent,
-scope, home and routing variables remain immutable preview context without
-changing the index fingerprint.
+The index lock is acquired before resource locks, each held in a fixed
+destination order within the store. Its context digest binds explicit
+installation identity separately from the route selected for an individual
+call: two installations sharing a store must use distinct contexts, since the
+same context digest is the same index. A render context's default installation
+context is its own routing context — agent, scope, surface, platform and the
+resolved routing paths — so a caller only needs an explicit context to
+deliberately share or separate installations that would otherwise collide or
+differ. Equivalent skill routes bind the same physical container identity;
+their agent, scope, home and routing variables remain immutable preview
+context without changing the index's context digest.
 An index cannot relocate authority or grant ownership by pointing to an arbitrary
 metadata file.
 

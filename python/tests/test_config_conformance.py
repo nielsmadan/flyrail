@@ -28,6 +28,8 @@ from flyrail import (
     StructuredContent,
     freeze_value,
 )
+from flyrail._state import destination_key
+from flyrail.authority import transaction_path
 from flyrail.values import value_from_record
 
 VECTORS = json.loads((FIXTURES / "configurations.json").read_text(encoding="utf-8"))
@@ -72,8 +74,9 @@ def test_shared_claim_overlap_vectors(case: dict[str, Any]) -> None:
 def test_shared_authority_paths(case: dict[str, Any]) -> None:
     authority = ResourceAuthority(case["destination"])
     assert authority.destination.as_posix() == case["destination"]
-    assert authority.state_root.as_posix() == case["state_root"]
-    assert authority.lock_path.as_posix() == case["lock_path"]
+    assert destination_key(Path(case["destination"])) == case["destination_key"]
+    selected = transaction_path(Path(case["destination"]), case["transaction_id"])
+    assert selected.as_posix() == case["transaction_path"]
 
 
 def rendered_artifact_from_record(raw: dict[str, Any]) -> RenderedArtifact:

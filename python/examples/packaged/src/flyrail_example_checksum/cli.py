@@ -8,6 +8,7 @@ from pathlib import Path
 
 from flyrail import (
     Bundle,
+    DirectoryStore,
     OperationStatus,
     Target,
     TargetInspection,
@@ -49,6 +50,7 @@ def main() -> int:
     for action in ("status", "install", "update", "uninstall"):
         command = actions.add_parser(action)
         command.add_argument("--target", type=Path, action="append", required=True)
+        command.add_argument("--state", type=Path, required=True)
         if action in {"update", "uninstall"}:
             command.add_argument("--replace-modified", action="store_true")
     arguments = parser.parse_args()
@@ -60,16 +62,19 @@ def main() -> int:
         if arguments.command == "config":
             return configuration.main(arguments, app_version)
         targets = [Target.directory(path) for path in arguments.target]
+        store = DirectoryStore(arguments.state)
         bundle_version = None
         if arguments.action == "uninstall":
-            results = uninstall(BUNDLE_ID, targets, replace_modified=arguments.replace_modified)
+            results = uninstall(
+                BUNDLE_ID, targets, store=store, replace_modified=arguments.replace_modified
+            )
         else:
             bundle = Bundle.from_package("flyrail_example_checksum")
             if bundle.id != BUNDLE_ID:
                 raise ValueError("packaged bundle ID differs from the host's stable ID")
             bundle_version = bundle.version
             if arguments.action == "status":
-                observations = inspect(bundle, targets)
+                observations = inspect(bundle, targets, store=store)
                 print(
                     json.dumps(
                         {
@@ -83,9 +88,11 @@ def main() -> int:
                 )
                 return int(any(not result.observation.is_current for result in observations))
             if arguments.action == "install":
-                results = install(bundle, targets)
+                results = install(bundle, targets, store=store)
             else:
-                results = update(bundle, targets, replace_modified=arguments.replace_modified)
+                results = update(
+                    bundle, targets, store=store, replace_modified=arguments.replace_modified
+                )
         print(
             json.dumps(
                 {

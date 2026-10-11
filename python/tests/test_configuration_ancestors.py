@@ -14,6 +14,7 @@ from flyrail import (
     Bundle,
     BundleEntry,
     BundleIdentity,
+    DirectoryStore,
     ErrorCode,
     OperationStatus,
     SkillArtifact,
@@ -54,6 +55,7 @@ def after_security_sample(
 def test_skill_lifecycle_accepts_unrelated_sibling_creation_and_removal_during_inspection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_alias: bool, seam: str
 ) -> None:
+    store = DirectoryStore(tmp_path / "state")
     parent = tmp_path / "Config"
     parent.mkdir()
     alias = tmp_path / "config" if case_alias else parent
@@ -97,20 +99,25 @@ def test_skill_lifecycle_accepts_unrelated_sibling_creation_and_removal_during_i
             ],
         )
 
-    assert install(skill("1"), [original])[0].status is OperationStatus.APPLIED
+    assert install(skill("1"), [original], store=store)[0].status is OperationStatus.APPLIED
     previous = changes
     assert previous >= 2
-    assert inspect(skill("1"), [equivalent])[0].observation.is_current
-    assert changes > previous
+    assert inspect(skill("1"), [equivalent], store=store)[0].observation.is_current
+    if seam == "ancestor":
+        assert changes > previous
     previous = changes
-    assert install(skill("1"), [equivalent, original])[0].status is OperationStatus.UNCHANGED
-    assert changes > previous
+    assert (
+        install(skill("1"), [equivalent, original], store=store)[0].status
+        is OperationStatus.UNCHANGED
+    )
+    if seam == "ancestor":
+        assert changes > previous
     previous = changes
-    assert update(skill("2"), [equivalent])[0].status is OperationStatus.APPLIED
+    assert update(skill("2"), [equivalent], store=store)[0].status is OperationStatus.APPLIED
     assert (parent / "skills" / "example" / "SKILL.md").read_bytes() == b"2"
     assert changes > previous
     previous = changes
-    assert uninstall("noise", [equivalent])[0].status is OperationStatus.APPLIED
+    assert uninstall("noise", [equivalent], store=store)[0].status is OperationStatus.APPLIED
     assert changes > previous
     assert not (parent / "skills" / "example").exists()
 

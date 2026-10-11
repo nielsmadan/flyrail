@@ -14,6 +14,7 @@ from flyrail import (
     BundleIdentity,
     Command,
     Dependency,
+    DirectoryStore,
     EnvRef,
     Family,
     HookArtifact,
@@ -110,7 +111,8 @@ def main(arguments: argparse.Namespace, app_version: str) -> int:
         else Platform.LINUX
     )
     context = RenderContext(Target.project(arguments.agent, root), platform)
-    target = context.installation(root / ".cache" / f"{BUNDLE_ID}-{arguments.agent}")
+    identity = (("agent", arguments.agent), ("project", str(root)))
+    target = context.installation(DirectoryStore(root / ".cache" / BUNDLE_ID), identity)
     result: InstallationResult | None = None
     observation: InstallationObservation
     bundle_version: str | None = None
@@ -133,7 +135,7 @@ def main(arguments: argparse.Namespace, app_version: str) -> int:
                 HookShell.CMD if os.name == "nt" else HookShell.POSIX,
             ),
         )
-        target = context.installation(target.index_root)
+        target = context.installation(target.store, identity)
         desired = render(bundle, context)
         if arguments.action == "update":
             result = sync(bundle, desired, target, replace_modified=arguments.replace_modified)

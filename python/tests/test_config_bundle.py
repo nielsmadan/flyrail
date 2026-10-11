@@ -21,6 +21,7 @@ from flyrail import (
     BundleIdentity,
     Command,
     Dependency,
+    DirectoryStore,
     DocumentFormat,
     Family,
     InstallationTarget,
@@ -219,7 +220,11 @@ def test_configuration_cannot_be_silently_installed_by_skill_lifecycle(tmp_path:
     bundle = Bundle.from_memory(CASES[1]["manifest"])
     for operation in (install, inspect):
         with pytest.raises(ValueError, match="explicit rendering"):
-            operation(bundle, [Target.directory(tmp_path / "skills")])
+            operation(
+                bundle,
+                [Target.directory(tmp_path / "skills")],
+                store=DirectoryStore(tmp_path / "state"),
+            )
     assert list(tmp_path.iterdir()) == []
 
 
@@ -240,14 +245,14 @@ def test_skill_convenience_rejects_support_graph_before_mutation(tmp_path: Path)
         render_skills(bundle, target)
     for operation in (install, update, inspect):
         with pytest.raises(ValueError, match="explicit rendering"):
-            operation(bundle, [target])
+            operation(bundle, [target], store=DirectoryStore(tmp_path / "state"))
         assert snapshot(tmp_path) == before
 
     output = render(bundle, RenderContext(target, Platform.LINUX))
     assert {artifact.id for artifact in output.artifacts} == {"review", "helper"}
     assert output.dependencies == (Dependency("review", "helper"),)
     assert (
-        sync(bundle, output, InstallationTarget(tmp_path / "index")).status
+        sync(bundle, output, InstallationTarget(DirectoryStore(tmp_path / "index"))).status
         is OperationStatus.APPLIED
     )
     assert (

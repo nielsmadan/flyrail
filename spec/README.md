@@ -7,9 +7,10 @@ These contracts are independent of implementation language:
 - [Transaction protocol](transaction-protocol.md): locking, commit and recovery.
 - [Porting guidance](porting.md): compatibility requirements for native implementations.
 - [Configuration format](configuration-format.md): four-family schema-2 snapshots and typed values.
-- [Resource authority](resource-authority.md): canonical destinations, permanent fences and claims.
+- [Resource authority](resource-authority.md): canonical destinations, store-scoped admission and claims.
 - [Translation](translation.md): destinations, semantic capabilities and explicit asset references.
 - [Configuration state](configuration-state.md): resource receipts, indexes and recovery contract.
+- [State store](state-store.md): host-supplied persistence for indexes, receipts, journals and locks.
 
 `fixtures/bundles.json`, `fixtures/edits.json`, `fixtures/configurations.json`
 and `fixtures/translations.json`

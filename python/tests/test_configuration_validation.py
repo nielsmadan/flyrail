@@ -9,11 +9,13 @@ from typing import Any
 
 import pytest
 from skill_helpers import snapshot
+from state_helpers import canonical_json, put
 from test_configuration_lifecycle import bundle, receipt, rendered
 
 from flyrail import (
     BundleEntry,
     Dependency,
+    DirectoryStore,
     ErrorCode,
     Family,
     FileContent,
@@ -33,65 +35,58 @@ from flyrail import (
     remove,
     sync,
 )
-from flyrail import _lifecycle as lifecycle
 from flyrail._codec import decode
-from flyrail._resource_io import observe as observe_revision
 from flyrail._resource_models import (
     Generation,
-    Revision,
 )
 from flyrail._security import security
+from flyrail._state import index_key, resource_key
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("removal", [False, True])
-@pytest.mark.parametrize("damage", ["unknown-entry", "corrupt-index", "observation-io"])
+@pytest.mark.parametrize("damage", ["corrupt-index", "store-io"])
 def test_failed_public_previews_retain_typed_error_without_observation_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, removal: bool, damage: str
 ) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired, output = bundle(), rendered(path)
     assert sync(desired, output, target).status is OperationStatus.APPLIED
-    index_file = target.index_root / "index.json"
-    original_index = index_file.read_bytes()
-    stray = target.index_root / "unexpected"
-    if damage == "unknown-entry":
-        stray.write_bytes(b"unrecognized metadata")
-    elif damage == "corrupt-index":
-        index_file.write_bytes(b"{}")
+    key = index_key(desired.id, target.context_digest)
+    original_index = target.store.read(key)
+    assert original_index is not None
+    if damage == "corrupt-index":
+        put(target.store, key, b"{}")
 
-    def observe(selected: Path) -> Revision:
-        if damage == "observation-io" and selected == target.index_root:
-            raise OSError(errno.EIO, "index observation unavailable", str(selected))
-        return observe_revision(selected)
+    def read(selected: str) -> bytes | None:
+        raise OSError(errno.EIO, "index store unavailable", str(target.store.location))
 
     before = snapshot(tmp_path)
     with monkeypatch.context() as patch:
-        patch.setattr(lifecycle, "observe", observe)
+        if damage == "store-io":
+            patch.setattr(target.store, "read", read)
         proposal = (
             preview_removal(desired.id, target) if removal else preview(desired, output, target)
         )
         assert not proposal.applicable
-        assert proposal.index_revision is None and proposal.resources == ()
+        assert proposal.index is None and proposal.resources == ()
         assert proposal.error is not None
         assert proposal.error.code is (
-            ErrorCode.IO_ERROR if damage == "observation-io" else ErrorCode.INVALID_STATE
+            ErrorCode.IO_ERROR if damage == "store-io" else ErrorCode.INVALID_STATE
         )
         result = apply_preview(proposal)
         assert result.status is OperationStatus.FAILED and result.error == proposal.error
         assert snapshot(tmp_path) == before
 
-    if damage == "unknown-entry":
-        stray.unlink()
-    elif damage == "corrupt-index":
-        index_file.write_bytes(original_index)
+    if damage == "corrupt-index":
+        put(target.store, key, original_index)
     repaired = snapshot(tmp_path)
     assert apply_preview(proposal).error == proposal.error
     assert snapshot(tmp_path) == repaired
     fresh = preview_removal(desired.id, target) if removal else preview(desired, output, target)
-    assert fresh.applicable and fresh.index_revision is not None
+    assert fresh.applicable and fresh.index is not None
     assert apply_preview(fresh).status is (
         OperationStatus.APPLIED if removal else OperationStatus.UNCHANGED
     )
@@ -108,7 +103,7 @@ def test_failed_public_previews_preserve_observed_unsafe_destinations(
     parent.mkdir()
     path = parent / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired, output = bundle(), rendered(path)
     assert sync(desired, output, target).status is OperationStatus.APPLIED
     assert preview(desired, output, target).applicable
@@ -148,7 +143,7 @@ def test_failed_public_previews_preserve_observed_unsafe_destinations(
     before = protected()
     proposal = preview_removal(desired.id, target) if removal else preview(desired, output, target)
     assert not proposal.applicable
-    assert proposal.index_revision is None and proposal.resources == ()
+    assert proposal.index is None and proposal.resources == ()
     assert proposal.error is not None and proposal.error.code is ErrorCode.UNSAFE_PATH
     assert proposal.error.path == changed
     result = apply_preview(proposal)
@@ -164,14 +159,14 @@ def test_failed_public_previews_preserve_observed_unsafe_destinations(
     assert apply_preview(proposal).error == proposal.error
     assert protected() == repaired
     fresh = preview_removal(desired.id, target) if removal else preview(desired, output, target)
-    assert fresh.applicable and fresh.index_revision is not None
+    assert fresh.applicable and fresh.index is not None
     assert apply_preview(fresh).status is (
         OperationStatus.APPLIED if removal else OperationStatus.UNCHANGED
     )
 
 
 def test_public_previews_raise_for_invalid_caller_inputs(tmp_path: Path) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired, output = bundle(), rendered(tmp_path / "AGENTS.md")
     before = snapshot(tmp_path)
     with pytest.raises(TypeError, match="acquisition"):
@@ -180,7 +175,7 @@ def test_public_previews_raise_for_invalid_caller_inputs(tmp_path: Path) -> None
         preview_removal(desired.id, target, replace_modified=1)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="bundle id"):
         preview_removal("../invalid", target)
-    overlap = InstallationTarget(tmp_path / "AGENTS.md/index")
+    overlap = InstallationTarget(DirectoryStore(tmp_path / "AGENTS.md/index"))
     with pytest.raises(ValueError, match="overlaps"):
         preview(desired, output, overlap)
     with pytest.raises(ValueError, match="concrete resource"):
@@ -205,26 +200,27 @@ def test_public_previews_raise_for_invalid_caller_inputs(tmp_path: Path) -> None
         "overlap",
         "resource",
         "header",
-        "hardlink",
     ],
 )
 def test_corrupt_ownership_cannot_authorize_content_changes(tmp_path: Path, damage: str) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
     original = path.read_bytes()
-    state = ResourceAuthority(path).state_root
-    file = state / "receipt.json"
-    raw = json.loads(file.read_bytes())
+    destination = ResourceAuthority(path).destination
+    key = resource_key(destination, "receipt")
+    stored = target.store.read(key)
+    assert stored is not None
+    raw = json.loads(stored)
     fields = raw["fields"]
     owned = fields["claims"][0]["fields"]
     if damage == "unknown":
         fields["future"] = True
     elif damage == "duplicate":
-        file.write_bytes(
-            file.read_bytes().replace(
-                b'"schema_version":2', b'"schema_version":2,"schema_version":2'
-            )
+        put(
+            target.store,
+            key,
+            stored.replace(b'"schema_version":2', b'"schema_version":2,"schema_version":2'),
         )
     elif damage == "version-bool":
         fields["schema_version"] = True
@@ -247,15 +243,11 @@ def test_corrupt_ownership_cannot_authorize_content_changes(tmp_path: Path, dama
     elif damage == "overlap":
         fields["claims"].append(fields["claims"][0])
     elif damage == "resource":
-        fields["resource"]["fields"]["state_root"] = {"path": str(tmp_path / "redirect")}
-    elif damage == "header":
-        (state / "authority.json").write_bytes(b"{}")
+        fields["resource"]["fields"]["destination"] = {"path": str(tmp_path / "redirect")}
     else:
-        import os
-
-        os.link(file, tmp_path / "receipt-link")
-    if damage not in {"duplicate", "header", "hardlink"}:
-        file.write_text(json.dumps(raw))
+        put(target.store, resource_key(destination, "authority"), b"{}")
+    if damage not in {"duplicate", "header"}:
+        put(target.store, key, canonical_json(raw))
     result = sync(bundle("2"), rendered(path, "changed"), target)
     assert result.status is OperationStatus.FAILED
     assert result.error is not None
@@ -273,16 +265,17 @@ def test_corrupt_ownership_cannot_authorize_content_changes(tmp_path: Path, dama
         "generation",
         "duplicate-resource",
         "kind-collision",
-        "next-corrupt",
     ],
 )
 def test_corrupt_index_is_bookkeeping_not_ownership_authority(tmp_path: Path, damage: str) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
     before = path.read_bytes()
-    file = target.index_root / "index.json"
-    raw = json.loads(file.read_bytes())
+    key = index_key("team", target.context_digest)
+    stored = target.store.read(key)
+    assert stored is not None
+    raw = json.loads(stored)
     fields = raw["fields"]
     if damage == "unknown":
         fields["extra"] = 1
@@ -296,13 +289,11 @@ def test_corrupt_index_is_bookkeeping_not_ownership_authority(tmp_path: Path, da
         fields["current"]["fields"]["bundle_digest"] = "invalid"
     elif damage == "duplicate-resource":
         fields["current"]["fields"]["membership"] *= 2
-    elif damage == "kind-collision":
+    else:
         ref = json.loads(json.dumps(fields["current"]["fields"]["membership"][0][0]))
         ref["fields"]["kind"]["value"] = "tree"
         fields["residual"] = [ref]
-    else:
-        (target.index_root / "index.json.next").write_bytes(b"{}")
-    file.write_text(json.dumps(raw))
+    put(target.store, key, canonical_json(raw))
     result = sync(bundle("2"), rendered(path, "changed"), target)
     assert result.status is OperationStatus.FAILED and path.read_bytes() == before
     assert inspect_installation("team", target).error is not None
@@ -312,11 +303,11 @@ def test_physical_claim_aliases_deduplicate_and_incompatible_aliases_fail_prefli
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     first = rendered(path).artifacts[0]
     selected = RenderedBundle([first, replace(first, id="second")])
     assert sync(bundle(), selected, target).status is OperationStatus.APPLIED
-    assert len(receipt(path).claims) == 1
+    assert len(receipt(path, target.store).claims) == 1
     conflict = RenderedBundle(
         [first, replace(first, id="second", content=SectionContent("guide", "different"))]
     )
@@ -331,13 +322,13 @@ def test_resource_dependency_cycle_is_rejected_after_grouping(tmp_path: Path) ->
         for name, path in [("a", "one"), ("b", "two"), ("c", "one")]
     ]
     rendered_bundle = RenderedBundle(artifacts, [Dependency("a", "b"), Dependency("b", "c")])
-    result = sync(bundle(), rendered_bundle, InstallationTarget(tmp_path / "index"))
+    result = sync(bundle(), rendered_bundle, InstallationTarget(DirectoryStore(tmp_path / "index")))
     assert result.status is OperationStatus.FAILED
     assert (tmp_path / "one").exists() is False and (tmp_path / "two").exists() is False
 
 
 def test_old_referenced_asset_requires_a_new_revision_destination(tmp_path: Path) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     path = tmp_path / "AGENTS.md"
     asset = tmp_path / "hook"
     first = RenderedBundle(
@@ -372,7 +363,7 @@ def test_old_referenced_asset_requires_a_new_revision_destination(tmp_path: Path
 def test_invalid_public_policies_fail_before_any_write(
     tmp_path: Path, field: str, value: Any
 ) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     path = tmp_path / "AGENTS.md"
     with pytest.raises((TypeError, ValueError)):
         sync(bundle(), rendered(path), target, **{field: value})
@@ -381,7 +372,7 @@ def test_invalid_public_policies_fail_before_any_write(
 
 def test_caller_iterables_and_nested_pairs_are_detached(tmp_path: Path) -> None:
     pairs = [["surface", "application"]]
-    target = InstallationTarget(tmp_path / "index", pairs)  # type: ignore[arg-type]
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"), pairs)  # type: ignore[arg-type]
     pairs[0][1] = "changed"
     assert target.context == (("surface", "application"),)
     content = [BundleEntry("file", b"data")]
@@ -390,11 +381,12 @@ def test_caller_iterables_and_nested_pairs_are_detached(tmp_path: Path) -> None:
     assert tree.entries[0].data == b"data"
     plan = preview(bundle(), rendered(tmp_path / "AGENTS.md"), target)
     resources = list(plan.resources)
-    ancestors = list(plan.index_ancestors)
-    frozen = replace(plan, resources=resources, index_ancestors=ancestors)  # type: ignore[arg-type]
+    ancestors = list(plan.resources[0].ancestors)
+    frozen = replace(plan, resources=resources)  # type: ignore[arg-type]
+    frozen_plan = replace(plan.resources[0], ancestors=ancestors)  # type: ignore[arg-type]
     resources.clear()
     ancestors.clear()
-    assert frozen.resources and frozen.index_ancestors
+    assert frozen.resources and frozen_plan.ancestors
     membership = [[plan.resources[0].resource, [plan.resources[0].receipt.claims[0].claim_id]]]
     generation = Generation("1", "a" * 64, "b" * 64, membership)  # type: ignore[arg-type]
     membership[0][1].clear()  # type: ignore[attr-defined]
@@ -430,5 +422,5 @@ def test_unsupported_render_notice_blocks_complete_target(tmp_path: Path) -> Non
         rendered(path).artifacts,
         notices=[Notice("guide", NoticeKind.UNSUPPORTED, "unsupported event")],
     )
-    result = sync(bundle(), desired, InstallationTarget(tmp_path / "index"))
+    result = sync(bundle(), desired, InstallationTarget(DirectoryStore(tmp_path / "index")))
     assert result.status is OperationStatus.FAILED and path.exists() is False

@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from flyrail._codec import encode, register
 from flyrail._validation import validate_identifier, validate_relative_path, validate_version
-from flyrail.authority import Claim, Ownership, ResourceAuthority, state_path
+from flyrail.authority import Claim, Ownership, ResourceAuthority
 from flyrail.content import DocumentSchema
 from flyrail.editors import Disposition, DocumentProvenance, OwnedSelection, content_claim
 
@@ -127,7 +127,6 @@ class Revision:
 class ResourceRef:
     destination: Path
     kind: ResourceKind
-    state_root: Path
     schema_version: int = 2
 
     def __post_init__(self) -> None:
@@ -136,8 +135,6 @@ class ResourceRef:
         absolute(self.destination)
         if not isinstance(self.kind, ResourceKind):
             raise TypeError("resource kind must be a ResourceKind")
-        if self.state_root != state_path(self.destination):
-            raise ValueError("resource state path disagrees with destination")
 
     @property
     def authority(self) -> ResourceAuthority:
@@ -242,7 +239,6 @@ class Receipt:
             raise ValueError("created directory evidence must contain distinct directories")
         authority = object.__new__(ResourceAuthority)
         object.__setattr__(authority, "destination", self.resource.destination)
-        object.__setattr__(authority, "state_root", self.resource.state_root)
         for index, owned in enumerate(self.claims):
             if owned.claim_id != owned.claim.identity(authority):
                 raise ValueError("claim identity disagrees with physical destination")
@@ -316,7 +312,7 @@ class Index:
         for generation in (self.current, self.pending, self.previous):
             if generation is not None:
                 refs.update(ref for ref, _ in generation.membership)
-        return tuple(sorted(refs, key=lambda ref: str(ref.state_root)))
+        return tuple(sorted(refs, key=lambda ref: str(ref.destination)))
 
 
 for _cls in (

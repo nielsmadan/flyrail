@@ -9,10 +9,10 @@ target paths (the target is the skill container itself):
 
 ```sh
 flyrail-notes words ./meeting.md
-flyrail-notes ai status --source /path/to/bundle --target /path/to/agent-skills
-flyrail-notes ai install --source /path/to/bundle --target /path/to/agent-skills
-flyrail-notes ai update --source /path/to/bundle --target /path/to/agent-skills
-flyrail-notes ai uninstall --bundle-id example-notes --target /path/to/agent-skills
+flyrail-notes ai status --source /path/to/bundle --target /path/to/agent-skills --state /path/to/app-state/flyrail
+flyrail-notes ai install --source /path/to/bundle --target /path/to/agent-skills --state /path/to/app-state/flyrail
+flyrail-notes ai update --source /path/to/bundle --target /path/to/agent-skills --state /path/to/app-state/flyrail
+flyrail-notes ai uninstall --bundle-id example-notes --target /path/to/agent-skills --state /path/to/app-state/flyrail
 ```
 
 The `bundle/` directory accompanies the source distribution; the wheel contains

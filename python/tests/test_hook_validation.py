@@ -4,12 +4,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from state_helpers import canonical_json, put
 from test_hook_lifecycle import schema_artifact
 from test_hooks import bundle_of, context, make_hook
 
 from flyrail import (
     Dependency,
     DependencyMode,
+    DirectoryStore,
     DocumentFormat,
     DocumentSchema,
     Family,
@@ -26,6 +28,7 @@ from flyrail import (
     render,
     sync,
 )
+from flyrail._state import resource_key
 
 pytestmark = pytest.mark.integration
 
@@ -103,12 +106,14 @@ def test_corrupt_schema_authority_preserves_document_and_receipt(
     tmp_path: Path, damage: str
 ) -> None:
     path = tmp_path / "config.json"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     bundle = bundle_of(make_hook())
     rendered = RenderedBundle([schema_artifact(path)])
     assert sync(bundle, rendered, target).status is OperationStatus.APPLIED
-    state = ResourceAuthority(path).state_root / "receipt.json"
-    raw = json.loads(state.read_text())
+    key = resource_key(ResourceAuthority(path).destination, "receipt")
+    stored = target.store.read(key)
+    assert stored is not None
+    raw = json.loads(stored)
     owned = raw["fields"]["claims"][0]["fields"]
     provenance = raw["fields"]["provenance"]["fields"]
     if damage == "stable-outside":
@@ -123,12 +128,12 @@ def test_corrupt_schema_authority_preserves_document_and_receipt(
         provenance["schema_fields"] *= 2
     else:
         provenance["schema_empty_document"] = {"bytes": b"foreign".hex()}
-    state.write_text(json.dumps(raw))
-    original_document, original_receipt = path.read_bytes(), state.read_bytes()
+    put(target.store, key, canonical_json(raw))
+    original_document, original_receipt = path.read_bytes(), target.store.read(key)
     assert not inspect_installation(bundle.id, target).is_current
     assert remove(bundle.id, target).status is OperationStatus.FAILED
     assert path.read_bytes() == original_document
-    assert state.read_bytes() == original_receipt
+    assert target.store.read(key) == original_receipt
 
 
 @pytest.mark.parametrize("name", ["runner.mts", "bridge.mts", "process.mts"])

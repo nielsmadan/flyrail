@@ -9,6 +9,7 @@ from test_configuration_lifecycle import bundle, receipt, rendered
 from flyrail import (
     Acquisition,
     Bundle,
+    DirectoryStore,
     DocumentFormat,
     EditStatus,
     ErrorCode,
@@ -38,7 +39,7 @@ from flyrail import (
 def test_intact_array_member_is_current_without_restoration_anchors(tmp_path: Path) -> None:
     path = tmp_path / "shared.json"
     path.write_bytes(b'{"items":[{"id":"a"},{"id":"x","v":1},{"id":"b"}]}')
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired = bundle()
     output = RenderedBundle(
         [
@@ -58,7 +59,7 @@ def test_intact_array_member_is_current_without_restoration_anchors(tmp_path: Pa
         sync(desired, output, target, acquisition=Acquisition.TAKEOVER).status
         is OperationStatus.APPLIED
     )
-    original = receipt(path).claims[0].selection
+    original = receipt(path, target.store).claims[0].selection
     assert original is not None and original.baseline is not None
     path.write_bytes(path.read_bytes().replace(b'"a"', b'"c"').replace(b'"b"', b'"d"'))
     before = snapshot(tmp_path)
@@ -80,7 +81,7 @@ def test_intact_array_member_is_current_without_restoration_anchors(tmp_path: Pa
     assert "no surviving anchors" in retirement.resources[0].error.message
     assert remove(desired.id, target).status is OperationStatus.FAILED
     assert snapshot(tmp_path) == stable
-    retained = receipt(path).claims[0].selection
+    retained = receipt(path, target.store).claims[0].selection
     assert retained is not None and retained.baseline == original.baseline
 
 
@@ -88,7 +89,7 @@ def test_intact_array_member_is_current_without_restoration_anchors(tmp_path: Pa
     "change", ["none", "id", "version", "content", "render", "modified", "unsupported"]
 )
 def test_observation_compares_the_desired_generation(tmp_path: Path, change: str) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     path = tmp_path / "AGENTS.md"
     desired, output = bundle(), rendered(path)
     assert sync(desired, output, target).status is OperationStatus.APPLIED
@@ -114,7 +115,7 @@ def test_observation_compares_the_desired_generation(tmp_path: Path, change: str
 
 
 def test_absent_and_unresolved_observations_do_not_match(tmp_path: Path) -> None:
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     desired, output = bundle(), rendered(tmp_path / "AGENTS.md")
     assert inspect_installation(desired.id, target).matches(desired, output) is False
     observed = sync(desired, output, target).observation
@@ -129,7 +130,7 @@ def test_absent_and_unresolved_observations_do_not_match(tmp_path: Path) -> None
 
 @pytest.mark.parametrize("invalid_bundle", [False, True])
 def test_comparison_rejects_invalid_public_values(tmp_path: Path, invalid_bundle: bool) -> None:
-    observed = inspect_installation("team", InstallationTarget(tmp_path / "index"))
+    observed = inspect_installation("team", InstallationTarget(DirectoryStore(tmp_path / "index")))
     invalid: Any = object()
     with pytest.raises(TypeError, match="comparison requires"):
         observed.matches(

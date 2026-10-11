@@ -16,10 +16,11 @@ execute bundled commands or use the network.
 | Native I/O | `_resource_io`, `_security`, `_filesystem` | Safe observations, private metadata, security preservation, locks and exclusive publication. |
 
 The skill convenience API adapts named subtrees into this same kernel. Every
-physical document/tree/skill container has one adjacent authority, lock, receipt
-and journal across all owners. A logical installation index is membership
-bookkeeping, not another source of ownership. This permits independent applications
-to own disjoint sections or keys in one document.
+physical document/tree/skill container has one authority, lock, receipt and
+journal across all owners, held in the application's `StateStore` rather than
+beside the resource. A logical installation index, held in the same store, is
+membership bookkeeping, not another source of ownership. This permits
+independent applications to own disjoint sections or keys in one document.
 
 Each contender registers its permanent boundary before validating ancestor and
 descendant boundaries. Incompatible concurrent parent/child admissions can both

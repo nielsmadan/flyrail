@@ -13,6 +13,7 @@ from flyrail import (
     BundleIdentity,
     Command,
     Dependency,
+    DirectoryStore,
     Family,
     HookArtifact,
     HookEvent,
@@ -65,7 +66,7 @@ def main() -> None:
     )
     rendered = render(bundle, ctx)
     assert rendered.supported
-    target = InstallationTarget(root / "index")
+    target = InstallationTarget(DirectoryStore(root / "index"))
     assert sync(bundle, rendered, target).status is OperationStatus.APPLIED
     entry = json.loads((root / ".claude/settings.json").read_text())["hooks"]["PreToolUse"][0][
         "hooks"

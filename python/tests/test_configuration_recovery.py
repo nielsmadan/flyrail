@@ -1,16 +1,20 @@
 import errno
 import multiprocessing as mp
 import os
+from collections.abc import Callable
+from dataclasses import replace
 from multiprocessing.connection import Connection
 from pathlib import Path
 
 import pytest
 from skill_helpers import snapshot
+from state_helpers import journal_directory, transaction_directories
 from test_configuration_lifecycle import bundle, receipt, rendered
 
 from flyrail import (
     Acquisition,
     Dependency,
+    DirectoryStore,
     ErrorCode,
     Family,
     FileContent,
@@ -29,9 +33,13 @@ from flyrail import _lifecycle as lifecycle
 from flyrail import _resource_transaction as tx
 from flyrail._resource_io import move as native_move
 from flyrail._resource_io import observe
+from flyrail._resource_io import write_revision as native_write_revision
 from flyrail._resource_models import Revision
+from flyrail._resource_plan import plan_resource as native_plan_resource
 from flyrail._security import replace_file as native_replace_file
+from flyrail._state import resource_key
 from flyrail.configuration import ResourcePlan
+from flyrail.stores import StateStore
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +47,8 @@ pytestmark = pytest.mark.integration
 def live_writer(root: str, channel: Connection) -> None:
     original = tx.prepare
 
-    def prepare(plan: ResourcePlan) -> tx.Journal:
-        journal = original(plan)
+    def prepare(store: StateStore, plan: ResourcePlan) -> tx.Journal:
+        journal = original(store, plan)
         channel.send("journal-ready")
         if not channel.poll(20):
             raise RuntimeError("writer barrier timed out")
@@ -52,7 +60,7 @@ def live_writer(root: str, channel: Connection) -> None:
         result = sync(
             bundle("2"),
             rendered(Path(root) / "AGENTS.md", "second"),
-            InstallationTarget(Path(root) / "index"),
+            InstallationTarget(DirectoryStore(Path(root) / "state")),
         )
         channel.send(str(result.status))
     finally:
@@ -62,8 +70,9 @@ def live_writer(root: str, channel: Connection) -> None:
 def test_live_public_writer_blocks_other_index_until_source_free_recovery(tmp_path: Path) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
-    other_target = InstallationTarget(tmp_path / "other-index")
+    store = DirectoryStore(tmp_path / "state")
+    target = InstallationTarget(store)
+    other_target = InstallationTarget(store, (("index", "other"),))
     other = RenderedBundle(
         [
             RenderedArtifact(
@@ -83,8 +92,7 @@ def test_live_public_writer_blocks_other_index_until_source_free_recovery(tmp_pa
     try:
         assert parent.poll(15) and parent.recv() == "journal-ready"
         assert process.is_alive()
-        journal = authority.state_root / "transaction.json"
-        assert journal.is_file()
+        assert store.read(resource_key(authority.destination, "journal")) is not None
         before = snapshot(tmp_path)
         competing = remove("other", other_target, lock_timeout=0)
         assert competing.status is OperationStatus.FAILED
@@ -113,13 +121,13 @@ def test_live_public_writer_blocks_other_index_until_source_free_recovery(tmp_pa
 
 def crash_worker(root: str, boundary: str) -> None:
     path = Path(root) / "AGENTS.md"
-    target = InstallationTarget(Path(root) / "index")
+    target = InstallationTarget(DirectoryStore(Path(root) / "index"))
     original_prepare = tx.prepare
     original_move = native_move
     original_publish_receipt = tx.publish_receipt
 
-    def prepare(plan: ResourcePlan) -> tx.Journal:
-        journal = original_prepare(plan)
+    def prepare(store: StateStore, plan: ResourcePlan) -> tx.Journal:
+        journal = original_prepare(store, plan)
         if boundary == "prepared":
             os._exit(77)
         return journal
@@ -129,10 +137,10 @@ def crash_worker(root: str, boundary: str) -> None:
         if boundary == "backup" and destination.parent.name == "backup":
             os._exit(77)
 
-    def publish_receipt(journal: tx.Journal) -> None:
+    def publish_receipt(store: StateStore, journal: tx.Journal) -> None:
         if boundary == "published":
             os._exit(77)
-        original_publish_receipt(journal)
+        original_publish_receipt(store, journal)
         if boundary == "committed":
             os._exit(77)
 
@@ -150,7 +158,7 @@ def test_real_process_crash_recovers_full_revision_and_source_free_membership(
         pytest.skip("ReplaceFileW publishes and backs up in one native operation")
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
     process = mp.get_context("spawn").Process(target=crash_worker, args=(str(tmp_path), boundary))
     process.start()
@@ -174,7 +182,7 @@ def test_foreign_edits_at_publication_boundaries_are_never_overwritten(
 ) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"# foreign\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).status is OperationStatus.APPLIED
     original_prepare = tx.prepare
     original_move = native_move
@@ -188,12 +196,12 @@ def test_foreign_edits_at_publication_boundaries_are_never_overwritten(
         destination.write_bytes(destination.read_bytes() + foreign)
         injected = True
 
-    def prepare(plan: ResourcePlan) -> tx.Journal:
-        journal = original_prepare(plan)
+    def prepare(store: StateStore, plan: ResourcePlan) -> tx.Journal:
+        journal = original_prepare(store, plan)
         if seam == "prepare":
             append_foreign(path)
         elif seam == "staging":
-            stage = tx.paths(journal.resource)[1]
+            stage = tx.paths(tx.transaction_directory(journal))[0]
             append_foreign(stage)
         return journal
 
@@ -207,14 +215,14 @@ def test_foreign_edits_at_publication_boundaries_are_never_overwritten(
         if seam == "backup":
             append_foreign(backup)
 
-    def publish_receipt(journal: tx.Journal) -> None:
+    def publish_receipt(store: StateStore, journal: tx.Journal) -> None:
         nonlocal injected
         if seam == "published":
             append_foreign(path)
         if seam == "receipt":
             injected = True
             raise OSError(errno.EIO, "receipt unavailable")
-        original_publish_receipt(journal)
+        original_publish_receipt(store, journal)
 
     monkeypatch.setattr(lifecycle, "prepare", prepare)
     monkeypatch.setattr(tx, "move", move)
@@ -231,19 +239,22 @@ def test_foreign_edits_at_publication_boundaries_are_never_overwritten(
     else:
         assert result.status is OperationStatus.INCOMPLETE
         ref = result.resources[0].resource
-        locations = [ref.destination, tx.paths(ref)[1], tx.paths(ref)[2]]
+        locations = [
+            ref.destination,
+            *tx.paths(journal_directory(target.store, ref.destination)),
+        ]
         assert any(item.exists() and foreign in item.read_bytes() for item in locations)
-        assert tx.paths(ref)[0].exists()
+        assert target.store.read(resource_key(ref.destination, "journal")) is not None
 
 
 def test_later_edits_after_receipt_commit_survive_cleanup_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     original_cleanup = tx.cleanup
 
-    def fail(journal: tx.Journal) -> None:
+    def fail(store: StateStore, journal: tx.Journal) -> None:
         path.write_bytes(path.read_bytes() + b"user after commit\n")
         raise OSError(errno.EIO, "cleanup failed")
 
@@ -262,7 +273,7 @@ def test_partial_index_union_and_dependency_retirement_preserve_referenced_old_a
     path = tmp_path / "AGENTS.md"
     old_asset = tmp_path / "asset-v1"
     new_asset = tmp_path / "asset-v2"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
 
     def revision(asset: Path) -> RenderedBundle:
         return RenderedBundle(
@@ -276,10 +287,10 @@ def test_partial_index_union_and_dependency_retirement_preserve_referenced_old_a
     assert sync(bundle(), revision(old_asset), target).status is OperationStatus.APPLIED
     original_publish = tx.publish
 
-    def fail(journal: tx.Journal) -> None:
+    def fail(store: StateStore, journal: tx.Journal) -> None:
         if journal.resource.destination == path:
             raise OSError(errno.EIO, "reference publication failed")
-        original_publish(journal)
+        original_publish(store, journal)
 
     monkeypatch.setattr(lifecycle, "publish", fail)
     result = sync(bundle("2"), revision(new_asset), target)
@@ -298,13 +309,13 @@ def test_equal_byte_adoption_journals_ownership_transition(
 ) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"<!-- flyrail:guide:start -->\ngenerated\n<!-- flyrail:guide:end -->\n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     before = observe(path)
     journals = []
     original = tx.prepare
 
-    def capture(plan: ResourcePlan) -> tx.Journal:
-        journal = original(plan)
+    def capture(store: StateStore, plan: ResourcePlan) -> tx.Journal:
+        journal = original(store, plan)
         journals.append(journal)
         return journal
 
@@ -317,4 +328,134 @@ def test_equal_byte_adoption_journals_ownership_transition(
         len(journals) == 1 and journals[0].previous is None and len(journals[0].receipt.claims) == 1
     )
     assert observe(path) == before
-    assert receipt(path).claims[0].disposition == "adopted"
+    assert receipt(path, target.store).claims[0].disposition == "adopted"
+
+
+REPAIRED = b"# mine\n\n<!-- flyrail:guide:start -->\none\n<!-- flyrail:guide:end -->\n"
+DRIFTED = b"# mine\n\n<!-- flyrail:guide:start -->\nEDITED\n<!-- flyrail:guide:end -->\n"
+
+
+class Crash(BaseException):
+    pass
+
+
+def drifted_installation(tmp_path: Path) -> tuple[Path, InstallationTarget]:
+    path = tmp_path / "AGENTS.md"
+    path.write_bytes(b"# mine\n")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
+    assert sync(bundle(), rendered(path, "one"), target).status is OperationStatus.APPLIED
+    path.write_bytes(path.read_bytes().replace(b"one", b"EDITED"))
+    assert path.read_bytes() == DRIFTED
+    return path, target
+
+
+def crash_after(
+    original: Callable[..., object], when: Callable[..., bool]
+) -> Callable[..., object]:
+    def crashing(*args: object) -> object:
+        result = original(*args)
+        if when(*args):
+            raise Crash
+        return result
+
+    return crashing
+
+
+def into_backup(source: Path, destination: Path, revision: Revision) -> bool:
+    return destination.parent.name == "backup"
+
+
+@pytest.mark.parametrize("point", ["staged", "backup", "published", "committed"])
+def test_interrupted_drift_repair_converges_on_next_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, point: str
+) -> None:
+    path, target = drifted_installation(tmp_path)
+    name, when = {
+        "staged": ("write_revision", lambda *args: True),
+        "backup": ("move", into_backup),
+        "published": ("rename_exclusive", lambda *args: True),
+        "committed": ("publish_receipt", lambda *args: True),
+    }[point]
+    with monkeypatch.context() as patch:
+        patch.setattr(tx, name, crash_after(getattr(tx, name), when))
+        with pytest.raises(Crash):
+            sync(bundle(), rendered(path, "one"), target, replace_modified=True)
+    assert path.exists() is (point != "backup")
+
+    result = sync(bundle(), rendered(path, "one"), target, replace_modified=True)
+
+    assert result.status is OperationStatus.APPLIED
+    assert path.read_bytes() == REPAIRED
+    assert inspect_installation("team", target).resources[0].recovery_paths == ()
+    assert sync(bundle(), rendered(path, "one"), target).status is OperationStatus.UNCHANGED
+
+
+def test_failed_repair_staging_does_not_block_the_next_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, target = drifted_installation(tmp_path)
+
+    def fail(destination: Path, revision: Revision) -> Revision:
+        native_write_revision(destination, revision)
+        raise OSError(errno.EIO, "staging interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(tx, "write_revision", fail)
+        failed = sync(bundle(), rendered(path, "one"), target, replace_modified=True)
+    assert failed.status is OperationStatus.FAILED
+    assert len(transaction_directories(path)) == 1
+
+    result = sync(bundle(), rendered(path, "one"), target, replace_modified=True)
+
+    assert result.status is OperationStatus.APPLIED
+    assert path.read_bytes() == REPAIRED
+
+
+def test_drift_repair_commits_a_fresh_transaction_and_noop_keeps_receipt(
+    tmp_path: Path,
+) -> None:
+    path, target = drifted_installation(tmp_path)
+    drifted = receipt(path, target.store)
+
+    repaired = sync(bundle(), rendered(path, "one"), target, replace_modified=True)
+
+    assert repaired.status is OperationStatus.APPLIED
+    assert repaired.resources[0].status is OperationStatus.APPLIED
+    assert path.read_bytes() == REPAIRED
+    current = receipt(path, target.store)
+    assert current.transaction_id != drifted.transaction_id
+    assert replace(current, transaction_id=drifted.transaction_id) == drifted
+    assert sync(bundle(), rendered(path, "one"), target).status is OperationStatus.UNCHANGED
+    assert receipt(path, target.store) == current
+
+
+def test_journal_repeating_previous_receipt_is_refused_with_evidence_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, target = drifted_installation(tmp_path)
+
+    def reuse_previous(*args: object, **kwargs: object) -> ResourcePlan:
+        plan = native_plan_resource(*args, **kwargs)  # type: ignore[arg-type]
+        assert plan.previous is not None and plan.after != plan.before
+        return replace(plan, receipt=plan.previous)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(lifecycle, "plan_resource", reuse_previous)
+        patch.setattr(tx, "move", crash_after(native_move, into_backup))
+        with pytest.raises(Crash):
+            sync(bundle(), rendered(path, "one"), target, replace_modified=True)
+    journal_key = resource_key(ResourceAuthority(path).destination, "journal")
+    journal = target.store.read(journal_key)
+    directory = journal_directory(target.store, path)
+    staged, backup = tx.paths(directory)
+    evidence = (observe(staged), observe(backup))
+    assert path.exists() is False and backup.read_bytes() == DRIFTED
+
+    result = recover_installation("team", target)
+
+    assert result.status is OperationStatus.INCOMPLETE
+    assert result.error is not None and result.error.code is ErrorCode.RECOVERY_NEEDED
+    assert result.resources[0].recovery_paths == (directory,)
+    assert path.exists() is False
+    assert (observe(staged), observe(backup)) == evidence
+    assert target.store.read(journal_key) == journal

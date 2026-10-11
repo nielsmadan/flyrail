@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import stat
 import sys
 from dataclasses import dataclass
@@ -72,7 +73,7 @@ def _canonical_child(parent: Path, name: str) -> Path:
 
 def _management_name(name: str) -> bool:
     folded = portable_path_key(name)
-    return folded.startswith(".flyrail-") and folded.endswith(".state")
+    return folded.startswith(".flyrail-") and folded.endswith(".txn")
 
 
 def _validate_destination(path: Path) -> None:
@@ -118,30 +119,19 @@ def canonical_destination(path: str | os.PathLike[str]) -> Path:
     return canonical
 
 
-def state_path(destination: Path) -> Path:
+def transaction_path(destination: Path, transaction_id: str) -> Path:
+    if not isinstance(transaction_id, str) or re.fullmatch("[0-9a-f]{32}", transaction_id) is None:
+        raise ValueError("transaction id must be 32 lowercase hexadecimal characters")
     key = hashlib.sha256(portable_path_key(destination.name).encode()).hexdigest()
-    return destination.parent / f".flyrail-{key}.state"
+    return destination.parent / f".flyrail-{key}-{transaction_id}.txn"
 
 
 @dataclass(frozen=True, slots=True, init=False)
 class ResourceAuthority:
     destination: Path
-    state_root: Path
 
     def __init__(self, destination: str | os.PathLike[str]) -> None:
-        canonical = canonical_destination(destination)
-        object.__setattr__(self, "destination", canonical)
-        object.__setattr__(self, "state_root", state_path(canonical))
-
-    @property
-    def lock_path(self) -> Path:
-        return self.state_root / "lock"
-
-    @property
-    def ancestor_fences(self) -> tuple[Path, ...]:
-        return tuple(
-            state_path(parent) for parent in self.destination.parents if parent != parent.parent
-        )
+        object.__setattr__(self, "destination", canonical_destination(destination))
 
 
 class Ownership(StrEnum):
@@ -230,26 +220,3 @@ class Claim:
         return hashlib.sha256(
             b"flyrail-claim-v1\0" + semantic_bytes(freeze_value(record))
         ).hexdigest()
-
-
-def hierarchy_conflicts(authority: ResourceAuthority, *, whole_tree: bool) -> tuple[Path, ...]:
-    if not isinstance(whole_tree, bool):
-        raise TypeError("whole_tree must be a boolean")
-    conflicts = [path for path in authority.ancestor_fences if path.exists() or path.is_symlink()]
-    if whole_tree and authority.destination.exists():
-        pending = [authority.destination]
-        while pending:
-            directory = pending.pop()
-            metadata = directory.lstat()
-            _safe(metadata, directory)
-            if not stat.S_ISDIR(metadata.st_mode):
-                raise _UnsafeDestination("whole-tree resource must be a directory", directory)
-            for child in directory.iterdir():
-                if _management_name(child.name):
-                    conflicts.append(child)
-                    continue
-                metadata = child.lstat()
-                _safe(metadata, child)
-                if stat.S_ISDIR(metadata.st_mode):
-                    pending.append(child)
-    return tuple(sorted(conflicts))

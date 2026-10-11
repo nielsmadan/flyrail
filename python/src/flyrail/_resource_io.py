@@ -4,20 +4,17 @@ import stat
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import TypeVar
 
-from flyrail._codec import decode, encode
 from flyrail._filesystem import rename_exclusive
 from flyrail._observation import ObservationFailure, Observer
 from flyrail._resource_models import Ancestor, Node, ResourceRef, Revision
 from flyrail._security import ensure_private, security, set_security, validate_windows_file
-from flyrail.authority import hierarchy_conflicts
+from flyrail._state import hierarchy_conflicts, read_record, resource_key, write_record
 from flyrail.observations import ErrorCode
+from flyrail.stores import StateStore
 
-T = TypeVar("T")
 
-
-def failure(code: ErrorCode, message: str, path: Path) -> ObservationFailure:
+def failure(code: ErrorCode, message: str, path: Path | None) -> ObservationFailure:
     return ObservationFailure(code, message, path)
 
 
@@ -75,85 +72,6 @@ def require(path: Path, revision: Revision) -> None:
         raise failure(ErrorCode.CONCURRENT_CHANGE, "complete resource revision changed", path)
 
 
-def read(path: Path, cls: type[T]) -> T | None:
-    observer = Observer()
-    ancestors(path)
-    if observer.metadata(path) is None:
-        observer.finish()
-        return None
-    try:
-        value = decode(observer.file(path))
-        if type(value) is not cls:
-            raise ValueError("metadata record has the wrong type")
-    except (ValueError, UnicodeError) as error:
-        raise failure(ErrorCode.INVALID_STATE, str(error), path) from error
-    observer.finish()
-    if not isinstance(value, cls):
-        raise ValueError("metadata class disagrees")
-    return value
-
-
-def atomic(
-    path: Path, value: object, *, expected_ancestors: tuple[Ancestor, ...] | None = None
-) -> None:
-    before = observe(path)
-    parents = ancestors(path)
-    if expected_ancestors is not None and parents != expected_ancestors:
-        raise failure(ErrorCode.CONCURRENT_CHANGE, "metadata ancestor changed", path)
-    temporary = path.with_name(path.name + ".next")
-    if temporary.exists() or temporary.is_symlink():
-        raise failure(ErrorCode.RECOVERY_NEEDED, "unrecognized metadata preparation", temporary)
-    payload = encode(value)
-    with temporary.open("xb") as stream:
-        if os.name != "nt":
-            temporary.chmod(0o600)
-        ensure_private(temporary)
-        stream.write(payload)
-    if os.name != "nt":
-        temporary.chmod(0o600)
-    snapshot = observe(temporary)
-    if snapshot.data != payload:
-        raise failure(ErrorCode.CONCURRENT_CHANGE, "metadata staging changed", temporary)
-    require(path, before)
-    if ancestors(path) != parents:
-        raise failure(ErrorCode.CONCURRENT_CHANGE, "metadata ancestor changed", path)
-    require(temporary, snapshot)
-    os.replace(temporary, path)
-    require(path, snapshot)
-
-
-def validate_state(ref: ResourceRef) -> tuple[Path, ...]:
-    observer = Observer()
-    observer.managed_directory(ref.state_root)
-    recovery: list[Path] = []
-    for child in observer.directory(ref.state_root):
-        if child.name not in {
-            "lock",
-            "authority.json",
-            "receipt.json",
-            "transaction.json",
-            "staging",
-            "backup",
-            "authority.json.next",
-            "receipt.json.next",
-            "transaction.json.next",
-        }:
-            raise failure(ErrorCode.INVALID_STATE, "unknown resource state entry", child)
-        metadata = observer.metadata(child)
-        if child.name in {"staging", "backup"}:
-            if observer.directory(child):
-                recovery.append(child)
-        elif metadata is not None and not stat.S_ISREG(metadata.st_mode):
-            raise failure(ErrorCode.INVALID_STATE, "metadata must be a regular file", child)
-        if child.name == "transaction.json" or child.name.endswith(".next"):
-            recovery.append(child)
-    observer.finish()
-    header = read(ref.state_root / "authority.json", ResourceRef)
-    if header is not None and header != ref:
-        raise failure(ErrorCode.INVALID_STATE, "authority identity disagrees", ref.state_root)
-    return tuple(recovery)
-
-
 def validate_kind(ref: ResourceRef) -> None:
     metadata = Observer().metadata(ref.destination)
     if metadata is not None and stat.S_ISREG(metadata.st_mode) != (ref.kind == "document"):
@@ -164,22 +82,17 @@ def validate_kind(ref: ResourceRef) -> None:
         )
 
 
-def admit(ref: ResourceRef) -> None:
-    authority = ref.authority
-    validate_state(ref)
-    header = ref.state_root / "authority.json"
-    if read(header, ResourceRef) is None:
-        prepared = header.with_name("authority.json.next")
-        if read(prepared, ResourceRef) == ref:
-            os.replace(prepared, header)
-        else:
-            atomic(header, ref)
+def admit(store: StateStore, ref: ResourceRef) -> None:
+    key = resource_key(ref.destination, "authority")
+    current = read_record(store, key, ResourceRef)
+    if current is None:
+        write_record(store, key, ref, expected=None)
+    elif current != ref:
+        raise failure(ErrorCode.INVALID_STATE, "authority identity disagrees", ref.destination)
     validate_kind(ref)
-    conflicts = hierarchy_conflicts(authority, whole_tree=ref.kind != "document")
+    conflicts = hierarchy_conflicts(store, ref.authority, whole_tree=ref.kind != "document")
     if conflicts:
-        raise failure(
-            ErrorCode.CONFLICT, "ancestor or descendant resource fence conflicts", conflicts[0]
-        )
+        raise failure(ErrorCode.CONFLICT, "ancestor or descendant resource conflicts", conflicts[0])
 
 
 def write_revision(path: Path, revision: Revision) -> Revision:

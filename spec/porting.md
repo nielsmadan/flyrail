@@ -10,11 +10,12 @@ Keep implementation and tooling under the corresponding language directory.
 | --- | --- |
 | [Skill bundle format](bundle-format.md) | Schema-1 input validation and exact content framing. |
 | [Configuration format](configuration-format.md) | Schema-2 artifacts, typed semantic values and rendering digests. |
-| [Resource authority](resource-authority.md) | Canonical destinations, common permanent fences, physical claim identity and hierarchy admission. |
+| [Resource authority](resource-authority.md) | Canonical destinations, store-held authority records, physical claim identity and store-scoped hierarchy admission. |
 | [Document editing](document-editing.md) | Scoped syntax, baseline disposition, array position and resource provenance. |
 | [State encoding](receipt-format.md) | Strict tagged records, complete revisions and all editor evidence. |
 | [Installation indexes](configuration-state.md) | Pending/current/previous/residual membership and source-free reconciliation. |
 | [Transactions](transaction-protocol.md) | Shared locks, immutable journals, publication and exact recovery. |
+| [State store](state-store.md) | Host-supplied store contract: fixed keys, compare-and-set, locks and busy/concurrent-change errors. |
 | [Translation](translation.md) | Explicit destinations, supported semantic mappings and prerequisite notices. |
 | [Hooks](hook-protocol.md) | Versioned command protocol, host outcomes, asset dependencies and runtime bounds. |
 
@@ -61,9 +62,13 @@ execute bundled commands during loading or installation.
 
 ## Native behavior
 
-Ports must lock the same permanent file: POSIX `flock`, Windows byte zero with
-length one. Register a resource fence before ancestor/descendant validation.
-Independent callers must converge on the same authority without a global registry.
+Ports must take the same store lock, by name, through the store's `lock`
+operation — not a bespoke lock file. Write the resource's authority record
+before ancestor/descendant validation, as in
+[resource authority](resource-authority.md). Independent callers must converge
+on the same authority without a global registry: the same destination-key and
+transaction-path hashes, computed the same way, are what let independent
+processes and languages agree.
 
 Use native exclusive publication primitives and private state on the resource
 volume. Capture supported identity/security metadata, or refuse precisely.

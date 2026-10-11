@@ -4,7 +4,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from flyrail._resource_io import ancestors, failure, observe, read, validate_state
+from flyrail._resource_io import ancestors, failure, observe
 from flyrail._resource_models import (
     Node,
     OwnedClaim,
@@ -13,8 +13,10 @@ from flyrail._resource_models import (
     ResourceRef,
     Revision,
 )
+from flyrail._resource_transaction import pending_recovery
 from flyrail._schema import edit_schema_document, matches
-from flyrail.authority import Claim, Ownership
+from flyrail._state import read_record, resource_key
+from flyrail.authority import Claim, Ownership, transaction_path
 from flyrail.bundle import Bundle
 from flyrail.configuration import ClaimObservation, ResourceObservation, ResourcePlan
 from flyrail.content import FileContent, FileMode, SectionContent, StructuredContent, TreeContent
@@ -29,6 +31,7 @@ from flyrail.editors import (
 )
 from flyrail.observations import ErrorCode, TargetError
 from flyrail.rendered import RenderedArtifact, RenderedBundle
+from flyrail.stores import StateStore
 
 
 def artifact_claim(artifact: RenderedArtifact) -> Claim:
@@ -55,7 +58,7 @@ def resource(artifact: RenderedArtifact) -> ResourceRef:
             else ResourceKind.DOCUMENT
         )
     )
-    return ResourceRef(authority.destination, kind, authority.state_root)
+    return ResourceRef(authority.destination, kind)
 
 
 def selected(revision: Revision, claim: Claim) -> Revision:
@@ -177,16 +180,20 @@ def claim_observations(receipt: Receipt, revision: Revision) -> tuple[ClaimObser
     )
 
 
-def summary(ref: ResourceRef) -> ResourceObservation:
-    recovery = validate_state(ref)
-    receipt = read(ref.state_root / "receipt.json", Receipt)
+def stored_receipt(store: StateStore, ref: ResourceRef) -> Receipt | None:
+    receipt = read_record(store, resource_key(ref.destination, "receipt"), Receipt)
     if receipt is not None and receipt.resource != ref:
-        raise failure(ErrorCode.INVALID_STATE, "receipt resource disagrees", ref.state_root)
+        raise failure(ErrorCode.INVALID_STATE, "receipt resource disagrees", ref.destination)
+    return receipt
+
+
+def summary(store: StateStore, ref: ResourceRef) -> ResourceObservation:
+    recovery = pending_recovery(store, ref)
+    receipt = stored_receipt(store, ref)
     current = observe(ref.destination)
     observations = () if receipt is None else claim_observations(receipt, current)
     return ResourceObservation(
         ref.destination,
-        ref.state_root,
         observations,
         current.content_digest,
         recovery_paths=recovery,
@@ -257,6 +264,7 @@ def container_provenance(
 
 
 def plan_resource(
+    store: StateStore,
     ref: ResourceRef,
     identifier: str,
     bundle: Bundle | None,
@@ -267,12 +275,9 @@ def plan_resource(
     requirements: dict[str, tuple[tuple[Path, str], ...]],
     stable_requirements: dict[str, tuple[tuple[Path, str], ...]],
 ) -> ResourcePlan:
-    recovery = validate_state(ref)
-    previous = read(ref.state_root / "receipt.json", Receipt)
-    if previous is not None and previous.resource != ref:
-        raise failure(ErrorCode.INVALID_STATE, "receipt resource disagrees", ref.state_root)
+    recovery = pending_recovery(store, ref)
+    previous = stored_receipt(store, ref)
     before = observe(ref.destination)
-    state_revision = observe(ref.state_root)
     claims = () if previous is None else previous.claims
     provenance = previous.provenance if previous else Receipt(ref, "0" * 32).provenance
     after = before
@@ -463,19 +468,20 @@ def plan_resource(
         if error is None
         else (previous or Receipt(ref, uuid.uuid4().hex))
     )
+    planned = after if error is None else before
     if (
         previous is not None
+        and planned == before
         and replace(receipt, transaction_id=previous.transaction_id) == previous
     ):
         receipt = previous
     return ResourcePlan(
         ref,
         before,
-        after if error is None else before,
+        planned,
         previous,
         receipt,
-        ancestors(ref.state_root / "transaction.json"),
-        state_revision,
+        ancestors(transaction_path(ref.destination, receipt.transaction_id) / "staging"),
         recovery,
         required,
         error,

@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from conformance import FIXTURES
+from state_helpers import index_record, put_index
 from test_translation import bundle_of, codes, context
 
 from flyrail import (
@@ -16,6 +17,7 @@ from flyrail import (
     BundleIdentity,
     Command,
     Dependency,
+    DirectoryStore,
     EnvRef,
     Family,
     FileContent,
@@ -32,6 +34,7 @@ from flyrail import (
     Platform,
     RenderContext,
     RenderedBundle,
+    StateStore,
     SupportAsset,
     Surface,
     Target,
@@ -47,6 +50,7 @@ from flyrail import (
     render_many,
     sync,
 )
+from flyrail._resource_models import Index
 
 pytestmark = pytest.mark.integration
 
@@ -82,7 +86,10 @@ def test_family_specific_relocations(
         tmp_path / ".agents/skills" if skills is None else tmp_path / "relocated" / skills
     )
     assert {key for key, _ in selected.target.environment} == {variable}
-    assert selected.installation(tmp_path / "index").routing_context == selected.routing_context
+    assert (
+        selected.installation(DirectoryStore(tmp_path / "index")).routing_context
+        == selected.routing_context
+    )
 
 
 def test_surface_relocation_and_explicit_alternates(tmp_path: Path) -> None:
@@ -160,7 +167,7 @@ def test_native_payloads_keep_authored_bytes_and_project_anchor(
     (item,) = render(bundle, selected).artifacts
     assert item.destination == tmp_path / path
     assert item.content == FileContent(text)
-    installation = InstallationTarget(tmp_path / "index")
+    installation = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle, render(bundle, selected), installation).status is OperationStatus.APPLIED
     assert (tmp_path / path).read_bytes() == text
     assert remove(bundle.id, installation).status is OperationStatus.APPLIED
@@ -280,7 +287,7 @@ def test_asset_manifest_snapshot_reference_and_revision_lifecycle(
     runtime = next(item for item in first.artifacts if item.id == "runtime")
     assert runtime.destination.parent == tmp_path / "assets/support-demo/runtime"
     assert len(runtime.destination.name) == 64
-    installation = selected.installation(tmp_path / "index")
+    installation = selected.installation(DirectoryStore(tmp_path / "index"))
     plans = preview(bundle, first, installation)
     assert plans.resources[0].resource.destination == runtime.destination
     assert sync(bundle, first, installation).status is OperationStatus.APPLIED
@@ -315,14 +322,14 @@ def test_reference_failure_preserves_old_asset_revision(
 
     bundle = asset_bundle()
     selected = context(tmp_path)
-    installation = selected.installation(tmp_path / "index")
+    installation = selected.installation(DirectoryStore(tmp_path / "index"))
     first = render(bundle, selected)
     assert sync(bundle, first, installation).status is OperationStatus.APPLIED
 
-    def fail_configuration(journal: Journal) -> None:
+    def fail_configuration(store: StateStore, journal: Journal) -> None:
         if journal.resource.destination.name == "config.toml":
             raise OSError("synthetic publication failure")
-        original_publish(journal)
+        original_publish(store, journal)
 
     monkeypatch.setattr("flyrail._lifecycle.publish", fail_configuration)
     updated = asset_bundle(b"next")
@@ -436,7 +443,7 @@ def test_public_render_input_guards_and_context_immutability(tmp_path: Path) -> 
 def test_rendered_drift_and_explicit_instruction_notices(tmp_path: Path) -> None:
     bundle = bundle_of(InstructionArtifact("guide", "Useful."))
     selected = context(tmp_path)
-    installation = selected.installation(tmp_path / "index")
+    installation = selected.installation(DirectoryStore(tmp_path / "index"))
     first = render(bundle, selected)
     assert "codex-instruction-discovery" in {notice.code for notice in first.notices}
     assert sync(bundle, first, installation).status is OperationStatus.APPLIED
@@ -468,7 +475,7 @@ def test_unsupported_preview_and_pending_target_never_mutate(tmp_path: Path) -> 
     bundle = bundle_of(
         McpArtifact("tools", "tools", HttpTransport("https://example.test", EnvRef("TOKEN")))
     )
-    installation = selected.installation(tmp_path / "index")
+    installation = selected.installation(DirectoryStore(tmp_path / "index"))
     rendered = render(bundle, selected)
     blocked = preview(bundle, rendered, installation)
     assert not blocked.applicable
@@ -476,8 +483,9 @@ def test_unsupported_preview_and_pending_target_never_mutate(tmp_path: Path) -> 
     assert list(tmp_path.iterdir()) == []
     valid = bundle_of(InstructionArtifact("guide", "Retain this."))
     assert sync(valid, render(valid, selected), installation).status is OperationStatus.APPLIED
-    pending = installation.index_root / "index.json.next"
-    pending.write_bytes((installation.index_root / "index.json").read_bytes())
+    index = index_record(installation, valid.id)
+    assert isinstance(index, Index)
+    put_index(installation, valid.id, replace(index, pending=index.current))
     before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
     result = sync(bundle, rendered, installation)
     assert result.error is not None and result.error.code == "unsupported"

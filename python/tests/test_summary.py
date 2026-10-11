@@ -1,7 +1,7 @@
-import shutil
 from pathlib import Path
 
 import pytest
+from state_helpers import journal_directory, put
 
 from flyrail import (
     Agent,
@@ -10,6 +10,7 @@ from flyrail import (
     BundleIdentity,
     ChangeAction,
     Command,
+    DirectoryStore,
     ErrorCode,
     Family,
     InstallationTarget,
@@ -34,6 +35,8 @@ from flyrail import (
     summarize,
     sync,
 )
+from flyrail import _lifecycle as lifecycle
+from flyrail._state import index_key
 
 
 def bundle_of(text: str = "Run the checks.\n") -> Bundle:
@@ -54,7 +57,7 @@ def test_summarizes_a_creation_plan(tmp_path: Path) -> None:
     bundle = bundle_of()
     selected = context(tmp_path)
     rendered = render(bundle, selected)
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
 
     summary = summarize(preview(bundle, rendered, target))
 
@@ -76,7 +79,7 @@ def test_summarizes_an_unchanged_plan(tmp_path: Path) -> None:
     bundle = bundle_of()
     selected = context(tmp_path)
     rendered = render(bundle, selected)
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
     sync(bundle, rendered, target)
 
     summary = summarize(preview(bundle, rendered, target))
@@ -87,7 +90,7 @@ def test_summarizes_an_unchanged_plan(tmp_path: Path) -> None:
 def test_summarizes_an_update_plan(tmp_path: Path) -> None:
     selected = context(tmp_path)
     first = bundle_of()
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
     sync(first, render(first, selected), target)
     second = bundle_of("Run the checks twice.\n")
 
@@ -99,7 +102,7 @@ def test_summarizes_an_update_plan(tmp_path: Path) -> None:
 def test_summarizes_a_removal_plan(tmp_path: Path) -> None:
     bundle = bundle_of()
     selected = context(tmp_path)
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
     sync(bundle, render(bundle, selected), target)
 
     summary = summarize(preview_removal(bundle.id, target))
@@ -131,7 +134,9 @@ def test_summarizes_a_conflicting_plan(tmp_path: Path) -> None:
         routing_context=base.routing_context,
     )
 
-    summary = summarize(preview(bundle, forced, selected.installation(tmp_path / "index")))
+    summary = summarize(
+        preview(bundle, forced, selected.installation(DirectoryStore(tmp_path / "index")))
+    )
 
     assert not summary.applicable
     assert summary.error is None
@@ -144,14 +149,23 @@ def test_summarizes_a_conflicting_plan(tmp_path: Path) -> None:
     assert change.recovery_paths == ()
 
 
-def test_reports_recovery_paths_as_a_conflict(tmp_path: Path) -> None:
+def test_reports_recovery_paths_as_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bundle = bundle_of()
     selected = context(tmp_path)
     rendered = render(bundle, selected)
-    target = selected.installation(tmp_path / "index")
-    sync(bundle, rendered, target)
-    state = preview(bundle, rendered, target).resources[0].resource.state_root
-    (state / "staging" / "leftover").write_text("interrupted\n")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
+
+    def interrupted(store: object, journal: object) -> None:
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(lifecycle, "publish", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            sync(bundle, rendered, target)
+    destination = preview(bundle, rendered, target).resources[0].resource.destination
+    state = journal_directory(target.store, destination)
 
     summary = summarize(preview(bundle, rendered, target))
 
@@ -160,25 +174,25 @@ def test_reports_recovery_paths_as_a_conflict(tmp_path: Path) -> None:
     (change,) = summary.changes
     assert change.action is ChangeAction.CONFLICT
     assert change.error is None
-    assert change.recovery_paths == (state / "staging",)
+    assert change.recovery_paths == (state,)
 
 
 def test_reports_a_target_error(tmp_path: Path) -> None:
     bundle = bundle_of()
     selected = context(tmp_path)
     rendered = render(bundle, selected)
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
     sync(bundle, rendered, target)
-    index = tmp_path / "index" / "index.json"
-    shutil.copyfile(index, index.with_suffix(".json.next"))
+    key = index_key(bundle.id, target.context_digest)
+    put(target.store, key, b"{}")
 
     summary = summarize(preview(bundle, rendered, target))
 
     assert not summary.applicable
     assert summary.error is not None
-    assert summary.error.code is ErrorCode.RECOVERY_NEEDED
-    assert summary.error.message == "installation index has prepared metadata"
-    assert summary.error.path == index.with_suffix(".json.next")
+    assert summary.error.code is ErrorCode.INVALID_STATE
+    assert summary.error.message == f"{key}: unknown state record"
+    assert summary.error.path == target.store.location
 
 
 def test_forwards_render_notices(tmp_path: Path) -> None:
@@ -192,7 +206,9 @@ def test_forwards_render_notices(tmp_path: Path) -> None:
     selected = RenderContext(Target.project("pi", tmp_path), Platform.LINUX)
     rendered = render(bundle, selected)
 
-    summary = summarize(preview(bundle, rendered, selected.installation(tmp_path / "index")))
+    summary = summarize(
+        preview(bundle, rendered, selected.installation(DirectoryStore(tmp_path / "index")))
+    )
 
     assert [(notice.artifact_id, notice.kind, notice.code) for notice in summary.notices] == [
         ("guide", NoticeKind.ACTIVATION, "instruction-loading"),
@@ -216,7 +232,9 @@ def test_reports_every_mcp_artifact_sharing_a_destination(tmp_path: Path) -> Non
     selected = RenderContext(Target.project("claude", tmp_path), Platform.LINUX)
     rendered = render(bundle, selected)
 
-    summary = summarize(preview(bundle, rendered, selected.installation(tmp_path / "index")))
+    summary = summarize(
+        preview(bundle, rendered, selected.installation(DirectoryStore(tmp_path / "index")))
+    )
 
     (change,) = summary.changes
     assert change.artifact_ids == ("m1", "m2")
@@ -233,7 +251,9 @@ def test_reports_every_skill_sharing_a_container(tmp_path: Path) -> None:
     selected = RenderContext(Target.project("claude", tmp_path), Platform.LINUX)
     rendered = render(bundle, selected)
 
-    summary = summarize(preview(bundle, rendered, selected.installation(tmp_path / "index")))
+    summary = summarize(
+        preview(bundle, rendered, selected.installation(DirectoryStore(tmp_path / "index")))
+    )
 
     (change,) = summary.changes
     assert change.artifact_ids == ("deploy", "review")
@@ -250,7 +270,9 @@ def test_reports_every_instruction_sharing_a_document(tmp_path: Path) -> None:
     selected = context(tmp_path)
     rendered = render(bundle, selected)
 
-    summary = summarize(preview(bundle, rendered, selected.installation(tmp_path / "index")))
+    summary = summarize(
+        preview(bundle, rendered, selected.installation(DirectoryStore(tmp_path / "index")))
+    )
 
     (change,) = summary.changes
     assert change.artifact_ids == ("first", "second")
@@ -263,7 +285,9 @@ def test_directory_targets_have_no_agent(tmp_path: Path) -> None:
     selected = context(tmp_path)
     rendered = render(bundle, selected)
 
-    summary = summarize(preview(bundle, rendered, InstallationTarget(tmp_path / "index")))
+    summary = summarize(
+        preview(bundle, rendered, InstallationTarget(DirectoryStore(tmp_path / "index")))
+    )
 
     assert summary.agent is None
     assert summary.scope is None

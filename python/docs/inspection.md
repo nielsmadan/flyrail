@@ -83,14 +83,19 @@ custom = Target.directory("./shared-skills")
 
 `inspect_installation(bundle_id, installation_target)` reads the index and the
 union of current, pending, previous and residual resource references, including
-references in complete prepared index metadata. It does not
-need the bundle source, create directories, acquire locks, recover transactions
-or change permissions. Reads may update access times.
+references in complete prepared index metadata, from the target's store. It
+does not need the bundle source, create directories, acquire a lock, recover
+transactions or change permissions. Reads may still touch the store — for
+example updating access times on a `DirectoryStore`.
 
 Its `InstallationObservation` includes recorded version/digests, pending state,
 resource summaries and an error. Each resource summary contains claim attribution,
-claim status, a revision digest, diagnostics and recovery paths. It excludes full
-foreign content and baseline payloads.
+claim status, a revision digest, diagnostics and recovery paths. A nonempty
+`recovery_paths` names the transaction directory recorded by the resource's
+journal — `P/.flyrail-<hash>-<transaction-id>.txn` beside destination `P/N` —
+left behind by an interrupted write; a later recovery removes it. A transaction
+directory that no journal in the store names is not reported. The observation
+excludes full foreign content and baseline payloads.
 
 A missing receipt required by a committed current or previous generation, including
 a recognized prepared completion, is a resource `INVALID_STATE` error, with the
@@ -116,23 +121,24 @@ current.
 
 ## Skill convenience inspection
 
-`inspect(bundle, targets)` returns an ordered tuple of `TargetInspection` values
-for a nonempty iterable of skill `Target` values. Each carries the requested
-target, canonical root, adjacent hashed authority `state_root`, `alias_of` and
-an `Observation`. Same-physical aliases share an observation and point to the
-first request's zero-based index.
+`inspect(bundle, targets, *, store)` returns an ordered tuple of
+`TargetInspection` values for a nonempty iterable of skill `Target` values,
+reading recorded membership from the given `store`. Each carries the requested
+target, canonical root, `alias_of` and an `Observation`. Same-physical aliases
+share an observation and point to the first request's zero-based index.
 
 If a target cannot be canonicalized, its observation is `UNKNOWN` with a typed
 error, and independent targets are still inspected. Its `root` retains the
-requested path; `state_root` is derived from that path for diagnostics. Physical
-alias attribution requires successful canonicalization.
+requested path. Physical alias attribution requires successful canonicalization.
 
-The skill adapter uses a deterministic sibling index named
-`.<container>.flyrail-index-<bundle-id>`. Its recorded context binds the canonical
-physical container. Equivalent directory and agent-preset routes can inspect,
-update and remove that installation in later calls, regardless of their order.
-The selected agent, scope, home and routing environment remain captured in the
-preview. Ownership remains at the shared container authority.
+The skill adapter identifies an installation within `store` by an
+`InstallationTarget` whose context is the canonical physical container's
+destination, not a name derived from anything beside it. Equivalent directory
+and agent-preset routes that canonicalize to the same container can inspect,
+update and remove that installation in later calls, regardless of their order,
+as long as they are given the same store. The selected agent, scope, home and
+routing environment remain captured in the preview. Ownership remains at the
+shared container authority, held in that store.
 
 `Observation` preserves the skill-facing shape: installed inventory summaries,
 version/content comparisons, same-resource ownership, modifications, desired

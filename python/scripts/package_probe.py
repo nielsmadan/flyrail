@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 import flyrail
-from flyrail import Bundle, OperationStatus, Target, install, uninstall
+from flyrail import Bundle, DirectoryStore, OperationStatus, Target, install, uninstall
+from flyrail._state import resource_key
 
 
 class Error(TypedDict):
@@ -82,8 +83,12 @@ class Host:
     skill: str
     filesystem: bool
 
+    @property
+    def state(self) -> Path:
+        return Path.cwd() / f"{self.bundle_id}-state"
+
     def arguments(self, action: str, targets: list[Path], *extra: str) -> list[str]:
-        result = [str(self.executable), "ai", action]
+        result = [str(self.executable), "ai", action, "--state", str(self.state)]
         if self.filesystem:
             result += (
                 ["--bundle-id", self.bundle_id]
@@ -120,8 +125,7 @@ def lifecycle(host: Host) -> None:
     (collision / "SKILL.md").write_bytes(b"untracked content")
     report = host.call("status", [first], expected=1)
     assert report["results"][0]["observation"]["state"] == "absent"
-    assert not first.exists()
-    assert not flyrail.ResourceAuthority(first).state_root.exists()
+    assert sorted(path.name for path in root.iterdir()) == ["blocked"]
     command([str(host.executable), "ai", "install"], expected=2)
     report = host.call("install", targets, expected=1)
     assert statuses(report) == ["applied", "failed", "applied"]
@@ -187,7 +191,11 @@ def lifecycle(host: Host) -> None:
     }
     (foreign_source / "flyrail.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert (
-        install(Bundle.from_directory(foreign_source), [Target.directory(first)])[0].status
+        install(
+            Bundle.from_directory(foreign_source),
+            [Target.directory(first)],
+            store=DirectoryStore(host.state),
+        )[0].status
         is OperationStatus.APPLIED
     )
     (first / "untracked.txt").write_bytes(b"untracked neighbor")
@@ -205,7 +213,8 @@ def lifecycle(host: Host) -> None:
     assert statuses(host.call("uninstall", active)) == ["unchanged", "unchanged"]
     assert {path.name for path in first.iterdir()} == {"foreign-skill", "untracked.txt"}
     assert not later.exists()
-    assert flyrail.ResourceAuthority(later).state_root.is_dir()
+    authority = resource_key(flyrail.ResourceAuthority(later).destination, "authority")
+    assert DirectoryStore(host.state).read(authority) is not None
     assert (first / "foreign-skill/SKILL.md").read_bytes() == b"foreign owned bytes"
     assert (first / "untracked.txt").read_bytes() == b"untracked neighbor"
     assert (collision / "SKILL.md").read_bytes() == b"untracked content"
@@ -232,13 +241,14 @@ def zip_resources(wheel: Path) -> None:
     assert entries["checksum-review/scratch"].is_directory
     assert entries["checksum-review/scripts/verify_checksum.py"].executable
     target = Target.directory(Path.cwd() / "zip-skills")
-    assert install(bundle, [target])[0].status is OperationStatus.APPLIED
+    store = DirectoryStore(Path.cwd() / "zip-state")
+    assert install(bundle, [target], store=store)[0].status is OperationStatus.APPLIED
     script = target.root / "checksum-review/scripts/verify_checksum.py"
     assert script.read_bytes() == entries["checksum-review/scripts/verify_checksum.py"].data
     if os.name != "nt":
         assert stat.S_IMODE(script.stat().st_mode) == 0o755
     assert (target.root / "checksum-review/assets/sample.bin").read_bytes() == expected
-    assert uninstall(bundle.id, [target])[0].status is OperationStatus.APPLIED
+    assert uninstall(bundle.id, [target], store=store)[0].status is OperationStatus.APPLIED
     print(
         "Built wheel ZIP resources, binary bytes, executable intent "
         "and closed-source snapshot passed."

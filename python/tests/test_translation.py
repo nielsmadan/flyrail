@@ -14,6 +14,7 @@ from flyrail import (
     BundleEntry,
     BundleIdentity,
     Command,
+    DirectoryStore,
     DocumentFormat,
     EnvRef,
     ErrorCode,
@@ -102,7 +103,7 @@ def test_neutral_combined_translation_vectors(tmp_path: Path, case: dict[str, An
     contexts = [context(tmp_path, item["agent"]) for item in case["contexts"]]
     rendered = render_many(bundle, contexts)
     assert rendered == render_many(bundle, reversed(contexts))
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     expected = case["expected"]
     if "unsupported" in expected:
         assert codes(rendered) == {expected["unsupported"]}
@@ -194,7 +195,7 @@ def test_neutral_translation_and_lifecycle_vectors(
     tmp_path: Path, case: dict[str, Any], platform: Platform
 ) -> None:
     selected, bundle, rendered = vector_context(tmp_path, case, platform)
-    installation = selected.installation(tmp_path / "private-index")
+    installation = selected.installation(DirectoryStore(tmp_path / "private-index"))
     expected = case["expected"]
     if "unsupported" in expected:
         assert codes(rendered) == {expected["unsupported"]}
@@ -279,7 +280,7 @@ def test_skills_reuse_the_existing_presets(tmp_path: Path, agent: Agent, scope: 
         return
     rendered = render(bundle, RenderContext(target, Platform.LINUX))
     assert rendered.artifacts == render_skills(bundle, target).artifacts
-    installation = InstallationTarget(tmp_path / "index")
+    installation = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle, rendered, installation).status is OperationStatus.APPLIED
     assert (target.root / "review/SKILL.md").read_bytes() == b"---\nname: review\n---\nCheck it.\n"
     assert (target.root / "review/empty").is_dir()
@@ -452,7 +453,7 @@ def test_pi_adapter_literal_environment_and_reference_boundary(tmp_path: Path) -
 def test_windows_environment_collisions_and_unsupported_update_do_not_write(tmp_path: Path) -> None:
     selected = replace(context(tmp_path), platform=Platform.WINDOWS)
     initial = bundle_of(InstructionArtifact("guide", "Keep this.\n"))
-    installation = selected.installation(tmp_path / "index")
+    installation = selected.installation(DirectoryStore(tmp_path / "index"))
     assert sync(initial, render(initial, selected), installation).status is OperationStatus.APPLIED
     before = {
         path.relative_to(tmp_path): path.read_bytes()
@@ -481,7 +482,7 @@ def test_shared_blocks_deduplicate_through_the_lifecycle(tmp_path: Path) -> None
     assert combined == render_many(bundle, reversed(contexts))
     assert len(combined.artifacts) == 4
     assert len({item.content for item in combined.artifacts}) == 1
-    installation = InstallationTarget(tmp_path / "index")
+    installation = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle, combined, installation).status is OperationStatus.APPLIED
     assert (tmp_path / "AGENTS.md").read_text().count("Shared guidance.") == 1
     assert len(inspect_installation(bundle.id, installation).resources[0].claims) == 1
@@ -502,7 +503,7 @@ def test_shared_mcp_records_preserve_the_effective_selection(
     combined = render_many(bundle, [claude, copilot])
     assert combined.supported
     assert combined == render_many(bundle, [copilot, claude])
-    installation = InstallationTarget(tmp_path / "index")
+    installation = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle, combined, installation).status is OperationStatus.APPLIED
     effective = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["tools"]
     assert effective == {
@@ -527,7 +528,7 @@ def test_invalid_copilot_env_update_preserves_previous_installation(
 ) -> None:
     selected = context(tmp_path, agent)
     original = bundle_of(InstructionArtifact("guide", "Keep this."))
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
     assert sync(original, render(original, selected), target).status is OperationStatus.APPLIED
     invalid = bundle_of(
         InstructionArtifact("guide", "Changed."),
@@ -545,7 +546,7 @@ def test_disjoint_structured_claims_require_one_document_format(
 ) -> None:
     selected = context(tmp_path, "codex")
     original = bundle_of(McpArtifact("tools", "tools", Command(["server"])))
-    target = selected.installation(tmp_path / "index")
+    target = selected.installation(DirectoryStore(tmp_path / "index"))
     assert sync(original, render(original, selected), target).status is OperationStatus.APPLIED
     bundle = bundle_of(
         *original.artifacts,
@@ -600,7 +601,7 @@ def test_incompatible_native_records_block_selected_copilot_routes(
     )
     assert codes(rendered) == {expected}
     assert_unsupported_without_writes(
-        tmp_path, bundle, rendered, InstallationTarget(tmp_path / "index")
+        tmp_path, bundle, rendered, InstallationTarget(DirectoryStore(tmp_path / "index"))
     )
 
 
@@ -734,7 +735,7 @@ def test_a_droid_preview_is_not_applicable(tmp_path: Path) -> None:
     bundle = bundle_of(InstructionArtifact("guide", "Be careful.\n"))
     selected = RenderContext(Target.project(Agent.DROID, tmp_path), Platform.LINUX)
     rendered = render(bundle, selected)
-    proposal = preview(bundle, rendered, InstallationTarget(tmp_path / "index"))
+    proposal = preview(bundle, rendered, InstallationTarget(DirectoryStore(tmp_path / "index")))
     assert not proposal.applicable
 
 
@@ -833,6 +834,7 @@ def skill_bundle() -> Bundle:
 def test_the_skill_lifecycle_refuses_droid_without_touching_its_root(
     tmp_path: Path, scope: str
 ) -> None:
+    store = DirectoryStore(tmp_path / "state")
     root = tmp_path / scope
     root.mkdir()
     bundle = skill_bundle()
@@ -842,9 +844,9 @@ def test_the_skill_lifecycle_refuses_droid_without_touching_its_root(
         else Target.user(Agent.DROID, home=root)
     )
     for results in (
-        install(bundle, [target]),
-        update(bundle, [target]),
-        uninstall("skills", [target]),
+        install(bundle, [target], store=store),
+        update(bundle, [target], store=store),
+        uninstall("skills", [target], store=store),
     ):
         (result,) = results
         assert result.status is OperationStatus.FAILED
@@ -852,7 +854,7 @@ def test_the_skill_lifecycle_refuses_droid_without_touching_its_root(
         assert result.error.code is ErrorCode.UNSUPPORTED
         assert "droid" in result.error.message
         assert list(root.rglob("*")) == []
-    (inspected,) = inspect(bundle, [target])
+    (inspected,) = inspect(bundle, [target], store=store)
     assert inspected.observation.state is ObservationState.UNKNOWN
     assert inspected.observation.error is not None
     assert inspected.observation.error.code is ErrorCode.UNSUPPORTED
@@ -860,16 +862,17 @@ def test_the_skill_lifecycle_refuses_droid_without_touching_its_root(
 
 
 def test_the_skill_lifecycle_still_installs_at_a_directory_target(tmp_path: Path) -> None:
+    store = DirectoryStore(tmp_path / "state")
     root = tmp_path / "container"
     root.mkdir()
     bundle = skill_bundle()
     target = Target.directory(root)
-    (installed,) = install(bundle, [target])
+    (installed,) = install(bundle, [target], store=store)
     assert installed.status is OperationStatus.APPLIED
     assert installed.error is None
     assert (root / "review/SKILL.md").read_bytes() == b"---\nname: review\n---\nCheck it.\n"
-    (inspected,) = inspect(bundle, [target])
+    (inspected,) = inspect(bundle, [target], store=store)
     assert inspected.observation.state is ObservationState.INSTALLED
-    (removed,) = uninstall("skills", [target])
+    (removed,) = uninstall("skills", [target], store=store)
     assert removed.status is OperationStatus.APPLIED
     assert not (root / "review").exists()

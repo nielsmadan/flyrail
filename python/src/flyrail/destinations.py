@@ -1,9 +1,11 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from flyrail.artifacts import Audience, Family
 from flyrail.configuration import InstallationTarget
 from flyrail.hooks import HookRuntime
+from flyrail.stores import StateStore
 from flyrail.targets import Agent, Platform, Surface, Target, TargetScope, _relocation
 
 
@@ -19,6 +21,9 @@ def _path(value: Path) -> Path:
     if ".." in value.parts or "\0" in str(value):
         raise ValueError("render routes must be unambiguous paths without NUL")
     return value
+
+
+_IDENTITY_KEYS = frozenset({"agent", "scope", "surface", "root"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,8 +98,17 @@ class RenderContext:
             )
         )
 
-    def installation(self, index_root: Path) -> InstallationTarget:
-        return InstallationTarget(index_root, routing_context=self.routing_context)
+    def installation(
+        self, store: StateStore, context: Iterable[tuple[str, str]] | None = None
+    ) -> InstallationTarget:
+        routing = self.routing_context
+        return InstallationTarget(
+            store,
+            tuple(item for item in routing if item[0] in _IDENTITY_KEYS)
+            if context is None
+            else context,
+            routing_context=routing,
+        )
 
 
 def _user_directory(context: RenderContext) -> Path | None:

@@ -29,8 +29,9 @@ uv pip install --python .cache/example-venv/bin/python . examples/filesystem exa
 .cache/example-venv/bin/flyrail-notes words README.md
 .cache/example-venv/bin/flyrail-checksum digest LICENSE
 .cache/example-venv/bin/flyrail-notes ai install \
-  --source examples/filesystem/bundle --target .cache/demo-notes-skills
-.cache/example-venv/bin/flyrail-checksum ai install --target .cache/demo-checksum-skills
+  --source examples/filesystem/bundle --target .cache/demo-notes-skills --state .cache/demo-notes-state
+.cache/example-venv/bin/flyrail-checksum ai install \
+  --target .cache/demo-checksum-skills --state .cache/demo-checksum-state
 ```
 
 The example destinations stay inside the checkout's ignored cache.
@@ -44,27 +45,30 @@ It retains its artifacts and disposable installation under
 Filesystem content operations require a source path:
 
 ```sh
-flyrail-notes ai status --source /path/to/bundle --target /path/to/skills
-flyrail-notes ai install --source /path/to/bundle --target /path/to/skills
-flyrail-notes ai update --source /path/to/bundle --target /path/to/skills
-flyrail-notes ai uninstall --bundle-id example-notes --target /path/to/skills
+flyrail-notes ai status --source /path/to/bundle --target /path/to/skills --state /path/to/state
+flyrail-notes ai install --source /path/to/bundle --target /path/to/skills --state /path/to/state
+flyrail-notes ai update --source /path/to/bundle --target /path/to/skills --state /path/to/state
+flyrail-notes ai uninstall --bundle-id example-notes --target /path/to/skills --state /path/to/state
 ```
 
 The package example obtains its source from
 `Bundle.from_package("flyrail_example_checksum")`:
 
 ```sh
-flyrail-checksum ai status --target /path/to/skills
-flyrail-checksum ai install --target /path/to/skills
-flyrail-checksum ai update --target /path/to/skills
-flyrail-checksum ai uninstall --target /path/to/skills
+flyrail-checksum ai status --target /path/to/skills --state /path/to/state
+flyrail-checksum ai install --target /path/to/skills --state /path/to/state
+flyrail-checksum ai update --target /path/to/skills --state /path/to/state
+flyrail-checksum ai uninstall --target /path/to/skills --state /path/to/state
 ```
 
 Repeat `--target` to request several destinations. Each path selects the skill
-container itself, as with `Target.directory`. The hosts never discover or choose
-agents automatically. The notes host accepts a bundle ID on removal. The checksum
-host retains its stable ID in code and checks it against loaded manifests for
-content operations. Both take the uninstall branch before loading resources.
+container itself, as with `Target.directory`. `--state` selects the application's
+own state directory and constructs a `DirectoryStore` there, passed explicitly to
+every call; flyrail has no default store or location of its own. The hosts never
+discover or choose agents automatically. The notes host accepts a bundle ID on
+removal. The checksum host retains its stable ID in code and checks it against
+loaded manifests for content operations. Both take the uninstall branch before
+loading resources.
 
 Each AI command prints one JSON report containing the application version, bundle
 ID, desired bundle label (`null` during uninstall), and ordered target results.

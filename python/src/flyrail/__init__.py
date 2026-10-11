@@ -104,6 +104,7 @@ from flyrail.rendered import (
     RenderedArtifact,
     RenderedBundle,
 )
+from flyrail.stores import DirectoryStore, MemoryStore, SQLiteStore, StateStore, StoreBusy
 from flyrail.summary import ChangeAction, PlannedChange, PlanSummary, summarize
 from flyrail.targets import Agent, Platform, Surface, Target, TargetScope
 from flyrail.translation import render, render_many
@@ -140,6 +141,7 @@ __all__ = [
     "CreatedContainer",
     "Dependency",
     "DependencyMode",
+    "DirectoryStore",
     "Disposition",
     "DocumentEdit",
     "DocumentFormat",
@@ -169,6 +171,7 @@ __all__ = [
     "LifecyclePreview",
     "McpArtifact",
     "Member",
+    "MemoryStore",
     "Modification",
     "ModificationKind",
     "NativeArtifact",
@@ -194,6 +197,7 @@ __all__ = [
     "ResourcePlan",
     "ResourceRef",
     "ResourceResult",
+    "SQLiteStore",
     "Scalar",
     "SectionBoundaries",
     "SectionContent",
@@ -202,6 +206,8 @@ __all__ = [
     "SharedContent",
     "SkillArtifact",
     "SkillSpec",
+    "StateStore",
+    "StoreBusy",
     "StructuredContent",
     "SupportAsset",
     "Surface",

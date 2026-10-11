@@ -18,6 +18,7 @@ from flyrail import (
     BundleIdentity,
     Dependency,
     DependencyMode,
+    DirectoryStore,
     Family,
     FileContent,
     HookOutcome,
@@ -28,6 +29,7 @@ from flyrail import (
     Platform,
     RenderedArtifact,
     RenderedBundle,
+    StateStore,
     Surface,
     TreeContent,
     inspect_installation,
@@ -65,7 +67,7 @@ def test_unsupported_semantics_have_no_writes(
     rendered = render(bundle, context(tmp_path, host))
     assert codes(rendered) == {"hook-outcome"}
     assert_unsupported_without_writes(
-        tmp_path, bundle, rendered, InstallationTarget(tmp_path / "index")
+        tmp_path, bundle, rendered, InstallationTarget(DirectoryStore(tmp_path / "index"))
     )
 
 
@@ -132,7 +134,7 @@ def test_runtime_prerequisites_are_preflight_constraints(tmp_path: Path, kind: s
     bundle = bundle_of(*hooks)
     rendered = render(bundle, ctx)
     assert_unsupported_without_writes(
-        tmp_path, bundle, rendered, InstallationTarget(tmp_path / "index")
+        tmp_path, bundle, rendered, InstallationTarget(DirectoryStore(tmp_path / "index"))
     )
 
 
@@ -160,11 +162,12 @@ def test_cursor_schema_two_bundles_preserve_original_document(
         Bundle.from_artifacts(BundleIdentity(name, "1"), [make_hook()])
         for name in ["first", "second"]
     ]
-    targets = [InstallationTarget(tmp_path / f"index-{name}") for name in ["first", "second"]]
+    store = DirectoryStore(tmp_path / "state")
+    targets = [InstallationTarget(store, (("index", name),)) for name in ["first", "second"]]
     for bundle, target in zip(bundles, targets, strict=True):
         assert sync(bundle, render(bundle, ctx), target).status is OperationStatus.APPLIED
-        assert all(item.schema_requirements for item in receipt(path).claims)
-    assert len(receipt(path).claims) == 2
+        assert all(item.schema_requirements for item in receipt(path, store).claims)
+    assert len(receipt(path, store).claims) == 2
     assert remove("first", targets[0]).status is OperationStatus.APPLIED
     assert inspect_installation("second", targets[1]).is_current
     assert remove("second", targets[1]).status is OperationStatus.APPLIED
@@ -199,7 +202,7 @@ def test_cursor_retained_scaffold_relinquishes_cleanup_rights(tmp_path: Path) ->
     path.write_text(path.read_text().rstrip()[:-1] + ' ,"foreign":{}}')
     assert remove(bundle.id, target).status is OperationStatus.APPLIED
     assert json.loads(path.read_text()) == {"version": 1, "foreign": {}}
-    assert receipt(path).provenance.schema_fields == ()
+    assert receipt(path, target.store).provenance.schema_fields == ()
     value = json.loads(path.read_text())
     del value["foreign"]
     path.write_text(json.dumps(value))
@@ -223,10 +226,10 @@ def test_failed_launcher_upgrade_retains_old_runtime_then_removes_source_free(
     )
     original = tx.publish
 
-    def fail(journal: tx.Journal) -> None:
+    def fail(store: StateStore, journal: tx.Journal) -> None:
         if journal.resource.destination == launcher:
             raise OSError(errno.EIO, "launcher failed")
-        original(journal)
+        original(store, journal)
 
     monkeypatch.setattr(lifecycle, "publish", fail)
     result = sync(second, new, target)
@@ -256,7 +259,7 @@ def test_failed_launcher_upgrade_retains_old_runtime_then_removes_source_free(
 
 def test_stable_dependency_does_not_weaken_revision_edges(tmp_path: Path) -> None:
     bundle = bundle_of(make_hook())
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     entry = RenderedArtifact("entry", Family.HOOKS, tmp_path / "entry", FileContent(b"one"))
     resource = RenderedArtifact("config", Family.HOOKS, tmp_path / "config", FileContent(b"entry"))
     stable = RenderedBundle(
@@ -327,7 +330,7 @@ def test_schema_mismatch_never_takes_over(tmp_path: Path, original: bytes) -> No
     result = sync(
         bundle_of(make_hook()),
         RenderedBundle([artifact]),
-        InstallationTarget(tmp_path / "index"),
+        InstallationTarget(DirectoryStore(tmp_path / "index")),
         acquisition=Acquisition.TAKEOVER,
         replace_modified=True,
     )
@@ -360,7 +363,7 @@ def test_missing_schema_is_repaired_on_update_not_status(tmp_path: Path) -> None
     )
     bundle = bundle_of(make_hook())
     rendered = RenderedBundle([artifact])
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle, rendered, target).status is OperationStatus.APPLIED
     path.write_text(re.sub(r',?\s*"version"\s*:\s*1', "", path.read_text()))
     before = path.read_bytes()
@@ -392,14 +395,14 @@ def test_schema_publication_failure_recovers_original_baseline(
     path = tmp_path / "hooks.json"
     if existing:
         path.write_bytes(b" \n")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     rendered = RenderedBundle([schema_artifact(path)])
     bundle = bundle_of(make_hook())
     original = tx.publish_receipt
 
-    def crash(journal: tx.Journal) -> None:
+    def crash(store: StateStore, journal: tx.Journal) -> None:
         if committed:
-            original(journal)
+            original(store, journal)
         raise KeyboardInterrupt
 
     monkeypatch.setattr(tx, "publish_receipt", crash)
@@ -433,7 +436,7 @@ def test_schema_requirements_conflict_before_publication(tmp_path: Path, kind: s
     result = sync(
         bundle_of(make_hook()),
         RenderedBundle([first, second]),
-        InstallationTarget(tmp_path / "index"),
+        InstallationTarget(DirectoryStore(tmp_path / "index")),
     )
     assert result.status is OperationStatus.FAILED
     assert not path.exists()
@@ -458,7 +461,7 @@ def test_cursor_upgrade_retains_first_takeover_baseline(tmp_path: Path) -> None:
         {"version": 1, "hooks": {"preToolUse": [entry]}, "foreign": True}
     ).encode()
     path.write_bytes(original)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert (
         sync(first, rendered, target, acquisition=Acquisition.TAKEOVER).status
         is OperationStatus.APPLIED
@@ -487,6 +490,8 @@ def test_aliases_cannot_weaken_revision_dependencies(tmp_path: Path, stable_alia
             for alias in ["first", "second"]
         ],
     )
-    result = sync(bundle_of(make_hook()), rendered, InstallationTarget(tmp_path / "index"))
+    result = sync(
+        bundle_of(make_hook()), rendered, InstallationTarget(DirectoryStore(tmp_path / "index"))
+    )
     assert result.status is OperationStatus.FAILED
     assert not first.destination.exists() and not entry.destination.exists()

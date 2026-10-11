@@ -4,12 +4,15 @@ from typing import Any
 
 import pytest
 from skill_helpers import make_bundle, snapshot
+from state_helpers import journal_directory
 from test_configuration_lifecycle import bundle, rendered
 
 from flyrail import (
     Bundle,
+    DirectoryStore,
     ErrorCode,
     InstallationTarget,
+    LifecyclePreview,
     ObservationState,
     OperationStatus,
     RenderedArtifact,
@@ -27,11 +30,11 @@ from flyrail import (
 )
 from flyrail import _lifecycle as lifecycle
 from flyrail._observation import ObservationFailure
-from flyrail._resource_io import observe as observe_revision
-from flyrail._resource_models import ResourceRef, Revision
+from flyrail._resource_models import ResourceRef
 from flyrail._resource_plan import resource as resolve_resource
 from flyrail._resource_transaction import Journal
 from flyrail._resource_transaction import publish as publish_resource
+from flyrail.stores import StateStore
 
 
 def test_skill_inspection_preserves_returned_resource_errors_and_conflicts(tmp_path: Path) -> None:
@@ -43,7 +46,9 @@ def test_skill_inspection_preserves_returned_resource_errors_and_conflicts(tmp_p
     (conflicting.root / "review/SKILL.md").write_bytes(b"unowned skill")
     before = snapshot(tmp_path)
 
-    failed, conflict = inspect(desired, [invalid, conflicting])
+    failed, conflict = inspect(
+        desired, [invalid, conflicting], store=DirectoryStore(tmp_path / "state")
+    )
 
     assert failed.observation.state is ObservationState.UNKNOWN
     assert failed.observation.error is not None
@@ -54,26 +59,43 @@ def test_skill_inspection_preserves_returned_resource_errors_and_conflicts(tmp_p
     assert snapshot(tmp_path) == before
 
 
+def unavailable_after_inspection(store: DirectoryStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_read = store.read
+    original_preview = lifecycle.preview
+    previewing = False
+
+    def read(key: str) -> bytes | None:
+        if previewing:
+            raise OSError(errno.EIO, "index store unavailable", str(store.location))
+        return original_read(key)
+
+    def preview(*args: Any, **kwargs: Any) -> LifecyclePreview:
+        nonlocal previewing
+        previewing = True
+        try:
+            return original_preview(*args, **kwargs)
+        finally:
+            previewing = False
+
+    monkeypatch.setattr(store, "read", read)
+    monkeypatch.setattr(inspection, "preview", preview)
+
+
 def test_skill_inspection_preserves_returned_aggregate_preview_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     desired = make_bundle(tmp_path / "source")
     target = Target.directory(tmp_path / "skills")
-    index = tmp_path / ".skills.flyrail-index-team"
-
-    def observe(path: Path) -> Revision:
-        if path == index:
-            raise OSError(errno.EIO, "index snapshot unavailable", str(path))
-        return observe_revision(path)
+    store = DirectoryStore(tmp_path / "state")
+    unavailable_after_inspection(store, monkeypatch)
 
     before = snapshot(tmp_path)
-    monkeypatch.setattr(lifecycle, "observe", observe)
-    observed, alias = inspect(desired, [target, target])
+    observed, alias = inspect(desired, [target, target], store=store)
 
     assert observed.observation.state is ObservationState.UNKNOWN
     assert observed.observation.error is not None
     assert observed.observation.error.code is ErrorCode.IO_ERROR
-    assert observed.observation.error.path == index
+    assert observed.observation.error.path == store.location
     assert observed.observation.error.errno == errno.EIO
     assert alias.alias_of == 0 and alias.observation is observed.observation
     assert snapshot(tmp_path) == before
@@ -86,32 +108,28 @@ def test_skill_inspection_retains_recovery_state_after_interrupted_install(
     desired = make_bundle(tmp_path / "source")
     target = Target.directory(tmp_path / "skills")
 
-    def interrupt(journal: Journal) -> None:
-        publish_resource(journal)
+    def interrupt(store: StateStore, journal: Journal) -> None:
+        publish_resource(store, journal)
         raise KeyboardInterrupt
 
     with monkeypatch.context() as patch:
         patch.setattr(lifecycle, "publish", interrupt)
         with pytest.raises(KeyboardInterrupt):
-            install(desired, [target])
+            install(desired, [target], store=DirectoryStore(tmp_path / "state"))
     assert (target.root / "review/SKILL.md").read_bytes() == b"original"
-    index = tmp_path / ".skills.flyrail-index-team"
-
-    def observe(path: Path) -> Revision:
-        if preview_error and path == index:
-            raise OSError(errno.EIO, "index snapshot unavailable", str(path))
-        return observe_revision(path)
-
-    monkeypatch.setattr(lifecycle, "observe", observe)
+    store = DirectoryStore(tmp_path / "state")
+    pending = journal_directory(store, target.root)
+    if preview_error:
+        unavailable_after_inspection(store, monkeypatch)
     before = snapshot(tmp_path)
-    result = inspect(desired, [target])[0]
+    result = inspect(desired, [target], store=store)[0]
 
     assert result.observation.state is ObservationState.RECOVERY_NEEDED
-    assert result.state_root / "transaction.json" in result.observation.recovery_paths
+    assert pending in result.observation.recovery_paths
     if preview_error:
         assert result.observation.error is not None
         assert result.observation.error.code is ErrorCode.IO_ERROR
-        assert result.observation.error.path == index
+        assert result.observation.error.path == store.location
     assert snapshot(tmp_path) == before
 
 
@@ -120,24 +138,22 @@ def test_skill_inspection_retains_recovery_state_after_interrupted_install(
     [
         (operation, failure)
         for operation in ["inspect", "install", "update", "uninstall"]
-        for failure in ["container-link", "index-link", "render-io", "reference-io"]
+        for failure in ["container-link", "render-io", "reference-io"]
         if operation != "uninstall" or failure.endswith("link")
     ],
 )
 def test_skill_target_failures_preserve_order_and_continue_independent_targets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str, failure: str
 ) -> None:
+    store = DirectoryStore(tmp_path / "state")
     desired = make_bundle(tmp_path / "source")
     failed = Target.directory(tmp_path / "failed")
     healthy = Target.directory(tmp_path / "healthy")
     if operation in {"update", "uninstall"}:
-        assert install(desired, [healthy])[0].status is OperationStatus.APPLIED
+        assert install(desired, [healthy], store=store)[0].status is OperationStatus.APPLIED
     failure_path = failed.root
     if failure == "container-link":
         failed.root.symlink_to(tmp_path / "missing", target_is_directory=True)
-    elif failure == "index-link":
-        failure_path = tmp_path / ".failed.flyrail-index-team"
-        failure_path.symlink_to(tmp_path / "missing", target_is_directory=True)
     elif failure == "render-io":
         original_render = inspection.render_skills
 
@@ -159,11 +175,11 @@ def test_skill_target_failures_preserve_order_and_continue_independent_targets(
     targets = [failed, healthy, healthy]
     results: tuple[TargetInspection, ...] | tuple[TargetResult, ...]
     if operation == "inspect":
-        results = inspect(desired, targets)
+        results = inspect(desired, targets, store=store)
     elif operation == "uninstall":
-        results = uninstall(desired.id, targets)
+        results = uninstall(desired.id, targets, store=store)
     else:
-        results = (install if operation == "install" else update)(desired, targets)
+        results = (install if operation == "install" else update)(desired, targets, store=store)
 
     assert tuple(result.target for result in results) == tuple(targets)
     error = results[0].observation.error
@@ -207,29 +223,32 @@ def test_skill_target_failures_preserve_order_and_continue_independent_targets(
 def test_skill_request_errors_raise_before_mutating_healthy_targets(
     tmp_path: Path, operation: str, invalid: str
 ) -> None:
+    store = DirectoryStore(tmp_path / "state")
     desired = make_bundle(tmp_path / "source")
     healthy = Target.directory(tmp_path / "healthy")
     malformed: Any = (
         object()
         if invalid == "type"
-        else Target.directory(tmp_path / ".flyrail-reserved.state")
+        else Target.directory(tmp_path / ".flyrail-reserved.txn")
         if invalid == "reserved-path"
         else Target.directory(tmp_path / "source")
     )
     before = snapshot(tmp_path)
     with pytest.raises(TypeError if invalid == "type" else ValueError):
         if operation == "uninstall":
-            uninstall(desired.id, [healthy, malformed])
+            uninstall(desired.id, [healthy, malformed], store=store)
         elif operation == "inspect":
-            inspect(desired, [healthy, malformed])
+            inspect(desired, [healthy, malformed], store=store)
         else:
-            (install if operation == "install" else update)(desired, [healthy, malformed])
+            (install if operation == "install" else update)(
+                desired, [healthy, malformed], store=store
+            )
     assert snapshot(tmp_path) == before
 
 
 def test_sync_returns_typed_error_for_an_existing_destination_link(tmp_path: Path) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     path.symlink_to(tmp_path / "missing")
     desired, output = bundle(), rendered(path)
 
@@ -251,7 +270,7 @@ def test_sync_reference_resolution_converts_expected_errors_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     path = tmp_path / "AGENTS.md"
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     failure: Exception = (
         OSError(errno.EIO, "reference observation failed", str(path))
         if kind == "os"

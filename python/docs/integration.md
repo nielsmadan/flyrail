@@ -46,6 +46,7 @@ from flyrail import (
     Bundle,
     BundleIdentity,
     Command,
+    DirectoryStore,
     InstructionArtifact,
     McpArtifact,
     Platform,
@@ -62,13 +63,21 @@ bundle = Bundle.from_artifacts(
     ],
 )
 
+state = DirectoryStore(root / ".cache" / "project-tools" / "flyrail")
 offered = (Agent.CLAUDE, Agent.CODEX)
 contexts = {agent: RenderContext(Target.project(agent, root), Platform.LINUX) for agent in offered}
-targets = {
-    agent: context.installation(root / ".cache" / "project-tools" / agent.value)
-    for agent, context in contexts.items()
-}
+targets = {agent: context.installation(state) for agent, context in contexts.items()}
 ```
+
+Both targets share one `DirectoryStore` in the app's own state directory. What
+keeps their installations separate is the context: `context.installation(state)`
+defaults it to the `agent`, `scope`, `surface` and `root` entries of each
+`RenderContext`'s `routing_context`, which differ per agent, so per-agent
+installations sharing a store stay separate without any extra code. Hook
+runtime, asset root, platform and environment are not part of that default, so
+removing through a context that omits them still finds the installation. Pass
+an explicit `context=` instead when an identity needs to survive something that
+would otherwise change those entries, such as a harness relocating `root`.
 
 A real host offers whichever agents `found` actually reported; keeping two agents
 here keeps the example free of a separate concern: Codex, Cursor, OpenCode and Pi

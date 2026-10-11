@@ -8,6 +8,7 @@ from flyrail import (
     Bundle,
     BundleIdentity,
     Command,
+    DirectoryStore,
     HookArtifact,
     HookEvent,
     HookOutcome,
@@ -37,7 +38,8 @@ context = RenderContext(
     hook_runtime=HookRuntime(Path("/opt/node/bin/node")),
 )
 rendered = render(bundle, context)
-result = sync(bundle, rendered, context.installation(Path.cwd() / ".hook-index"))
+store = DirectoryStore(Path.cwd() / ".cache" / "hook-tools" / "flyrail")
+result = sync(bundle, rendered, context.installation(store))
 ```
 
 `HookRuntime` reads packaged resources once and holds immutable bytes. It does not

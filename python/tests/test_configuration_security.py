@@ -12,7 +12,7 @@ from unittest.mock import Mock
 import pytest
 from test_configuration_lifecycle import bundle, rendered
 
-from flyrail import InstallationTarget, OperationStatus, remove, sync
+from flyrail import DirectoryStore, InstallationTarget, OperationStatus, StateStore, remove, sync
 from flyrail import _security as security
 from flyrail._resource_io import observe
 
@@ -233,7 +233,7 @@ def test_private_backup_dacl_is_checked_on_the_payload_not_only_its_parent(
 def test_native_macos_acl_and_foreign_xattr_refuse_before_publication(tmp_path: Path) -> None:
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"foreign")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     for command, cleanup in [
         (["chmod", "+a", "everyone allow read", str(path)], ["chmod", "-N", str(path)]),
         (
@@ -262,7 +262,7 @@ def test_native_linux_xattr_refuses_before_publication(tmp_path: Path) -> None:
     if sys.platform != "linux":
         pytest.skip("Linux xattr API")
     os.setxattr(path, "user.flyrail", b"private")
-    result = sync(bundle(), rendered(path), InstallationTarget(tmp_path / "index"))
+    result = sync(bundle(), rendered(path), InstallationTarget(DirectoryStore(tmp_path / "index")))
     assert (
         result.status is OperationStatus.FAILED and os.getxattr(path, "user.flyrail") == b"private"
     )
@@ -275,7 +275,7 @@ def test_native_windows_shared_file_security_preservation_and_private_backup(
 ) -> None:
     from flyrail import _lifecycle as lifecycle
     from flyrail import _resource_transaction as transaction
-    from flyrail._resource_transaction import Journal, paths
+    from flyrail._resource_transaction import Journal, paths, transaction_directory
 
     path = tmp_path / "AGENTS.md"
     path.write_bytes(b"foreign")
@@ -292,7 +292,7 @@ def test_native_windows_shared_file_security_preservation_and_private_backup(
         )
 
     monkeypatch.setattr(transaction, "replace_file", replace_file)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     initial = sync(bundle(), rendered(path), target)
     assert initial.status is OperationStatus.APPLIED, initial.error
     assert len(replacements) == 1
@@ -301,8 +301,8 @@ def test_native_windows_shared_file_security_preservation_and_private_backup(
     assert security.security(path) == before
     backups = []
 
-    def retain(journal: Journal) -> None:
-        backup = paths(journal.resource)[2]
+    def retain(store: StateStore, journal: Journal) -> None:
+        backup = paths(transaction_directory(journal))[1]
         security.ensure_private(backup)
         backups.append(security.security(backup))
         raise OSError(errno.EIO, "retain backup")

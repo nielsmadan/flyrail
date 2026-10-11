@@ -15,29 +15,30 @@ from flyrail._resource_models import (
     sequence,
 )
 from flyrail._validation import validate_identifier, validate_version
-from flyrail.authority import canonical_destination
 from flyrail.bundle import Bundle
 from flyrail.editors import Acquisition, EditStatus
 from flyrail.models import OperationStatus
 from flyrail.observations import TargetError
 from flyrail.rendered import Notice, RenderedBundle
+from flyrail.stores import StateStore
 
 
 @dataclass(frozen=True, slots=True, init=False)
 class InstallationTarget:
-    index_root: Path
+    store: StateStore
     context: tuple[tuple[str, str], ...]
     routing_context: tuple[tuple[str, str], ...]
 
     def __init__(
         self,
-        index_root: str | Path,
+        store: StateStore,
         context: Iterable[tuple[str, str]] = (),
         *,
         routing_context: Iterable[tuple[str, str]] = (),
     ) -> None:
-        root = canonical_destination(index_root)
-        object.__setattr__(self, "index_root", root)
+        if not isinstance(store, StateStore):
+            raise TypeError("store must be a StateStore")
+        object.__setattr__(self, "store", store)
         for name, values in (("context", context), ("routing_context", routing_context)):
             pairs = tuple((key, value) for key, value in values)
             if any(not isinstance(key, str) or not isinstance(value, str) for key, value in pairs):
@@ -48,7 +49,7 @@ class InstallationTarget:
 
     @property
     def context_digest(self) -> str:
-        return digest((self.index_root, self.context))
+        return digest(self.context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +76,6 @@ class ClaimObservation:
 @dataclass(frozen=True, slots=True)
 class ResourceObservation:
     destination: Path
-    state_root: Path
     claims: tuple[ClaimObservation, ...] = ()
     revision_digest: str | None = None
     error: TargetError | None = None
@@ -83,7 +83,6 @@ class ResourceObservation:
 
     def __post_init__(self) -> None:
         absolute(self.destination)
-        absolute(self.state_root)
         if self.revision_digest is not None:
             hexadecimal(self.revision_digest)
         if self.error is not None and type(self.error) is not TargetError:
@@ -182,7 +181,6 @@ class ResourcePlan:
     previous: Receipt | None
     receipt: Receipt
     ancestors: tuple[Ancestor, ...]
-    state_revision: Revision
     recovery_paths: tuple[Path, ...]
     require_existing: bool = False
     error: TargetError | None = None
@@ -196,7 +194,7 @@ class ResourcePlan:
             self.previous is not None and self.previous.resource != self.resource
         ):
             raise ValueError("planned receipts disagree with resource")
-        sequence((self.before, self.after, self.state_revision), Revision)
+        sequence((self.before, self.after), Revision)
         if type(self.require_existing) is not bool or (
             self.error is not None and type(self.error) is not TargetError
         ):
@@ -216,8 +214,6 @@ class LifecyclePreview:
     acquisition: Acquisition
     replace_modified: bool
     index: Index | None
-    index_revision: Revision | None
-    index_ancestors: tuple[Ancestor, ...]
     generation: Generation | None
     resources: tuple[ResourcePlan, ...]
     error: TargetError | None = None
@@ -235,15 +231,10 @@ class LifecyclePreview:
             raise TypeError("preview requires an immutable index")
         if self.generation is not None and type(self.generation) is not Generation:
             raise TypeError("preview requires an immutable generation")
-        if (self.index_revision is not None and type(self.index_revision) is not Revision) or (
-            self.error is not None and type(self.error) is not TargetError
-        ):
+        if self.error is not None and type(self.error) is not TargetError:
             raise TypeError("invalid preview metadata")
-        if self.index_revision is None and self.error is None:
-            raise ValueError("unobserved preview metadata requires an error")
         validate_identifier(self.bundle_id, "bundle id")
         object.__setattr__(self, "resources", sequence(self.resources, ResourcePlan))
-        object.__setattr__(self, "index_ancestors", sequence(self.index_ancestors, Ancestor))
 
     @property
     def applicable(self) -> bool:

@@ -12,9 +12,10 @@ from flyrail._lifecycle import (
 )
 from flyrail._validation import validate_identifier
 from flyrail.bundle import Bundle
-from flyrail.inspection import prepare_skills, skill_observation
+from flyrail.inspection import prepare_skills, skill_observation, validate_store
 from flyrail.models import OperationStatus
 from flyrail.observations import ErrorCode, Observation, ObservationState, TargetError, TargetResult
+from flyrail.stores import StateStore
 from flyrail.targets import Target
 
 __all__ = [
@@ -35,6 +36,7 @@ def _skills(
     bundle: Bundle | None,
     identifier: str,
     targets: Iterable[Target],
+    store: StateStore,
     operation: str,
     replace_modified: bool,
     lock_timeout: float,
@@ -45,7 +47,7 @@ def _skills(
     if not isinstance(replace_modified, bool):
         raise TypeError("replace_modified must be a boolean")
     results: list[TargetResult] = []
-    for item, rendered in prepare_skills(bundle, identifier, targets):
+    for item, rendered in prepare_skills(bundle, identifier, targets, store):
         if item.alias_of is not None:
             results.append(
                 replace(results[item.alias_of], target=item.target, alias_of=item.alias_of)
@@ -56,7 +58,6 @@ def _skills(
                 TargetResult(
                     item.target,
                     item.root,
-                    item.state_root,
                     None,
                     OperationStatus.FAILED,
                     Observation(ObservationState.UNKNOWN, error=item.installation),
@@ -78,7 +79,6 @@ def _skills(
                 TargetResult(
                     item.target,
                     item.root,
-                    item.state_root,
                     None,
                     OperationStatus.FAILED,
                     skill_observation(prior, bundle, rendered),
@@ -106,7 +106,6 @@ def _skills(
             TargetResult(
                 item.target,
                 item.root,
-                item.state_root,
                 None,
                 result.status,
                 skill_observation(result.observation, bundle, rendered),
@@ -118,31 +117,36 @@ def _skills(
 
 
 def install(
-    bundle: Bundle, targets: Iterable[Target], *, lock_timeout: float = 0
+    bundle: Bundle, targets: Iterable[Target], *, store: StateStore, lock_timeout: float = 0
 ) -> tuple[TargetResult, ...]:
+    validate_store(store)
     if not isinstance(bundle, Bundle):
         raise TypeError("bundle must be a Bundle snapshot")
-    return _skills(bundle, bundle.id, targets, "install", False, lock_timeout)
+    return _skills(bundle, bundle.id, targets, store, "install", False, lock_timeout)
 
 
 def update(
     bundle: Bundle,
     targets: Iterable[Target],
     *,
+    store: StateStore,
     replace_modified: bool = False,
     lock_timeout: float = 0,
 ) -> tuple[TargetResult, ...]:
+    validate_store(store)
     if not isinstance(bundle, Bundle):
         raise TypeError("bundle must be a Bundle snapshot")
-    return _skills(bundle, bundle.id, targets, "update", replace_modified, lock_timeout)
+    return _skills(bundle, bundle.id, targets, store, "update", replace_modified, lock_timeout)
 
 
 def uninstall(
     bundle_id: str,
     targets: Iterable[Target],
     *,
+    store: StateStore,
     replace_modified: bool = False,
     lock_timeout: float = 0,
 ) -> tuple[TargetResult, ...]:
+    validate_store(store)
     validate_identifier(bundle_id, "bundle id")
-    return _skills(None, bundle_id, targets, "uninstall", replace_modified, lock_timeout)
+    return _skills(None, bundle_id, targets, store, "uninstall", replace_modified, lock_timeout)

@@ -3,12 +3,18 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from flyrail._inventory import inventory
-from flyrail._lifecycle import _references, error_detail, inspect_installation, preview
+from flyrail._lifecycle import (
+    StoreOverlap,
+    _references,
+    error_detail,
+    inspect_installation,
+    preview,
+)
 from flyrail._observation import ObservationFailure
-from flyrail._resource_io import read
 from flyrail._resource_models import Receipt
+from flyrail._state import read_record, resource_key
 from flyrail.artifacts import Family, SkillArtifact
-from flyrail.authority import ResourceAuthority, _UnsafeDestination, state_path
+from flyrail.authority import ResourceAuthority, _UnsafeDestination
 from flyrail.bundle import Bundle
 from flyrail.configuration import InstallationObservation, InstallationTarget
 from flyrail.content import TreeContent
@@ -27,6 +33,7 @@ from flyrail.observations import (
     TargetInspection,
 )
 from flyrail.rendered import Notice, NoticeKind, RenderedArtifact, RenderedBundle
+from flyrail.stores import StateStore
 from flyrail.targets import Target
 
 
@@ -37,12 +44,10 @@ class SkillTarget:
     root: Path
     alias_of: int | None
 
-    @property
-    def state_root(self) -> Path:
-        return state_path(self.root)
 
-
-def skill_targets(identifier: str, targets: Iterable[Target]) -> tuple[SkillTarget, ...]:
+def skill_targets(
+    identifier: str, targets: Iterable[Target], store: StateStore
+) -> tuple[SkillTarget, ...]:
     values = tuple(targets)
     if not values:
         raise ValueError("at least one target is required")
@@ -59,7 +64,6 @@ def skill_targets(identifier: str, targets: Iterable[Target]) -> tuple[SkillTarg
             continue
         try:
             root = ResourceAuthority(root).destination
-            index = root.with_name(f".{root.name}.flyrail-index-{identifier}")
             context = (
                 ("destination", str(root)),
                 ("agent", target.agent.value if target.agent else ""),
@@ -68,7 +72,7 @@ def skill_targets(identifier: str, targets: Iterable[Target]) -> tuple[SkillTarg
                 *(("env:" + key, value) for key, value in target.environment),
             )
             installation = InstallationTarget(
-                index, (("destination", str(root)),), routing_context=context
+                store, (("destination", str(root)),), routing_context=context
             )
         except (OSError, ObservationFailure, _UnsafeDestination) as error:
             result.append(SkillTarget(target, error_detail(error), root, None))
@@ -131,12 +135,18 @@ def render_skills(bundle: Bundle, target: Target) -> RenderedBundle:
     return RenderedBundle(rendered)
 
 
+def validate_store(store: StateStore) -> None:
+    if not isinstance(store, StateStore):
+        raise TypeError("store must be a StateStore")
+
+
 def prepare_skills(
-    bundle: Bundle | None, identifier: str, targets: Iterable[Target]
+    bundle: Bundle | None, identifier: str, targets: Iterable[Target], store: StateStore
 ) -> tuple[tuple[SkillTarget, RenderedBundle | None], ...]:
+    validate_store(store)
     if bundle is not None:
         _validate_skill_bundle(bundle)
-    selected = skill_targets(identifier, targets)
+    selected = skill_targets(identifier, targets, store)
     result: list[tuple[SkillTarget, RenderedBundle | None]] = []
     for item in selected:
         if item.alias_of is not None:
@@ -147,7 +157,7 @@ def prepare_skills(
             try:
                 rendered = render_skills(bundle, item.target)
                 _references(rendered, None, item.installation, bundle)
-            except (OSError, ObservationFailure, _UnsafeDestination) as error:
+            except (OSError, ObservationFailure, _UnsafeDestination, StoreOverlap) as error:
                 item = replace(item, installation=error_detail(error))
         result.append((item, rendered))
     return tuple(result)
@@ -162,7 +172,9 @@ def skill_observation(
     metadata_error = None
     for observed in observation.resources:
         try:
-            stored = read(observed.state_root / "receipt.json", Receipt)
+            stored = read_record(
+                observation.target.store, resource_key(observed.destination, "receipt"), Receipt
+            )
         except (OSError, ObservationFailure, ValueError) as caught:
             metadata_error = error_detail(caught)
             continue
@@ -235,11 +247,14 @@ def skill_observation(
     )
 
 
-def inspect(bundle: Bundle, targets: Iterable[Target]) -> tuple[TargetInspection, ...]:
+def inspect(
+    bundle: Bundle, targets: Iterable[Target], *, store: StateStore
+) -> tuple[TargetInspection, ...]:
+    validate_store(store)
     if not isinstance(bundle, Bundle):
         raise TypeError("bundle must be a Bundle snapshot")
     result: list[TargetInspection] = []
-    for item, rendered in prepare_skills(bundle, bundle.id, targets):
+    for item, rendered in prepare_skills(bundle, bundle.id, targets, store):
         if item.alias_of is not None:
             result.append(
                 replace(result[item.alias_of], target=item.target, alias_of=item.alias_of)
@@ -283,7 +298,6 @@ def inspect(bundle: Bundle, targets: Iterable[Target]) -> tuple[TargetInspection
             TargetInspection(
                 item.target,
                 item.root,
-                item.state_root,
                 item.alias_of,
                 observation,
             )

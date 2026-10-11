@@ -6,21 +6,30 @@ from typing import Any
 
 import pytest
 from conformance import FIXTURES
+from state_helpers import put_index
 
 from flyrail import (
     Claim,
+    DirectoryStore,
     InstallationTarget,
     OperationStatus,
-    ResourceAuthority,
     ResourceRef,
     remove,
 )
 from flyrail._codec import decode, encode, record
-from flyrail._filesystem import target_lock
 from flyrail._observation import ObservationFailure
-from flyrail._resource_io import atomic, observe
+from flyrail._resource_io import observe
 from flyrail._resource_models import Generation, Index, Receipt, Revision
 from flyrail._resource_transaction import Journal, recover, transaction_ancestors
+from flyrail._state import (
+    destination_key,
+    index_key,
+    read_record,
+    resource_key,
+    store_lock,
+    write_record,
+)
+from flyrail.authority import transaction_path
 
 VECTORS = json.loads((FIXTURES / "configurations.json").read_text(encoding="utf-8"))
 
@@ -31,20 +40,8 @@ def relocated(raw: object, root: Path) -> object:
     if not isinstance(raw, dict):
         return raw
     if raw.keys() == {"path"}:
-        original = raw["path"]
-        name = original.rsplit("/", 1)[1]
-        if name.startswith(".flyrail-"):
-            return {
-                "path": ResourceAuthority(
-                    root / ("config.json" if "config.json" in str(raw) else "AGENTS.md")
-                ).state_root.as_posix()
-            }
-        return {"path": (root / name).as_posix()}
+        return {"path": (root / raw["path"].rsplit("/", 1)[1]).as_posix()}
     result: dict[str, Any] = {key: relocated(value, root) for key, value in raw.items()}
-    if result.get("type") == "ResourceRef":
-        fields = result["fields"]
-        path = Path(fields["destination"]["path"])
-        fields["state_root"] = {"path": ResourceAuthority(path).state_root.as_posix()}
     if result.get("type") == "Receipt":
         fields = result["fields"]
         ref = decode(json.dumps(fields["resource"]).encode())
@@ -71,17 +68,20 @@ def test_neutral_receipt_vectors_drive_production_source_free_removal(
         )
         path.write_bytes(data)
         path.chmod(0o600)
-        target = InstallationTarget(root / "index")
+        target = InstallationTarget(DirectoryStore(root / "index"))
         owner = value.claims[0].bundle_id
         generation = Generation(
             "1", "a" * 64, "b" * 64, ((value.resource, (value.claims[0].claim_id,)),)
         )
-        with target_lock(value.resource.state_root, 0), target_lock(target.index_root, 0):
-            atomic(value.resource.state_root / "authority.json", value.resource)
-            atomic(value.resource.state_root / "receipt.json", value)
-            atomic(
-                target.index_root / "index.json", Index(owner, target.context_digest, generation)
-            )
+        key = index_key(owner, target.context_digest)
+        store = target.store
+        with (
+            store_lock(store, key, 0),
+            store_lock(store, "resource/" + destination_key(path), 0),
+        ):
+            write_record(store, resource_key(path, "authority"), value.resource, expected=None)
+            write_record(store, resource_key(path, "receipt"), value, expected=None)
+            put_index(target, owner, Index(owner, target.context_digest, generation))
         assert record(decode(encode(value))) == record(value)
         result = remove(owner, target)
         assert str(result.status) == outcome["status"]
@@ -92,8 +92,7 @@ def test_neutral_receipt_vectors_drive_production_source_free_removal(
             )
         else:
             assert path.read_bytes() == data
-            retained = decode((value.resource.state_root / "receipt.json").read_bytes())
-            assert retained == value
+            assert read_record(store, resource_key(path, "receipt"), Receipt) == value
 
 
 @pytest.mark.parametrize("case", VECTORS["transactions"], ids=lambda case: case["name"])
@@ -121,14 +120,17 @@ def test_neutral_transaction_vectors_drive_production_recovery(
         published=revisions[journal.published.nodes[0].inode],
         backup=revisions[journal.backup.nodes[0].inode],
     )
-    with target_lock(ref.state_root, 0):
-        atomic(ref.state_root / "authority.json", ref)
+    store = DirectoryStore(tmp_path / "state")
+    directory = transaction_path(ref.destination, journal.receipt.transaction_id)
+    with store_lock(store, "resource/" + destination_key(ref.destination), 0):
+        write_record(store, resource_key(ref.destination, "authority"), ref, expected=None)
+        directory.mkdir(mode=0o700)
         for folder in ["staging", "backup"]:
-            (ref.state_root / folder).mkdir(mode=0o700)
+            (directory / folder).mkdir(mode=0o700)
         for key, path in [
             ("resource", ref.destination),
-            ("staged", ref.state_root / "staging" / "resource"),
-            ("backup", ref.state_root / "backup" / "resource"),
+            ("staged", directory / "staging" / "resource"),
+            ("backup", directory / "backup" / "resource"),
         ]:
             raw_revision = case["observed"][key]
             if raw_revision is None:
@@ -143,24 +145,29 @@ def test_neutral_transaction_vectors_drive_production_recovery(
             source.write_bytes(observed.data or b"")
             source.chmod(observed.nodes[0].mode)
             source.rename(path)
-        journal = replace(journal, ancestors=transaction_ancestors(ref))
+        journal = replace(journal, ancestors=transaction_ancestors(directory))
         committed = case["observed"]["receipt"] == "new"
-        atomic(ref.state_root / "receipt.json", journal.receipt if committed else journal.previous)
-        atomic(ref.state_root / "transaction.json", journal)
+        write_record(
+            store,
+            resource_key(ref.destination, "receipt"),
+            journal.receipt if committed else journal.previous,
+            expected=None,
+        )
+        write_record(store, resource_key(ref.destination, "journal"), journal, expected=None)
         if case["expected"]["status"] == "recovered":
-            recover(ref)
-            recover(ref)
+            recover(store, ref)
+            recover(store, ref)
             expected = decode(json.dumps(case["expected"]["resource"]).encode())
             assert isinstance(expected, Revision)
             assert ref.destination.read_bytes() == expected.data
         else:
             with pytest.raises((ObservationFailure, OSError)):
-                recover(ref)
-        assert (ref.state_root / "transaction.json").exists() is case["expected"]["retain_journal"]
-        assert (ref.state_root / "backup" / "resource").exists() is case["expected"][
-            "retain_backup"
-        ]
-        value = decode((ref.state_root / "receipt.json").read_bytes())
+                recover(store, ref)
+        retained = store.read(resource_key(ref.destination, "journal")) is not None
+        assert retained is case["expected"]["retain_journal"]
+        assert directory.exists() is case["expected"]["retain_journal"]
+        assert (directory / "backup" / "resource").exists() is case["expected"]["retain_backup"]
+        value = read_record(store, resource_key(ref.destination, "receipt"), Receipt)
         assert value == (
             journal.receipt if case["expected"]["receipt"] == "new" else journal.previous
         )

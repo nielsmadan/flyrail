@@ -6,12 +6,21 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from state_helpers import journal_directory
 from test_configuration_lifecycle import bundle, rendered
 
-from flyrail import InstallationTarget, OperationStatus, ResourceAuthority, remove, sync
+from flyrail import (
+    DirectoryStore,
+    InstallationTarget,
+    OperationStatus,
+    ResourceAuthority,
+    remove,
+    sync,
+)
 from flyrail import _resource_io as io
 from flyrail import _resource_transaction as tx
 from flyrail._resource_models import Receipt, Revision
+from flyrail._state import read_record, resource_key
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +46,7 @@ def test_windows_document_security_transitions_keep_backup_private(
 ) -> None:
     destination = tmp_path / "AGENTS.md"
     destination.write_bytes(b"foreign")
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     descriptors = {destination.stat().st_ino: b"public"}
     calls: list[str] = []
     armed = True
@@ -126,8 +135,9 @@ def test_windows_document_security_transitions_keep_backup_private(
                     assert descriptor(destination) == b"external descriptor"
                     assert calls == ["narrow"]
                 else:
+                    canonical = ResourceAuthority(destination).destination
                     assert (
-                        ResourceAuthority(destination).state_root / "backup/resource"
+                        journal_directory(target.store, canonical) / "backup/resource"
                     ).read_bytes() == b"external backup edit"
             else:
                 assert result.status is OperationStatus.FAILED
@@ -136,7 +146,8 @@ def test_windows_document_security_transitions_keep_backup_private(
                 if seam == "write-dac":
                     assert calls == ["narrow"]
         if seam not in {"descriptor-edit", "backup-edit"}:
-            assert not (ResourceAuthority(destination).state_root / "transaction.json").exists()
+            canonical = ResourceAuthority(destination).destination
+            assert target.store.read(resource_key(canonical, "journal")) is None
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows sharing and DACL transitions")
@@ -152,7 +163,7 @@ def test_native_windows_shared_file_interruption_recovers_original_security(
     destination = tmp_path / "AGENTS.md"
     destination.write_bytes(b"foreign")
     original = security.security(destination)
-    target = InstallationTarget(tmp_path / "index")
+    target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     held = None
     if seam == "sharing":
         library = native.WinDLL("kernel32", use_last_error=True)
@@ -203,8 +214,8 @@ def test_native_windows_shared_file_interruption_recovers_original_security(
             patch.setattr(tx, "set_security", set_security)
             with pytest.raises(SystemExit):
                 sync(bundle(), rendered(destination), target)
-        state = ResourceAuthority(destination).state_root
-        assert io.read(state / "receipt.json", Receipt) is None
+        canonical = ResourceAuthority(destination).destination
+        assert read_record(target.store, resource_key(canonical, "receipt"), Receipt) is None
     assert remove("team", target).status is OperationStatus.APPLIED
     assert destination.read_bytes() == b"foreign"
     assert security.security(destination) == original
