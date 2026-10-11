@@ -886,7 +886,7 @@ mod tests {
             "selector keys must be nonempty"
         );
         let member = Member::new(Scalar::integer(1), Vec::<String>::new()).unwrap();
-        assert!(member.key().is_empty());
+        assert_eq!(member.key(), [] as [String; 0]);
         let object = crate::values::ObjectValue::new([("a", Scalar::integer(1).into())]).unwrap();
         assert_eq!(
             Member::new(object.clone(), ["name"]).unwrap_err().message(),
@@ -900,7 +900,7 @@ mod tests {
         let member = || Member::new(Scalar::text("anchor"), Vec::<String>::new()).unwrap();
         assert!(Placement::new(Position::First, None).is_ok());
         assert!(Placement::new(Position::Last, None).is_ok());
-        assert!(Placement::default().position() == Position::Last);
+        assert_eq!(Placement::default().position(), Position::Last);
         assert!(Placement::new(Position::Before, Some(member())).is_ok());
         assert!(Placement::new(Position::After, Some(member())).is_ok());
         for position in [Position::First, Position::Last] {

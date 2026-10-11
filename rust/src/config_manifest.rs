@@ -628,8 +628,8 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.identity.id(), "team");
         assert_eq!(parsed.artifacts.len(), 1);
-        assert!(parsed.assets.is_empty());
-        assert!(parsed.dependencies.is_empty());
+        assert_eq!(parsed.assets.len(), 0);
+        assert_eq!(parsed.dependencies.len(), 0);
 
         let sourced = load(
             &manifest(r#"[{"kind":"instruction","id":"guide","path":"first.md"}]"#),
@@ -800,7 +800,7 @@ mod tests {
             panic!("expected a hook artifact");
         };
         assert_eq!(hook.outcomes(), &[crate::artifacts::HookOutcome::Continue]);
-        assert!(hook.tools().is_empty());
+        assert_eq!(hook.tools(), [] as [String; 0]);
         assert_eq!(
             message(load(
                 &manifest(

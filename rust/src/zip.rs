@@ -49,7 +49,7 @@ impl Archive {
             members.push(CentralEntry::read(&data, &mut cursor)?.into_member()?);
         }
         let mut ordered: Vec<&mut Member> = members.iter_mut().collect();
-        ordered.sort_by(|left, right| right.offset.cmp(&left.offset));
+        ordered.sort_by_key(|member| std::cmp::Reverse(member.offset));
         let mut end_offset = offset;
         for member in ordered {
             member.end_offset = end_offset;

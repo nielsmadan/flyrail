@@ -1335,7 +1335,10 @@ mod tests {
             Some(next)
         );
         cleanup(&journal).expect("cleanup");
-        assert!(validate_state(&reference).expect("state").is_empty());
+        assert_eq!(
+            validate_state(&reference).expect("state"),
+            [] as [PathBuf; 0]
+        );
     }
 
     #[test]
@@ -1356,7 +1359,10 @@ mod tests {
         assert!(cleanup_revision(&staged, journal.staged()));
         recover(&guard).expect("recover");
         assert_eq!(observe(&destination).expect("restored"), before);
-        assert!(validate_state(&reference).expect("state").is_empty());
+        assert_eq!(
+            validate_state(&reference).expect("state"),
+            [] as [PathBuf; 0]
+        );
     }
 
     #[test]
@@ -1619,7 +1625,10 @@ mod tests {
             set_fault(None);
             recover(&guard).expect("recover after seam");
             recover(&guard).expect("idempotent recovery");
-            assert!(validate_state(&reference).expect("state").is_empty());
+            assert_eq!(
+                validate_state(&reference).expect("state"),
+                [] as [PathBuf; 0]
+            );
             let committed = matches!(seam, "receipt-reread" | "cleanup");
             assert_eq!(
                 fs::read(&destination).expect("destination"),
@@ -1786,7 +1795,7 @@ mod tests {
             execute_transaction(&locks, &[plan], &pending, &completed, &initial, &parents)
                 .expect("transaction");
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
-        assert!(outcome.unchanged().is_empty());
+        assert_eq!(outcome.unchanged(), [] as [ResourceRef; 0]);
         assert!(outcome.error().is_none());
         assert_eq!(
             read::<Index>(&index_root.join("index.json"), "Index").expect("index"),

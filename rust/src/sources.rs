@@ -513,7 +513,7 @@ impl ZipSource {
             .get(&path)
             .copied()
             .flatten()
-            .ok_or_else(&missing)?;
+            .ok_or_else(missing)?;
         let member = self.archive.members().get(index).ok_or_else(missing)?;
         self.archive.read(member).map_err(BundleError::Io)
     }
@@ -526,7 +526,7 @@ impl ZipSource {
             .get(&full)
             .copied()
             .flatten()
-            .ok_or_else(&missing)?;
+            .ok_or_else(missing)?;
         let member = self.archive.members().get(index).ok_or_else(missing)?;
         self.archive.read(member).map_err(BundleError::Io)
     }

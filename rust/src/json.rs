@@ -408,7 +408,7 @@ impl Parser<'_> {
             b'u' => {
                 let first = self.hex4()?;
                 let character = if (0xD800..=0xDBFF).contains(&first) {
-                    if self.bytes.get(self.pos..self.pos + 2) != Some(&[b'\\', b'u'][..]) {
+                    if self.bytes.get(self.pos..self.pos + 2) != Some(b"\\u") {
                         return Err(ValueError::new(
                             "JSON escape contains an unpaired surrogate",
                         ));

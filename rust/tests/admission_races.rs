@@ -68,15 +68,10 @@ fn run_worker(args: &[String]) -> i32 {
         std::thread::sleep(Duration::from_millis(5));
     }
     match admit(&reference) {
-        Ok(()) => {
-            println!("admitted");
-            0
-        }
-        Err(error) => {
-            println!("{}", error.code());
-            0
-        }
+        Ok(()) => println!("admitted"),
+        Err(error) => println!("{}", error.code()),
     }
+    0
 }
 
 fn unique_root(label: &str) -> PathBuf {

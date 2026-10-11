@@ -120,7 +120,7 @@ fn version_words_and_usage_contract() {
         root.join("missing").into_os_string(),
     ]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(!output.stderr.is_empty());
+    assert_ne!(output.stderr, [] as [u8; 0]);
     assert_eq!(run(&["ai", "install"]).status.code(), Some(2));
 }
 
@@ -146,7 +146,7 @@ fn non_utf8_paths_work_and_non_utf8_text_is_rejected_without_panic() {
     let missing = root.join(OsString::from_vec(b"missing-\xff".to_vec()));
     let output = run_os(&[OsString::from("words"), missing.into_os_string()]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
-    assert!(!output.stderr.is_empty());
+    assert_ne!(output.stderr, [] as [u8; 0]);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
 
     let output = run_os(&[

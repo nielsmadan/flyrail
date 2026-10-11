@@ -167,7 +167,7 @@ fn expected_record_keys(
             "edit" => {
                 let count = row[4].parse::<usize>().expect("edit count must be valid");
                 assert_eq!(row.len(), 5 + count * 3, "{case}: invalid edit row");
-                for (index, operation) in row[5..].chunks_exact(3).enumerate() {
+                for (index, operation) in row[5..].as_chunks::<3>().0.iter().enumerate() {
                     let step = index + 1;
                     for suffix in ["bytes", "status", "provenance", "ownership-count"] {
                         expected.insert(record_key(category, case, format!("{step}-{suffix}")));
@@ -380,13 +380,15 @@ fn corpus_covers_structures_orders_and_operation_shapes() {
         .clone()
         .map(|row| {
             row[5..]
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .map(|operation| operation[0])
                 .collect::<Vec<_>>()
         })
         .collect::<BTreeSet<_>>();
     let acquisitions = edit_rows
-        .flat_map(|row| row[5..].chunks_exact(3))
+        .flat_map(|row| row[5..].as_chunks::<3>().0)
         .filter(|operation| operation[0] == "set")
         .map(|operation| operation[2])
         .collect::<BTreeSet<_>>();

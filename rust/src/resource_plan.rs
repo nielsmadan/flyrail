@@ -1365,7 +1365,7 @@ mod tests {
         cleanup(&journal).expect("cleanup");
         let observation = summary(&reference).expect("summary");
         assert_eq!(observation.claims[0].status, EditStatus::Current);
-        assert!(observation.recovery_paths.is_empty());
+        assert_eq!(observation.recovery_paths, [] as [PathBuf; 0]);
 
         let empty = RenderedBundle::empty();
         let removal = plan_resource(
@@ -1384,8 +1384,8 @@ mod tests {
             removal.previous().expect("previous"),
             "team"
         ));
-        assert!(removal.after().nodes().is_empty());
-        assert!(removal.receipt().claims().is_empty());
+        assert_eq!(removal.after().nodes(), [] as [Node; 0]);
+        assert_eq!(removal.receipt().claims(), [] as [OwnedClaim; 0]);
     }
 
     #[test]

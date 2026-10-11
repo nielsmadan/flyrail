@@ -319,7 +319,7 @@ mod tests {
     use super::*;
     use crate::artifacts::{Family, InstructionArtifact};
     use crate::authority::ResourceAuthority;
-    use crate::configuration::InstallationTarget;
+    use crate::configuration::{InstallationTarget, ResourceResult};
     use crate::content::{Content, FileContent, FileMode, SectionContent};
     use crate::models::{BundleIdentity, OperationStatus};
     use crate::rendered::{Notice, NoticeKind, RenderedArtifact, RenderedBundle};
@@ -832,7 +832,7 @@ mod tests {
 
         for result in results {
             assert_eq!(result.status(), OperationStatus::Failed);
-            assert!(result.resources().is_empty());
+            assert_eq!(result.resources(), [] as [ResourceResult; 0]);
             assert_eq!(
                 result.error().map(TargetError::code),
                 Some(crate::ErrorCode::InvalidState)
@@ -1358,7 +1358,7 @@ mod tests {
         .expect("preview");
         let applied = apply_preview(&proposal, Duration::ZERO);
         assert_eq!(applied.status(), OperationStatus::Failed);
-        assert!(applied.notices().is_empty());
+        assert_eq!(applied.notices(), [] as [Notice; 0]);
 
         let synchronized = sync(
             &bundle("1"),
@@ -1370,7 +1370,7 @@ mod tests {
         )
         .expect("sync");
         assert_eq!(synchronized.status(), OperationStatus::Failed);
-        assert!(synchronized.notices().is_empty());
+        assert_eq!(synchronized.notices(), [] as [Notice; 0]);
     }
 
     #[test]

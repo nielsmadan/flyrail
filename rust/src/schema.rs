@@ -285,7 +285,7 @@ mod tests {
         )
         .expect("install");
         assert_eq!(installed.after(), Some(b"{\"version\":1}".as_slice()));
-        assert!(installed.ownership().is_empty());
+        assert_eq!(installed.ownership(), [] as [OwnedSelection; 0]);
         assert_eq!(installed.provenance().schema_fields().len(), 1);
         assert_eq!(
             installed.provenance().schema_empty_document(),
@@ -302,7 +302,10 @@ mod tests {
         )
         .expect("remove");
         assert_eq!(removed.after(), source.as_deref());
-        assert!(removed.provenance().schema_fields().is_empty());
+        assert_eq!(
+            removed.provenance().schema_fields(),
+            [] as [OwnedSelection; 0]
+        );
     }
 
     #[test]

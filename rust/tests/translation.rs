@@ -1135,8 +1135,8 @@ fn assembly_blocks_destination_format_and_copilot_precedence_collisions() {
     )
     .expect("assembly");
     assert!(!collision.supported());
-    assert!(collision.artifacts().is_empty());
-    assert!(collision.dependencies().is_empty());
+    assert_eq!(collision.artifacts().len(), 0);
+    assert_eq!(collision.dependencies().len(), 0);
     let destination_message = format!(
         "Incompatible claims from first and second at {}.",
         root.join(".mcp.json").display()
@@ -1181,7 +1181,7 @@ fn assembly_blocks_destination_format_and_copilot_precedence_collisions() {
     )
     .expect("assembly");
     assert!(!format_collision.supported());
-    assert!(format_collision.artifacts().is_empty());
+    assert_eq!(format_collision.artifacts().len(), 0);
     let format_message = format!(
         "Incompatible document formats from first and second at {}.",
         shared.display()
@@ -1224,7 +1224,7 @@ fn assembly_blocks_destination_format_and_copilot_precedence_collisions() {
     )
     .expect("assembly");
     assert!(!precedence.supported());
-    assert!(precedence.artifacts().is_empty());
+    assert_eq!(precedence.artifacts().len(), 0);
     let precedence_collision_message = format!(
         "Copilot CLI selects {} over {} for server tools; the selected records disagree.",
         root.join(".mcp.json").display(),

@@ -434,7 +434,7 @@ fn physical_directory(path: &Path) -> Result<PathBuf, AuthorityError> {
     let end = buffer
         .iter()
         .position(|byte| *byte == 0)
-        .map_or(buffer.len(), |end| end);
+        .unwrap_or(buffer.len());
     let physical = PathBuf::from(OsString::from_vec(
         buffer.iter().copied().take(end).collect(),
     ));
@@ -1135,7 +1135,7 @@ mod tests {
                 .iter()
                 .any(|fence| fence.as_path() == home.state_root())
         );
-        assert!(directory_names(&tmp).is_empty());
+        assert_eq!(directory_names(&tmp), [] as [String; 0]);
         assert_eq!(
             state_path(&tmp.join("ABSENT.md")),
             state_path(&tmp.join("absent.md"))

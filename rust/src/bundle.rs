@@ -596,7 +596,7 @@ mod tests {
         directory as archive_directory, file as archive_file, write_archive,
     };
     use sha2::{Digest as _, Sha256};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     const NONE: [String; 0] = [];
 
@@ -754,7 +754,7 @@ mod tests {
             return;
         };
         let cases = array(&fixtures, "cases");
-        assert!(!cases.is_empty());
+        assert_ne!(cases, [] as [Json; 0]);
         for case in cases {
             let name = text(case, "name");
             let expected = case_entries(case);
@@ -791,7 +791,7 @@ mod tests {
                     .expect(name);
             assert_eq!(remembered.entries(), expected, "{name} memory entries");
             assert_eq!(remembered.content_digest(), digest, "{name} memory digest");
-            assert!(remembered.source_roots().is_empty());
+            assert_eq!(remembered.source_roots(), [] as [PathBuf; 0]);
 
             if let Some(framing) = case.get("framing_hex").and_then(Json::as_str) {
                 assert_eq!(sha256_hex(&from_hex(framing)), digest, "{name} framing");

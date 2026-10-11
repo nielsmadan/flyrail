@@ -1374,7 +1374,7 @@ mod tests {
             NO_TOOLS,
         )
         .unwrap();
-        assert!(same.tools().is_empty());
+        assert_eq!(same.tools(), [] as [String; 0]);
         assert_eq!(
             message(HookArtifact::new(
                 "x",

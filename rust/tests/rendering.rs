@@ -247,8 +247,8 @@ fn unsupported_hook_boundaries_block_outputs_with_typed_notices() {
     for (bundle, selected, code) in cases {
         let rendered = render(&bundle, &selected).expect("unsupported render");
         assert!(!rendered.supported());
-        assert!(rendered.artifacts().is_empty());
-        assert!(rendered.dependencies().is_empty());
+        assert_eq!(rendered.artifacts().len(), 0);
+        assert_eq!(rendered.dependencies().len(), 0);
         assert_eq!(
             rendered
                 .notices()
@@ -279,7 +279,7 @@ fn unsupported_hook_boundaries_block_outputs_with_typed_notices() {
     )
     .expect("unsupported render");
     assert_eq!(rendered.notices()[0].code(), "hook-surface");
-    assert!(rendered.artifacts().is_empty());
+    assert_eq!(rendered.artifacts().len(), 0);
 }
 
 #[test]

@@ -3079,7 +3079,7 @@ mod tests {
                         result.after(),
                         Some([prefix.as_slice(), suffix.as_slice()].concat().as_slice())
                     );
-                    assert!(result.ownership().is_empty());
+                    assert_eq!(result.ownership(), [] as [OwnedSelection; 0]);
                 } else {
                     let first = "<!-- flyrail:a:start -->\na\n<!-- flyrail:a:end -->\n"
                         .to_string()
@@ -4042,7 +4042,7 @@ mod tests {
             let removed = retire_all(&third, after_of(&third));
             assert_eq!(removed.after(), Some(raw));
             let removed_again = retire_all(&removed, after_of(&removed));
-            assert!(removed_again.ownership().is_empty());
+            assert_eq!(removed_again.ownership(), [] as [OwnedSelection; 0]);
         }
     }
 
@@ -4088,7 +4088,7 @@ mod tests {
             );
             let removed = retire_all(&adopted, after_of(&adopted));
             assert!(removed.after().is_some());
-            assert!(removed.ownership().is_empty());
+            assert_eq!(removed.ownership(), [] as [OwnedSelection; 0]);
             let mismatch = set_structured(
                 after_of(&generated),
                 &structured(
@@ -4248,7 +4248,10 @@ mod tests {
                 &structured(format, Value::from("A"), vec![key("mcp"), key("a")], None),
                 Acquisition::Conflict,
             );
-            assert!(foreign.provenance().containers().is_empty());
+            assert_eq!(
+                foreign.provenance().containers(),
+                [] as [CreatedContainer; 0]
+            );
             let removed_foreign = retire_all(&foreign, after_of(&foreign));
             assert_eq!(removed_foreign.after(), Some(empty.as_slice()));
         }
@@ -4985,7 +4988,7 @@ mod tests {
                 Some(EditStatus::Conflict)
             );
             assert_eq!(result.after(), Some(raw));
-            assert!(result.ownership().is_empty());
+            assert_eq!(result.ownership(), [] as [OwnedSelection; 0]);
         }
     }
 
@@ -5680,7 +5683,7 @@ mod tests {
                 );
                 assert!(!result.applicable());
                 assert_eq!(result.after(), None);
-                assert!(result.ownership().is_empty());
+                assert_eq!(result.ownership(), [] as [OwnedSelection; 0]);
                 let observation = result.observations().first().expect("observation");
                 assert_eq!(observation.status(), EditStatus::Conflict);
                 assert_eq!(observation.current(), None);

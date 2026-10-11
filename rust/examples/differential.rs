@@ -114,7 +114,9 @@ fn run_bundles(rows: &[Vec<String>]) -> Result<(), String> {
             return Err(format!("{}: invalid bundle entry count", row[1]));
         }
         let entries = row[5..]
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|entry| {
                 let data = if entry[1] == "-" {
                     None
@@ -321,7 +323,9 @@ fn run_edits(rows: &[Vec<String>]) -> Result<(), String> {
         }
         let mut claim = None;
         let requests = row[5..]
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|operation| match operation[0].as_str() {
                 "set" => {
                     let request = DocumentRequest::set(
