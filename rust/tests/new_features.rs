@@ -102,7 +102,7 @@ fn droid_refuses_selected_artifacts_and_blocks_mixed_rendering() {
     .expect("context");
 
     let refused = render(&bundle, &droid).expect("render");
-    assert!(refused.artifacts().is_empty());
+    assert_eq!(refused.artifacts(), []);
     assert_eq!(refused.notices().len(), 1);
     assert_eq!(refused.notices()[0].artifact_id(), "guide");
     assert_eq!(refused.notices()[0].code(), "agent-unsupported");
@@ -126,8 +126,8 @@ fn droid_refuses_selected_artifacts_and_blocks_mixed_rendering() {
         1
     );
     let mixed = render_many(&bundle, [supported, droid]).expect("render");
-    assert!(mixed.artifacts().is_empty());
-    assert!(mixed.dependencies().is_empty());
+    assert_eq!(mixed.artifacts(), []);
+    assert_eq!(mixed.dependencies(), []);
     assert!(
         mixed
             .notices()
@@ -224,7 +224,7 @@ fn droid_refusal_covers_hooks_and_only_selected_native_artifacts() {
     )
     .expect("bundle");
     let rendered = render(&bundle, &droid).expect("render");
-    assert!(rendered.artifacts().is_empty());
+    assert_eq!(rendered.artifacts(), []);
     assert_eq!(
         rendered
             .notices()
@@ -248,9 +248,9 @@ fn droid_skill_lifecycle_refuses_before_touching_the_target() {
     let target = Target::project(Agent::Droid, &root).expect("target");
 
     let rendered = render_skills(&bundle, &target).expect("render");
-    assert!(rendered.artifacts().is_empty());
+    assert_eq!(rendered.artifacts(), []);
     assert_eq!(rendered.notices()[0].code(), "agent-unsupported");
-    assert!(rendered.routing_context().is_empty());
+    assert_eq!(rendered.routing_context(), []);
 
     for result in [
         install(&bundle, [target.clone()])
@@ -427,9 +427,10 @@ fn summaries_report_recovery_paths_as_conflicts() {
 
 #[test]
 fn empty_explicit_discovery_inputs_do_not_select_installed_agents() {
-    assert!(
+    assert_eq!(
         detect_agents(Some(""), Some(&[]))
             .expect("detection")
-            .is_empty()
+            .as_slice(),
+        []
     );
 }
