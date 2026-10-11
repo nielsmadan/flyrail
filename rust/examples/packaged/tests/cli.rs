@@ -897,6 +897,7 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
         ("pi", false),
         ("cursor", false),
         ("copilot", false),
+        ("droid", false),
     ] {
         let candidate = root.join(format!("agent-{agent}"));
         let candidate_text = candidate.to_str().expect("UTF-8");

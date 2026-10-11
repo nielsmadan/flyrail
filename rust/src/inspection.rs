@@ -3,13 +3,14 @@ use crate::authority::{AuthorityError, ClaimSelector, ResourceAuthority, state_p
 use crate::bundle::Bundle;
 use crate::configuration::{InstallationObservation, InstallationTarget};
 use crate::content::{Content, TreeContent};
+use crate::destinations::{is_translatable, untranslatable_message};
 use crate::inventory::inventory;
 use crate::models::BundleEntry;
 use crate::observations::{
     Conflict, ErrorCode, Installation, Modification, ModificationKind, Observation,
     ObservationState, TargetError, TargetInspection,
 };
-use crate::rendered::{RenderedArtifact, RenderedBundle};
+use crate::rendered::{Notice, NoticeKind, RenderedArtifact, RenderedBundle};
 use crate::resource_models::Receipt;
 use crate::values::ValueError;
 use std::collections::BTreeSet;
@@ -17,6 +18,10 @@ use std::path::{Path, PathBuf};
 
 pub trait SkillTarget: Clone {
     fn root(&self) -> &Path;
+
+    fn agent(&self) -> Option<crate::Agent> {
+        None
+    }
 
     fn routing_context(&self) -> Vec<(String, String)> {
         vec![
@@ -56,6 +61,10 @@ impl<T: SkillTarget> SkillTarget for &T {
         (*self).routing_context()
     }
 
+    fn agent(&self) -> Option<crate::Agent> {
+        (*self).agent()
+    }
+
     fn render_bundle(
         &self,
         bundle: &Bundle,
@@ -79,6 +88,21 @@ pub fn render_skills<T: SkillTarget>(
     target: &T,
 ) -> Result<RenderedBundle, AuthorityError> {
     validate_skill_bundle(bundle)?;
+    if let Some(agent) = target.agent().filter(|agent| !is_translatable(*agent)) {
+        let notices = bundle
+            .skills()
+            .iter()
+            .map(|skill| {
+                Notice::with_code(
+                    skill.name(),
+                    NoticeKind::Unsupported,
+                    untranslatable_message(agent),
+                    "agent-unsupported",
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return RenderedBundle::with_notices([], [], notices, []).map_err(AuthorityError::from);
+    }
     let destination = ResourceAuthority::new(target.root())?
         .destination()
         .to_path_buf();
@@ -173,6 +197,21 @@ fn prepare_target<T: SkillTarget>(
     target: T,
     identifier: &str,
 ) -> Result<PreparedSkill<T>, ValueError> {
+    if let Some(agent) = target.agent().filter(|agent| !is_translatable(*agent)) {
+        let root = target.root().to_path_buf();
+        return Ok(PreparedSkill {
+            target,
+            installation: Err(TargetError::new(
+                ErrorCode::Unsupported,
+                untranslatable_message(agent),
+                Some(root.clone()),
+                None,
+            )),
+            root,
+            alias_of: None,
+            rendered: None,
+        });
+    }
     let root = match ResourceAuthority::new(target.root()) {
         Ok(authority) => authority.destination().to_path_buf(),
         Err(error) => {

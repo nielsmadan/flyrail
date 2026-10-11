@@ -6,13 +6,16 @@ unsupported and is not an accepted CI platform.
 Bundle inputs can describe skills, instructions, MCP registrations, hooks, native
 payloads, and support assets. The lifecycle accepts explicit files, trees,
 sections, and JSON/JSONC/TOML selections. Agent presets cover Claude, Codex,
-OpenCode, Pi, Cursor, and Copilot, subject to the exact
+OpenCode, Pi, Cursor, Copilot, and Droid, subject to the exact
 [translation matrix](../../spec/translation.md).
 
-Flyrail does not discover installed agents, manage cloud configuration, execute
-bundled commands during installation, or contact MCP servers. A current
-installation does not prove host discovery, trust, activation, credentials, or
-runtime readiness.
+`detect_agents` reports executable and supported macOS application evidence in
+declaration order. Detection does not select an agent. Droid is detectable but
+has no supported translation or lifecycle destination.
+
+Flyrail does not manage cloud configuration, execute bundled commands during
+installation, or contact MCP servers. A current installation does not prove host
+discovery, trust, activation, credentials, or runtime readiness.
 
 ## Security metadata
 

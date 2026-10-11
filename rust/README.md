@@ -5,8 +5,9 @@ for reversible skills, instructions, MCP registrations and hooks at explicit
 local destinations.
 
 Flyrail snapshots bundle content, renders it for an explicitly selected agent,
-and applies it through per-resource ownership records. It never discovers agents,
-prompts, prints, starts bundled commands, or contacts a network service.
+and applies it through per-resource ownership records. It can report installed
+agent evidence when asked, but never selects an agent automatically. It does not
+prompt, print, start bundled commands, or contact a network service.
 
 ## Quickstart
 

@@ -1,7 +1,10 @@
 use crate::artifacts::{Artifact, Family, InstructionArtifact, McpArtifact};
 use crate::bundle::Bundle;
 use crate::content::{Content, FileContent, FileMode, SectionContent, SelectorPart};
-use crate::destinations::{RenderContext, instruction_destination, mcp_destination};
+use crate::destinations::{
+    RenderContext, instruction_destination, is_translatable, mcp_destination, require_translatable,
+    untranslatable_message,
+};
 use crate::hook_translation::{
     HookTranslationError, hook_artifacts, support_asset_artifacts, translate_native_artifact,
 };
@@ -135,6 +138,9 @@ pub fn translate_instruction_artifact(
     artifact: &InstructionArtifact,
     context: &RenderContext,
 ) -> Result<ArtifactTranslation, ValueError> {
+    if let Err(error) = require_translatable(context) {
+        return unsupported(artifact.id(), &error);
+    }
     let Some(mut path) = instruction_destination(context)? else {
         return unsupported(
             artifact.id(),
@@ -204,6 +210,9 @@ pub fn translate_mcp_artifact(
     context: &RenderContext,
     asset_destinations: impl IntoIterator<Item = (String, PathBuf)>,
 ) -> Result<ArtifactTranslation, ValueError> {
+    if let Err(error) = require_translatable(context) {
+        return unsupported(artifact.id(), &error);
+    }
     let Some(path) = mcp_destination(context)? else {
         let (code, message) = if context.surface() == Surface::Vscode {
             (
@@ -452,6 +461,15 @@ pub fn render(bundle: &Bundle, context: &RenderContext) -> Result<RenderedBundle
             continue;
         }
         selected.insert(artifact.id().to_owned());
+        if !matches!(artifact, Artifact::Hook(_)) && !is_translatable(context.audience().agent()) {
+            notices.push(Notice::with_code(
+                artifact.id(),
+                NoticeKind::Unsupported,
+                untranslatable_message(context.audience().agent()),
+                "agent-unsupported",
+            )?);
+            continue;
+        }
         let translation = match artifact {
             Artifact::Skill(skill) => ArtifactTranslation {
                 artifact: Some(RenderedArtifact::new(

@@ -7,6 +7,10 @@ consumer-facing types and functions. Bundles, renderings, previews, observations
 and results are owned snapshots. The library is synchronous, and the host
 application owns destination selection, presentation, and replacement policy.
 
+`detect_agents` reports `AgentPresence` values from an explicit or ambient
+executable search path and supported macOS application directories. Evidence is
+absolute and ordered by `Agent`; detection never chooses a rendering target.
+
 ## Bundles and rendering
 
 `Bundle::from_directory`, `Bundle::from_zip`, `Bundle::from_memory`,
@@ -38,6 +42,10 @@ of the persistent index identity.
 | `sync` | Recover recognized work, plan afresh under locks, and synchronize. |
 | `inspect_installation` | Read recorded membership and owned content without mutation. |
 | `remove` | Remove recorded ownership without the source bundle. |
+
+Call `summarize(&proposal)` to derive a `PlanSummary` with routing, notices,
+errors, and create/update/delete/unchanged/conflict classifications for each
+planned destination.
 
 Lifecycle functions use an explicit `Acquisition`, `replace_modified` flag, and
 `Duration` lock timeout where those choices apply:

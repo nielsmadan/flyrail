@@ -52,6 +52,11 @@ an unsupported notice. `capabilities` reports portable/native family availabilit
 limitations, and prerequisites, but request-specific validation still happens in
 `render`.
 
+Droid is detectable but not translatable. It has no instruction or MCP
+destination, all four capabilities report unsupported, and rendering returns one
+`agent-unsupported` notice per selected artifact with no output. A Droid context
+also blocks every output from a combined `render_many` request.
+
 Use `render_many` for one logical installation consumed by several explicit
 contexts. It deduplicates identical physical claims and rejects incompatible
 collisions. An unsupported context blocks the combined result; synchronize

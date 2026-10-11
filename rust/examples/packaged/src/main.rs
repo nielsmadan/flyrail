@@ -29,7 +29,7 @@ Usage:
   flyrail-checksum config uninstall --project PROJECT --agent AGENT [--replace-modified]
 
 Config options: --node PATH --mcp-arg ARG (repeatable) --guidance TEXT --asset-root PATH
-Agents: claude, codex, opencode, pi, cursor, copilot";
+Agents: claude, codex, opencode, pi, cursor, copilot, droid";
 
 struct AiRequest {
     action: String,

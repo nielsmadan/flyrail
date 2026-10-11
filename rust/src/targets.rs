@@ -16,16 +16,18 @@ pub enum Agent {
     Pi,
     Cursor,
     Copilot,
+    Droid,
 }
 
 impl Agent {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Claude,
         Self::Codex,
         Self::Opencode,
         Self::Pi,
         Self::Cursor,
         Self::Copilot,
+        Self::Droid,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -36,6 +38,7 @@ impl Agent {
             Self::Pi => "pi",
             Self::Cursor => "cursor",
             Self::Copilot => "copilot",
+            Self::Droid => "droid",
         }
     }
 }
@@ -57,6 +60,7 @@ impl FromStr for Agent {
             "pi" => Ok(Self::Pi),
             "cursor" => Ok(Self::Cursor),
             "copilot" => Ok(Self::Copilot),
+            "droid" => Ok(Self::Droid),
             _ => Err(ValueError::new(format!("'{value}' is not a valid Agent"))),
         }
     }
@@ -418,6 +422,10 @@ impl SkillTarget for Target {
         );
         context
     }
+
+    fn agent(&self) -> Option<Agent> {
+        self.agent
+    }
 }
 
 fn absolute(path: &Path) -> Result<PathBuf, ValueError> {
@@ -522,6 +530,7 @@ const fn project_suffix(agent: Agent) -> &'static [&'static str] {
         Agent::Pi => &[".pi", "skills"],
         Agent::Cursor => &[".cursor", "skills"],
         Agent::Copilot => &[".github", "skills"],
+        Agent::Droid => &[".factory", "skills"],
     }
 }
 
@@ -533,6 +542,7 @@ const fn user_suffix(agent: Agent) -> &'static [&'static str] {
         Agent::Pi => &[".pi", "agent", "skills"],
         Agent::Cursor => &[".cursor", "skills"],
         Agent::Copilot => &[".copilot", "skills"],
+        Agent::Droid => &[".factory", "skills"],
     }
 }
 
@@ -542,7 +552,7 @@ const fn relocation(agent: Agent) -> Option<(&'static str, &'static [&'static st
         Agent::Opencode => Some(("XDG_CONFIG_HOME", &["opencode", "skills"])),
         Agent::Pi => Some(("PI_CODING_AGENT_DIR", &["skills"])),
         Agent::Copilot => Some(("COPILOT_HOME", &["skills"])),
-        Agent::Codex | Agent::Cursor => None,
+        Agent::Codex | Agent::Cursor | Agent::Droid => None,
     }
 }
 

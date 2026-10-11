@@ -12,7 +12,7 @@ dependency edges, routing context and structured notices. It must not read files
 resolve environment references, discover installed agents or active profiles, run
 commands, contact servers, grant trust or enable tool approvals.
 
-The Python entry points are `render(bundle, RenderContext(...))` and
+The Python and Rust entry points are `render(bundle, RenderContext(...))` and
 `render_many(bundle, contexts)`. The latter describes one logical installation
 consumed by several explicitly selected agents. A logical installation with any
 unsupported requested artifact returns no publishable artifacts and an unsupported
@@ -44,8 +44,8 @@ unchanged apart from the verified Copilot CLI relocation described below.
 `render`/`render_many` refuse it unconditionally, returning no artifacts and an
 `agent-unsupported` notice for every artifact the render context selects. Its
 absence from the table is deliberate, not an unlisted destination pending a
-fixture. A skill preset may resolve a droid container path — the Python
-implementation anchors one at `.factory/skills` so a target constructs — but that
+fixture. A skill preset may resolve a droid container path — both implementations
+anchor one at `.factory/skills` so a target constructs — but that
 path is not a verified destination and is never used: every skill convenience
 entry point refuses a droid target before it resolves, locks, reads or writes
 anything below it, so an implementation must leave the droid root untouched in

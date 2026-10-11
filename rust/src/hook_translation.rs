@@ -7,7 +7,9 @@ use crate::content::{
     Content, DocumentFormat, DocumentSchema, FileContent, FileMode, Key, Member, Selector,
     SelectorPart, StructuredContent, TreeContent,
 };
-use crate::destinations::{RenderContext, user_directory};
+use crate::destinations::{
+    RenderContext, require_translatable, untranslatable_message, user_directory,
+};
 use crate::hooks::{
     EVENT_TIMEOUT_LIMIT_MS, HANDLER_LIMIT, HookConfig, HookEnvironment, HookHandler, HookShell,
 };
@@ -165,6 +167,7 @@ fn supported(
     context: &RenderContext,
 ) -> Result<(), UnsupportedTranslation> {
     let agent = context.audience().agent();
+    require_translatable(context)?;
     if context.surface() == Surface::Vscode {
         return Err(UnsupportedTranslation::new(
             "hook-surface",
@@ -441,6 +444,11 @@ pub fn hook_artifacts<S: std::hash::BuildHasher>(
             Agent::Copilot => ".github",
             Agent::Opencode => ".opencode",
             Agent::Pi => ".pi",
+            Agent::Droid => {
+                return Err(HookTranslationError::Unsupported(
+                    UnsupportedTranslation::new("agent-unsupported", untranslatable_message(agent)),
+                ));
+            }
         })
     };
     let base = context

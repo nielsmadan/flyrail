@@ -12,6 +12,11 @@ context, complete resource revisions, security metadata, ancestors, receipts,
 index state, and recovery evidence. `LifecyclePreview::applicable` is false when
 known errors or pending recovery prevent application.
 
+`summarize` converts a preview into a presentation-oriented `PlanSummary`. Each
+`PlannedChange` maps a destination to its artifact IDs and families and classifies
+it as create, update, delete, unchanged, or conflict. Routing, notices, errors,
+and recovery paths remain available in the summary.
+
 `apply_preview` rejects any changed precondition, including foreign bytes outside
 an owned section. It never refreshes a stale proposal. `sync` and `remove` instead
 recover recognized interrupted work under locks and plan again.

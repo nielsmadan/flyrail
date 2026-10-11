@@ -6,6 +6,7 @@ mod config_manifest;
 pub mod configuration;
 pub mod content;
 pub mod destinations;
+pub mod discovery;
 pub mod editors;
 mod filesystem;
 mod hook_translation;
@@ -30,6 +31,7 @@ pub(crate) mod resource_transaction;
 mod schema;
 mod security;
 mod sources;
+pub mod summary;
 pub mod targets;
 mod temporal;
 mod toml_document;
@@ -60,8 +62,10 @@ pub use content::{
     TreeContent,
 };
 pub use destinations::{
-    Capability, RenderContext, capabilities, instruction_destination, mcp_destination,
+    Capability, RenderContext, TRANSLATABLE_AGENTS, capabilities, instruction_destination,
+    is_translatable, mcp_destination, require_translatable, untranslatable_message,
 };
+pub use discovery::{AgentPresence, detect_agents};
 pub use editors::{
     Acquisition, ArrayPosition, CreatedContainer, Disposition, DocumentEdit, DocumentProvenance,
     DocumentRequest, EditObservation, EditStatus, OwnedSelection, SelectionSnapshot, SharedContent,
@@ -78,6 +82,7 @@ pub use lifecycle::{
     preview_removal, recover_installation, remove, sync, uninstall, uninstall_with_options, update,
     update_with_options,
 };
+pub use mcp_translation::UnsupportedTranslation;
 pub use models::{BundleEntry, BundleIdentity, OperationStatus, SkillSpec};
 pub use observations::{
     Conflict, ErrorCode, Installation, Modification, ModificationKind, Observation,
@@ -102,6 +107,7 @@ pub use resource_transaction::{
 };
 #[doc(hidden)]
 pub use security::security as security_capture;
+pub use summary::{ChangeAction, PlanSummary, PlannedChange, summarize};
 pub use targets::{Agent, Platform, Surface, Target, TargetScope};
 pub use temporal::{Date, DateTime, Time};
 pub use translation::{

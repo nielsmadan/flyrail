@@ -1,9 +1,47 @@
 use crate::artifacts::{Audience, Family};
 use crate::configuration::InstallationTarget;
 pub use crate::hooks::{HookRuntime, HookShell};
+use crate::mcp_translation::UnsupportedTranslation;
 use crate::targets::{Agent, Platform, Surface, Target, TargetScope, relocated, validate_route};
 use crate::values::ValueError;
 use std::path::{Path, PathBuf};
+
+pub const TRANSLATABLE_AGENTS: [Agent; 6] = [
+    Agent::Claude,
+    Agent::Codex,
+    Agent::Opencode,
+    Agent::Pi,
+    Agent::Cursor,
+    Agent::Copilot,
+];
+
+#[must_use]
+pub const fn is_translatable(agent: Agent) -> bool {
+    matches!(
+        agent,
+        Agent::Claude | Agent::Codex | Agent::Opencode | Agent::Pi | Agent::Cursor | Agent::Copilot
+    )
+}
+
+#[must_use]
+pub fn untranslatable_message(agent: Agent) -> String {
+    format!(
+        "Flyrail detects {} but has no verified configuration translation.",
+        agent.as_str()
+    )
+}
+
+pub fn require_translatable(context: &RenderContext) -> Result<(), UnsupportedTranslation> {
+    let agent = context.audience().agent();
+    if is_translatable(agent) {
+        Ok(())
+    } else {
+        Err(UnsupportedTranslation::new(
+            "agent-unsupported",
+            untranslatable_message(agent),
+        ))
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderContext {
@@ -250,6 +288,9 @@ pub(crate) fn user_directory(context: &RenderContext) -> Result<PathBuf, ValueEr
         Agent::Pi => ("PI_CODING_AGENT_DIR", ".pi/agent"),
         Agent::Cursor => ("", ".cursor"),
         Agent::Copilot => ("COPILOT_HOME", ".copilot"),
+        Agent::Droid => {
+            return Err(ValueError::new(untranslatable_message(agent)));
+        }
     };
     if context.surface == Surface::Vscode {
         variable = "";
@@ -274,12 +315,16 @@ pub fn instruction_destination(context: &RenderContext) -> Result<Option<PathBuf
     if let Some(path) = &context.instruction_path {
         return Ok(Some(path.clone()));
     }
+    if !is_translatable(context.audience().agent()) {
+        return Ok(None);
+    }
     let agent = context.audience().agent();
     if context.target.scope() == TargetScope::Project {
         let path = match agent {
             Agent::Claude => "CLAUDE.md",
             Agent::Codex | Agent::Opencode | Agent::Pi | Agent::Cursor => "AGENTS.md",
             Agent::Copilot => ".github/copilot-instructions.md",
+            Agent::Droid => return Ok(None),
         };
         return Ok(Some(context.root().join(path)));
     }
@@ -294,7 +339,7 @@ pub fn instruction_destination(context: &RenderContext) -> Result<Option<PathBuf
         Agent::Claude => "CLAUDE.md",
         Agent::Codex | Agent::Opencode | Agent::Pi => "AGENTS.md",
         Agent::Copilot => "copilot-instructions.md",
-        Agent::Cursor => return Ok(None),
+        Agent::Cursor | Agent::Droid => return Ok(None),
     };
     Ok(Some(directory.join(path)))
 }
@@ -302,6 +347,9 @@ pub fn instruction_destination(context: &RenderContext) -> Result<Option<PathBuf
 pub fn mcp_destination(context: &RenderContext) -> Result<Option<PathBuf>, ValueError> {
     if let Some(path) = &context.mcp_path {
         return Ok(Some(path.clone()));
+    }
+    if !is_translatable(context.audience().agent()) {
+        return Ok(None);
     }
     let agent = context.audience().agent();
     if context.target.scope() == TargetScope::Project {
@@ -314,6 +362,7 @@ pub fn mcp_destination(context: &RenderContext) -> Result<Option<PathBuf>, Value
             Agent::Opencode => "opencode.json",
             Agent::Pi => ".pi/mcp.json",
             Agent::Cursor => ".cursor/mcp.json",
+            Agent::Droid => return Ok(None),
         };
         return Ok(Some(context.root().join(path)));
     }
@@ -336,7 +385,7 @@ pub fn mcp_destination(context: &RenderContext) -> Result<Option<PathBuf>, Value
         Agent::Opencode => "opencode.json",
         Agent::Pi | Agent::Cursor => "mcp.json",
         Agent::Copilot => "mcp-config.json",
-        Agent::Claude => return Ok(None),
+        Agent::Claude | Agent::Droid => return Ok(None),
     };
     Ok(Some(user_directory(context)?.join(path)))
 }
@@ -408,6 +457,17 @@ impl Capability {
 }
 
 pub fn capabilities(context: &RenderContext) -> Result<Vec<Capability>, ValueError> {
+    if !is_translatable(context.audience().agent()) {
+        return [
+            Family::Skills,
+            Family::Instructions,
+            Family::Mcp,
+            Family::Hooks,
+        ]
+        .into_iter()
+        .map(|family| Capability::new(family, false, false, [], []))
+        .collect();
+    }
     Ok(vec![
         Capability::new(Family::Skills, true, true, [], [])?,
         Capability::new(
@@ -551,5 +611,51 @@ mod tests {
                 .with_mcp_path(root.join("a/../b"))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn droid_has_no_translation_destinations_or_capabilities() {
+        let root = checkout_temp_dir("destination-droid");
+        for target in [
+            Target::project(Agent::Droid, &*root).expect("project"),
+            Target::user_with_home_and_environment(
+                Agent::Droid,
+                &*root,
+                std::iter::empty::<(String, String)>(),
+            )
+            .expect("user"),
+        ] {
+            let context = RenderContext::new(target, Platform::Linux).expect("context");
+            assert_eq!(
+                instruction_destination(&context).expect("instructions"),
+                None
+            );
+            assert_eq!(mcp_destination(&context).expect("mcp"), None);
+            assert!(
+                capabilities(&context)
+                    .expect("capabilities")
+                    .iter()
+                    .all(|capability| !capability.portable() && !capability.native())
+            );
+            let overridden = context
+                .with_instruction_path(root.join("instructions.md"))
+                .expect("instructions")
+                .with_mcp_path(root.join("mcp.json"))
+                .expect("mcp");
+            assert_eq!(
+                instruction_destination(&overridden).expect("instructions"),
+                Some(root.join("instructions.md"))
+            );
+            assert_eq!(
+                mcp_destination(&overridden).expect("mcp"),
+                Some(root.join("mcp.json"))
+            );
+            assert!(
+                capabilities(&overridden)
+                    .expect("capabilities")
+                    .iter()
+                    .all(|capability| !capability.portable() && !capability.native())
+            );
+        }
     }
 }

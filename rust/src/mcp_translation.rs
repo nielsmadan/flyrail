@@ -6,6 +6,7 @@ use crate::destinations::RenderContext;
 use crate::targets::{Agent, Platform, Surface};
 use crate::values::{ArrayValue, ObjectValue, Scalar, Value, ValueError};
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,6 +31,14 @@ impl UnsupportedTranslation {
         &self.message
     }
 }
+
+impl Display for UnsupportedTranslation {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for UnsupportedTranslation {}
 
 fn unsupported<T>(code: &'static str, message: &'static str) -> Result<T, UnsupportedTranslation> {
     Err(UnsupportedTranslation::new(code, message))

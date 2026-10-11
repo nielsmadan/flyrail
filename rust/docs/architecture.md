@@ -11,7 +11,8 @@ Library operations do not run bundled commands or access the network.
 | Rendering | `translation`, `destinations`, `rendered` | Explicit agent presets, notices, routes, and dependency edges. |
 | Hook protocol | `hooks` and packaged runtime assets | Typed protocol values and detached Node/Bun adapter sources. |
 | Editing | `editors` | Pure section, JSON, JSONC, and TOML proposals with scoped baselines. |
-| Observation and planning | `configuration`, `inspection`, `lifecycle` | Resource summaries, immutable previews, and logical index membership. |
+| Observation and planning | `configuration`, `inspection`, `lifecycle`, `summary` | Resource summaries, immutable previews, and logical index membership. |
+| Agent evidence | `discovery` | Explicit executable and macOS application discovery without target selection. |
 | Persistence | private codec, resource-model, and transaction modules | Closed state records, complete revisions, journals, and receipt commit. |
 | Native I/O | authority, filesystem, resource-I/O, and security modules | Canonical destinations, safe observation, locks, metadata, and exclusive publication. |
 

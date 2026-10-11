@@ -16,10 +16,15 @@ agent presets:
 | `Pi` | `~/.pi/agent/skills` | `PI_CODING_AGENT_DIR/skills` | `.pi/skills` |
 | `Cursor` | `~/.cursor/skills` | None | `.cursor/skills` |
 | `Copilot` | `~/.copilot/skills` | `COPILOT_HOME/skills` | `.github/skills` |
+| `Droid` | `~/.factory/skills` | None | `.factory/skills` |
 
 Presets are path conveniences, not exclusive-discovery promises. Ownership
 belongs to the physical installation. Removing a shared container affects every
 agent that discovers it.
+
+The Droid preset permits explicit target construction but is not a supported
+destination. Skill rendering, inspection, installation, update, and removal
+return an unsupported result before reading or writing its root.
 
 ## Explicit home and environment
 
