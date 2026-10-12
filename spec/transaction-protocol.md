@@ -77,7 +77,7 @@ Read-only inspection can observe an active writer and cannot establish abandonme
 | --- | --- |
 | Previous receipt, exact original destination, recognized preparation | Clean preparation and preserve previous ownership. |
 | Previous receipt, destination absent, complete recognized original backup | Restore the backup. |
-| Previous receipt, exact published destination and original backup | Return recognized new data to staging and restore the original revision. |
+| Previous receipt, exact published destination, original backup and no post-preparation replacement evidence | Return recognized new data to staging and restore the original revision. |
 | Previous receipt, equal-byte ownership-only transition | Preserve previous receipt ownership. |
 | Intended committed receipt | Cleanup only; preserve subsequent public content edits. |
 | Unexpected content, identity, security, ancestors, receipt or backup | Retain evidence and report `INCOMPLETE`. |
@@ -86,6 +86,11 @@ Rollback requires complete recognized revisions. It never selectively recomposes
 a foreign edit around an owned selection. On Windows, restore a recognized private
 backup to the public destination before restoring original security there.
 Every recovery transition must itself be recognizable after interruption.
+
+Recovery rejects a matching destination that has a modification time after the
+journal or, where the filesystem records it, a later creation time. This detects
+replacement when a filesystem reuses an inode; staging is complete before the
+journal is written, so recognized publication remains older than the journal.
 
 After commit, cleanup cannot roll back ownership. Nodes are deleted in reverse
 revision order. An interrupted deletion is recognized only when the remaining

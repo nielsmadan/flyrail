@@ -15,6 +15,7 @@ use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read as _, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 const STATE_ENTRIES: [&str; 9] = [
     "lock",
@@ -621,6 +622,43 @@ pub(crate) fn require(path: &Path, revision: &Revision) -> Result<(), TargetErro
             "complete resource revision changed",
             path,
         ));
+    }
+    Ok(())
+}
+
+pub(crate) fn require_unchanged_since(
+    path: &Path,
+    revision: &Revision,
+    boundary: SystemTime,
+) -> Result<(), TargetError> {
+    for node in revision.nodes() {
+        let selected = if node.path().is_empty() {
+            path.to_path_buf()
+        } else {
+            path.join(node.path())
+        };
+        let metadata = fs::symlink_metadata(&selected).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                failure(
+                    ErrorCode::ConcurrentChange,
+                    "path changed during inspection",
+                    &selected,
+                )
+            } else {
+                io_failure(&error, &selected)
+            }
+        })?;
+        let modified = metadata
+            .modified()
+            .map_err(|error| io_failure(&error, &selected))?;
+        let created = metadata.created().ok();
+        if modified > boundary || created.is_some_and(|created| created > boundary) {
+            return Err(failure(
+                ErrorCode::RecoveryNeeded,
+                "destination revision changed after preparation",
+                &selected,
+            ));
+        }
     }
     Ok(())
 }

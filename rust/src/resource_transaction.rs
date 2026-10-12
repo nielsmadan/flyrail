@@ -4,7 +4,7 @@ use crate::observation::{failure, io_failure};
 use crate::observations::{ErrorCode, TargetError};
 use crate::resource_io::{
     ancestors, atomic, atomic_with_publication, cleanup_revision, destroy, move_revision, observe,
-    read, require, validate_kind, validate_state, write_revision,
+    read, require, require_unchanged_since, validate_kind, validate_state, write_revision,
 };
 use crate::resource_models::{Ancestor, Index, Receipt, ResourceRef, Revision};
 use crate::resource_plan::{ResourcePlan, prepared_index_promotes};
@@ -14,7 +14,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt as _;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 #[cfg(feature = "interop-test-seams")]
 use std::{
     sync::{Mutex, OnceLock},
@@ -994,6 +994,14 @@ pub(crate) fn cleanup(journal: &Journal) -> Result<(), TargetError> {
     fs::remove_file(&path).map_err(|error| io_failure(&error, &path))
 }
 
+fn preparation_time(reference: &ResourceRef) -> Result<SystemTime, TargetError> {
+    let path = paths(reference).0;
+    let metadata = fs::symlink_metadata(&path).map_err(|error| io_failure(&error, &path))?;
+    metadata
+        .modified()
+        .map_err(|error| io_failure(&error, &path))
+}
+
 #[allow(clippy::redundant_pub_crate)]
 pub(crate) fn rollback(journal: &Journal) -> Result<(), TargetError> {
     let reference = journal.resource();
@@ -1003,6 +1011,17 @@ pub(crate) fn rollback(journal: &Journal) -> Result<(), TargetError> {
     let actual = observe(reference.destination())?;
     let staged = observe(&staged_path)?;
     let backup = observe(&backup_path)?;
+    if !actual.nodes().is_empty()
+        && (actual == *journal.before()
+            || actual == *journal.staged()
+            || actual == *journal.published())
+    {
+        require_unchanged_since(
+            reference.destination(),
+            &actual,
+            preparation_time(reference)?,
+        )?;
+    }
     if actual == *journal.before() && backup.nodes().is_empty() {
         inject("rollback")?;
         return cleanup(journal);
@@ -1363,6 +1382,106 @@ mod tests {
             validate_state(&reference).expect("state"),
             [] as [PathBuf; 0]
         );
+    }
+
+    fn journal_modification_time(reference: &ResourceRef) -> SystemTime {
+        fs::symlink_metadata(paths(reference).0)
+            .and_then(|metadata| metadata.modified())
+            .expect("journal modification time")
+    }
+
+    fn revise_modification_time(path: &Path, later: SystemTime) {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open for revised time");
+        file.set_times(fs::FileTimes::new().set_modified(later))
+            .expect("revised modification time");
+    }
+
+    #[test]
+    fn recover_refuses_a_replacement_of_the_published_revision() {
+        let tmp = checkout_temp_dir("transaction-published-replacement");
+        let destination = tmp.join("AGENTS.md");
+        exclusive_write(&destination, b"before\n", 0o600);
+        let reference = reference(&destination);
+        reserve(&reference).expect("reserve");
+        admit(&reference).expect("admit");
+        let old = receipt(&reference, '0');
+        atomic(&reference.state_root().join("receipt.json"), &old, None).expect("old receipt");
+        let before = observe(&destination).expect("before");
+        let plan = plan(
+            &reference,
+            before,
+            revision(b"after\n"),
+            Some(old.clone()),
+            receipt(&reference, '1'),
+        );
+        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&plan, &guard).expect("prepare");
+        move_revision(&destination, &paths(&reference).2, journal.backup()).expect("backup move");
+        move_revision(&paths(&reference).1, &destination, journal.staged()).expect("publish move");
+        // Recycled inodes need the post-preparation identity check.
+        revise_modification_time(
+            &destination,
+            journal_modification_time(&reference)
+                .checked_add(Duration::from_secs(60))
+                .expect("replacement time"),
+        );
+        let error = recover(&guard).expect_err("recovery refuses the replacement");
+        assert_eq!(error.code(), ErrorCode::RecoveryNeeded);
+        assert_eq!(
+            error.message(),
+            "destination revision changed after preparation"
+        );
+        assert_eq!(error.path(), Some(destination.as_path()));
+        assert_eq!(fs::read(&destination).expect("destination"), b"after\n");
+        assert_eq!(
+            read::<Receipt>(&reference.state_root().join("receipt.json"), "Receipt")
+                .expect("receipt read")
+                .expect("receipt present"),
+            old,
+            "the previous receipt is retained"
+        );
+        assert!(paths(&reference).0.exists(), "journal is retained");
+        assert!(paths(&reference).2.exists(), "backup is retained");
+    }
+
+    #[test]
+    fn recover_refuses_a_replacement_of_the_previous_revision() {
+        let tmp = checkout_temp_dir("transaction-previous-replacement");
+        let destination = tmp.join("AGENTS.md");
+        exclusive_write(&destination, b"before\n", 0o600);
+        let reference = reference(&destination);
+        reserve(&reference).expect("reserve");
+        admit(&reference).expect("admit");
+        let old = receipt(&reference, '0');
+        atomic(&reference.state_root().join("receipt.json"), &old, None).expect("old receipt");
+        let before = observe(&destination).expect("before");
+        let plan = plan(
+            &reference,
+            before,
+            revision(b"after\n"),
+            Some(old),
+            receipt(&reference, '1'),
+        );
+        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
+        prepare(&plan, &guard).expect("prepare");
+        revise_modification_time(
+            &destination,
+            journal_modification_time(&reference)
+                .checked_add(Duration::from_secs(60))
+                .expect("replacement time"),
+        );
+        let error = recover(&guard).expect_err("recovery refuses the replacement");
+        assert_eq!(error.code(), ErrorCode::RecoveryNeeded);
+        assert_eq!(
+            error.message(),
+            "destination revision changed after preparation"
+        );
+        assert_eq!(fs::read(&destination).expect("destination"), b"before\n");
+        assert!(paths(&reference).0.exists(), "journal is retained");
+        assert!(paths(&reference).1.exists(), "staging is retained");
     }
 
     #[test]
