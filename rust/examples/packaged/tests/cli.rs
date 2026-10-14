@@ -7,7 +7,6 @@
 )]
 
 use serde_json::Value;
-use sha2::{Digest as _, Sha256};
 use std::ffi::OsString;
 use std::fs;
 use std::ops::Deref;
@@ -81,6 +80,59 @@ fn digest_reader_uses_bounded_reads() {
         flyrail_example_checksum::sha256_reader(reader).expect("digest"),
         "371036ccdfc733fa30542a26a4f276536147c906d1570f0becc1d6f8b868c311"
     );
+}
+
+struct InterruptedReader {
+    interrupted: bool,
+    remaining: &'static [u8],
+}
+
+impl std::io::Read for InterruptedReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if !self.interrupted {
+            self.interrupted = true;
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        self.remaining.read(buffer)
+    }
+}
+
+#[test]
+fn digest_reader_retries_interrupted_reads() {
+    let reader = InterruptedReader {
+        interrupted: false,
+        remaining: b"payload",
+    };
+    assert_eq!(
+        flyrail_example_checksum::sha256_reader(reader).expect("digest after interruption"),
+        "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5"
+    );
+}
+
+struct FailingReader {
+    remaining: &'static [u8],
+}
+
+impl std::io::Read for FailingReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.remaining.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "reader failed",
+            ));
+        }
+        self.remaining.read(buffer)
+    }
+}
+
+#[test]
+fn digest_reader_propagates_errors_after_partial_input() {
+    let reader = FailingReader {
+        remaining: b"partial",
+    };
+    let error = flyrail_example_checksum::sha256_reader(reader).expect_err("read failure");
+    assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    assert_eq!(error.to_string(), "reader failed");
 }
 
 #[test]
@@ -288,7 +340,7 @@ fn version_digest_usage_and_embedded_resources() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        format!("{:x}", Sha256::digest(b"\x00one\ntwo"))
+        "f8407b660c5c1645065501e7eaa5ba03868a156609cb45314d4ad01e3838414a"
     );
     assert_eq!(run(&["digest", "missing"]).status.code(), Some(2));
     assert_eq!(run(&["ai", "install"]).status.code(), Some(2));
@@ -327,7 +379,7 @@ fn non_utf8_paths_work_and_non_utf8_text_is_rejected_without_panic() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        format!("{:x}", Sha256::digest(b"payload"))
+        "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5"
     );
 
     let missing = root.join(OsString::from_vec(b"missing-\xff".to_vec()));
@@ -355,18 +407,16 @@ fn digest_streams_a_bounded_generated_file() {
     let root = root("large-digest");
     let file = root.join("large.bin");
     let chunk = vec![0x5a; 1024 * 1024];
-    let mut expected = Sha256::new();
     let mut output_file = fs::File::create(&file).expect("create generated file");
     for _ in 0..32 {
         output_file.write_all(&chunk).expect("write generated file");
-        expected.update(&chunk);
     }
     drop(output_file);
     let output = run_os(&[OsString::from("digest"), file.into_os_string()]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        format!("{:x}", expected.finalize())
+        "371036ccdfc733fa30542a26a4f276536147c906d1570f0becc1d6f8b868c311"
     );
 }
 

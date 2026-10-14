@@ -4,7 +4,8 @@ use flyrail::{
     McpArtifact, McpTransport, SupportAsset, TreeContent,
 };
 use sha2::{Digest as _, Sha256};
-use std::io::{self, Read};
+use std::fmt::Write as _;
+use std::io::{self, BufRead as _, Read};
 
 pub const BUNDLE_ID: &str = "example-checksum";
 pub const CONFIG_BUNDLE_ID: &str = "example-checksum-config";
@@ -21,10 +22,27 @@ const SCRATCH: &[u8] =
 const REMINDER_PY: &[u8] = include_bytes!("../resources/assets/reminder.py");
 const REMINDER_TXT: &[u8] = include_bytes!("../resources/assets/reminder.txt");
 
-pub fn sha256_reader(mut reader: impl Read) -> io::Result<String> {
+pub fn sha256_reader(reader: impl Read) -> io::Result<String> {
+    let mut reader = io::BufReader::new(reader);
     let mut digest = Sha256::new();
-    io::copy(&mut reader, &mut digest)?;
-    Ok(format!("{:x}", digest.finalize()))
+    loop {
+        let bytes = match reader.fill_buf() {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        if bytes.is_empty() {
+            break;
+        }
+        digest.update(bytes);
+        let count = bytes.len();
+        reader.consume(count);
+    }
+    let mut hex = String::with_capacity(64);
+    for byte in digest.finalize() {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    Ok(hex)
 }
 
 pub fn packaged_bundle() -> Result<Bundle, BundleError> {
