@@ -9,6 +9,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
+#[cfg(target_os = "macos")]
 const PROVENANCE: &[u8] = b"com.apple.provenance";
 
 #[cfg(target_os = "macos")]
@@ -46,6 +47,7 @@ fn refused(errno: i32, message: &str, path: &Path) -> TargetError {
     )
 }
 
+#[cfg(target_os = "macos")]
 fn last_errno() -> i32 {
     io::Error::last_os_error()
         .raw_os_error()
@@ -103,6 +105,7 @@ fn attribute_names(buffer: &[u8]) -> Vec<Vec<u8>> {
     names
 }
 
+#[cfg(target_os = "macos")]
 fn strip_trailing_nuls(buffer: &[u8]) -> &[u8] {
     let end = buffer
         .iter()

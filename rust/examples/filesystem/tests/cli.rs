@@ -124,6 +124,17 @@ fn version_words_and_usage_contract() {
     assert_eq!(run(&["ai", "install"]).status.code(), Some(2));
 }
 
+#[cfg(target_os = "macos")]
+fn filesystem_rejects_non_utf8_names(error: &std::io::Error) -> bool {
+    const EILSEQ: i32 = 92;
+    error.raw_os_error() == Some(EILSEQ)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const fn filesystem_rejects_non_utf8_names(_error: &std::io::Error) -> bool {
+    false
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_paths_work_and_non_utf8_text_is_rejected_without_panic() {
@@ -131,17 +142,27 @@ fn non_utf8_paths_work_and_non_utf8_text_is_rejected_without_panic() {
 
     let root = root("non-utf8");
     let file = root.join(OsString::from_vec(b"notes-\xff.txt".to_vec()));
-    if let Err(error) = fs::write(&file, "one two") {
-        if error.kind() == std::io::ErrorKind::PermissionDenied && std::env::var_os("CI").is_none()
+    match fs::write(&file, "one two") {
+        Ok(()) => {
+            let output = run_os(&[OsString::from("words"), file.into_os_string()]);
+            assert_eq!(output.status.code(), Some(0), "{output:?}");
+            assert_eq!(output.stdout, b"2\n");
+        }
+        Err(error)
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                && std::env::var_os("CI").is_none() =>
         {
             eprintln!("SKIP: active sandbox rejects non-UTF-8 filesystem names");
             return;
         }
-        panic!("write non-UTF-8 path: {error}");
+        Err(error) if filesystem_rejects_non_utf8_names(&error) => {
+            eprintln!(
+                "SKIP: filesystem rejects non-UTF-8 file names ({error}); \
+                 skipping the existing-path check, still checking non-UTF-8 text"
+            );
+        }
+        Err(error) => panic!("write non-UTF-8 path: {error}"),
     }
-    let output = run_os(&[OsString::from("words"), file.into_os_string()]);
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert_eq!(output.stdout, b"2\n");
 
     let missing = root.join(OsString::from_vec(b"missing-\xff".to_vec()));
     let output = run_os(&[OsString::from("words"), missing.into_os_string()]);

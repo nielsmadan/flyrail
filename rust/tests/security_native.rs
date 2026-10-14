@@ -1,3 +1,4 @@
+#![cfg(target_os = "macos")]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
