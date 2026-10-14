@@ -142,7 +142,7 @@ fn application_evidence(agent: Agent, directories: &[PathBuf]) -> Option<PathBuf
 }
 
 #[cfg(not(target_os = "macos"))]
-fn application_evidence(_agent: Agent, _directories: &[PathBuf]) -> Option<PathBuf> {
+const fn application_evidence(_agent: Agent, _directories: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
