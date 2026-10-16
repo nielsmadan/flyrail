@@ -1,5 +1,5 @@
 use crate::artifacts::{Artifact, Family};
-use crate::authority::{AuthorityError, ClaimSelector, ResourceAuthority, state_path};
+use crate::authority::{AuthorityError, ClaimSelector, ResourceAuthority};
 use crate::bundle::Bundle;
 use crate::configuration::{InstallationObservation, InstallationTarget};
 use crate::content::{Content, TreeContent};
@@ -12,9 +12,11 @@ use crate::observations::{
 };
 use crate::rendered::{Notice, NoticeKind, RenderedArtifact, RenderedBundle};
 use crate::resource_models::Receipt;
+use crate::stores::StateStore;
 use crate::values::ValueError;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub trait SkillTarget: Clone {
     fn root(&self) -> &Path;
@@ -195,7 +197,7 @@ fn authority_error(error: AuthorityError) -> Result<TargetError, ValueError> {
 
 fn prepare_target<T: SkillTarget>(
     target: T,
-    identifier: &str,
+    store: &Arc<dyn StateStore>,
 ) -> Result<PreparedSkill<T>, ValueError> {
     if let Some(agent) = target.agent().filter(|agent| !is_translatable(*agent)) {
         let root = target.root().to_path_buf();
@@ -225,34 +227,13 @@ fn prepare_target<T: SkillTarget>(
             });
         }
     };
-    let Some(index_root) = root.parent().map(|parent| {
-        parent.join(format!(
-            ".{}.flyrail-index-{identifier}",
-            root.file_name().unwrap_or_default().to_string_lossy()
-        ))
-    }) else {
-        return Err(ValueError::new(
-            "resource destination cannot be a root or contain traversal",
-        ));
-    };
     let mut routing_context = vec![(String::from("destination"), root.display().to_string())];
     routing_context.extend(target.routing_context());
-    let installation = match InstallationTarget::new(
-        index_root,
+    let installation = InstallationTarget::new(
+        Arc::clone(store),
         [(String::from("destination"), root.display().to_string())],
         routing_context,
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            return Ok(PreparedSkill {
-                target,
-                installation: Err(authority_error(error)?),
-                root,
-                alias_of: None,
-                rendered: None,
-            });
-        }
-    };
+    )?;
     Ok(PreparedSkill {
         target,
         installation: Ok(installation),
@@ -266,6 +247,7 @@ pub(crate) fn prepare_skills<T: SkillTarget>(
     bundle: Option<&Bundle>,
     identifier: &str,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
 ) -> Result<Vec<PreparedSkill<T>>, ValueError> {
     crate::configuration::validate_bundle_id(identifier)?;
     if let Some(bundle) = bundle {
@@ -278,7 +260,7 @@ pub(crate) fn prepare_skills<T: SkillTarget>(
     let mut prepared: Vec<PreparedSkill<T>> = Vec::with_capacity(targets.len());
     let mut known: Vec<(PathBuf, usize)> = Vec::new();
     for target in targets {
-        let mut item = prepare_target(target, identifier)?;
+        let mut item = prepare_target(target, store)?;
         item.alias_of = item.installation.as_ref().ok().and_then(|_| {
             known
                 .iter()
@@ -291,7 +273,7 @@ pub(crate) fn prepare_skills<T: SkillTarget>(
             if let (Some(bundle), Ok(installation)) = (bundle, &item.installation) {
                 match item.target.render_bundle(bundle, &item.root) {
                     Ok(rendered) => {
-                        if let Some(error) = crate::lifecycle_impl::validate_reference_request(
+                        if let Some(error) = crate::lifecycle_impl::validate_skill_references(
                             &rendered,
                             installation,
                             bundle,
@@ -385,8 +367,11 @@ fn installed_inventory(
     let mut installations = Vec::new();
     let mut metadata_error = None;
     for observed in observation.resources() {
-        let receipt_path = observed.state_root().join("receipt.json");
-        let stored = match crate::resource_io::read::<Receipt>(&receipt_path, "Receipt") {
+        let stored = match crate::state::read_record::<Receipt>(
+            observation.target().store().as_ref(),
+            &crate::state::resource_key(observed.destination(), "receipt"),
+            "Receipt",
+        ) {
             Ok(value) => value,
             Err(error) => {
                 metadata_error = Some(error);
@@ -444,16 +429,16 @@ fn installed_inventory(
 pub fn inspect<T: SkillTarget>(
     bundle: &Bundle,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
 ) -> Result<Vec<TargetInspection<T>>, ValueError> {
     let mut result: Vec<TargetInspection<T>> = Vec::new();
-    for item in prepare_skills(Some(bundle), bundle.id(), targets)? {
+    for item in prepare_skills(Some(bundle), bundle.id(), targets, store)? {
         if let Some(alias) = item.alias_of
             && let Some(prior) = result.get(alias)
         {
             result.push(prior.aliased(item.target, alias));
             continue;
         }
-        let state_root = state_path(&item.root);
         let observation = match (&item.installation, &item.rendered) {
             (Err(error), _) => Observation::unknown(error.clone()),
             (Ok(installation), Some(rendered)) => {
@@ -506,7 +491,6 @@ pub fn inspect<T: SkillTarget>(
         result.push(TargetInspection::new(
             item.target,
             item.root,
-            state_root,
             None,
             observation,
         ));

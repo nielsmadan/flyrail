@@ -105,7 +105,9 @@ def test_windows_document_security_transitions_keep_backup_private(
         patch.setattr(io, "ensure_private", private)
         patch.setattr(tx, "ensure_private", private)
         patch.setattr(io, "os", SimpleNamespace(name="nt", replace=os.replace))
-        patch.setattr(tx, "os", SimpleNamespace(name="nt", replace=os.replace))
+        patch.setattr(
+            tx, "os", SimpleNamespace(name="nt", replace=os.replace, utime=os.utime, path=os.path)
+        )
         patch.setattr(io, "security", descriptor)
         patch.setattr(io, "set_security", apply)
         patch.setattr(tx, "set_security", apply)

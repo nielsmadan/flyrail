@@ -315,6 +315,22 @@ class Index:
         return tuple(sorted(refs, key=lambda ref: str(ref.destination)))
 
 
+@dataclass(frozen=True, slots=True)
+class Preparation:
+    resource: ResourceRef
+    transaction_id: str
+    directory: Path
+    schema_version: int = 2
+
+    def __post_init__(self) -> None:
+        if type(self.resource) is not ResourceRef:
+            raise TypeError("preparation requires a resource")
+        hexadecimal(self.transaction_id, 32)
+        absolute(self.directory)
+        if type(self.schema_version) is not int or self.schema_version != 2:
+            raise ValueError("preparation schema must be 2")
+
+
 for _cls in (
     ResourceKind,
     Ancestor,
@@ -325,5 +341,6 @@ for _cls in (
     Receipt,
     Generation,
     Index,
+    Preparation,
 ):
     register(_cls)

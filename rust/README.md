@@ -15,25 +15,32 @@ Add the crate from this workspace, then construct or load a bundle and select a
 destination:
 
 ```rust
-use flyrail::{Bundle, OperationStatus, Target, install, uninstall};
+use flyrail::{Bundle, DirectoryStore, OperationStatus, StateStore, Target, install, uninstall};
 use std::path::Path;
+use std::sync::Arc;
 
 let bundle = Bundle::from_directory("path/to/flyrail")?;
 let target = Target::directory(Path::new(".cache/demo-skills"))?;
+let store: Arc<dyn StateStore> = Arc::new(DirectoryStore::new(".cache/demo-skills-state")?);
 
-let installed = install(&bundle, [&target])?;
+let installed = install(&bundle, [&target], &store)?;
 assert!(matches!(
     installed[0].status(),
     OperationStatus::Applied | OperationStatus::Unchanged
 ));
 
-let removed = uninstall(bundle.id(), [&target])?;
+let removed = uninstall(bundle.id(), [&target], &store)?;
 assert!(matches!(
     removed[0].status(),
     OperationStatus::Applied | OperationStatus::Unchanged
 ));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+There is no default state store: construct one explicitly (for example a
+`DirectoryStore` in the application's own state directory) and pass it to
+every lifecycle call. `MemoryStore` suits tests and dry runs. See
+[the public API](docs/api.md#state-stores) for the full contract.
 
 The convenience lifecycle accepts only skill-only bundles without support
 dependencies. For instructions, MCP registrations, hooks, native payloads, or

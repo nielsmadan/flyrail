@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+const EMPTY_CONTEXT_INDEX: &str =
+    "index/team/37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570";
 
 struct TempDir(PathBuf);
 
@@ -131,21 +133,7 @@ fn record_key(category: &str, case: &str, field: impl Into<String>) -> (String, 
     (category.to_owned(), case.to_owned(), field.into())
 }
 
-fn lifecycle_destination(case_root: &Path, kind: &str) -> PathBuf {
-    case_root.join(match kind {
-        "file" | "alias" => "owned",
-        "casefold" => "Straße",
-        "toml" => "config.toml",
-        "json" => "config.json",
-        _ => "AGENTS.md",
-    })
-}
-
-fn expected_record_keys(
-    rows: &[Vec<&str>],
-    work: &Path,
-) -> Result<BTreeSet<(String, String, String)>, String> {
-    let work = fs::canonicalize(work).map_err(|error| error.to_string())?;
+fn expected_record_keys(rows: &[Vec<&str>]) -> Result<BTreeSet<(String, String, String)>, String> {
     let mut expected = BTreeSet::new();
     for row in rows {
         let category = row[0];
@@ -183,15 +171,13 @@ fn expected_record_keys(
                 }
             }
             "lifecycle" => {
-                let case_root = work.join(case);
-                let authority =
-                    flyrail::ResourceAuthority::new(lifecycle_destination(&case_root, row[2]))
-                        .expect("lifecycle destination must be valid");
-                let state_root = authority
-                    .state_root()
-                    .strip_prefix(&case_root)
-                    .expect("lifecycle state root must belong to case root")
-                    .to_string_lossy();
+                let destination = match row[2] {
+                    "file" | "alias" => "owned",
+                    "casefold" => "Straße",
+                    "toml" => "config.toml",
+                    "json" => "config.json",
+                    _ => "AGENTS.md",
+                };
                 for phase in [
                     "1-create",
                     "2-unchanged",
@@ -201,8 +187,9 @@ fn expected_record_keys(
                 ] {
                     for field in [
                         format!("{phase}-result"),
-                        format!("{phase}-state-$ROOT/{state_root}/receipt.json"),
-                        format!("{phase}-state-$ROOT/index/index.json"),
+                        format!("{phase}-state-{EMPTY_CONTEXT_INDEX}"),
+                        format!("{phase}-state-resource/$ROOT/{destination}/authority"),
+                        format!("{phase}-state-resource/$ROOT/{destination}/receipt"),
                         format!("{phase}-payloads"),
                     ] {
                         expected.insert(record_key(category, case, field));
@@ -258,13 +245,13 @@ fn generated_python_and_rust_corpus_is_byte_identical() {
     let python_records = records(&python_output.stdout, "Python output");
     let rust_records = records(&rust_output.stdout, "Rust output");
     let expected_keys =
-        expected_record_keys(&corpus_rows, &work).expect("expected keys must be derivable");
+        expected_record_keys(&corpus_rows).expect("expected keys must be derivable");
     let python_keys = python_records.keys().cloned().collect::<BTreeSet<_>>();
     let rust_keys = rust_records.keys().cloned().collect::<BTreeSet<_>>();
     assert_eq!(rust_output.stdout, python_output.stdout);
     assert_eq!(python_keys, expected_keys);
     assert_eq!(rust_keys, expected_keys);
-    assert_eq!(python_records.len(), 437);
+    assert_eq!(python_records.len(), 482);
     assert_eq!(
         case_counts(&python_records),
         BTreeMap::from([

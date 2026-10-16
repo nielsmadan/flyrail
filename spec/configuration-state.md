@@ -38,8 +38,6 @@ Before any resource content is published, the index records desired `pending`
 membership, the completed `current` generation as `previous`, and resource
 references needed for interrupted or retired claims. Source-free inspection and
 removal traverse the union of all generations and `residual`.
-Complete prepared index metadata contributes its resource references to this
-union until a locked mutation recognizes and reconciles the preparation.
 
 A completed generation records version, bundle digest, render digest and exact
 resource/claim membership. Current state requires all expected claims with those
@@ -58,9 +56,8 @@ re-observes receipts and reconciles membership; only completion replaces the ind
 with the new current generation. An empty completed removal has no active bundle
 generation.
 
-Current and previous committed generation resources, including a recognized
-prepared completion of the pending generation, require a valid resource receipt.
-A missing receipt is invalid ownership state: inspection reports the
+Current and previous committed generation resources require a valid resource
+receipt. A missing receipt is invalid ownership state: inspection reports the
 resource error, and mutation preserves the index, payload and remaining recovery
 evidence. The index never supplies deletion or baseline-restoration authority.
 Pending first-install resources can lack receipts before committing. A valid
@@ -126,7 +123,10 @@ process-recovery behavior.
 observed transitions. Consumers exercise real receipt validation, removal and
 recovery using these records; loading fixtures or comparing hashes alone is
 insufficient. Synthetic identity tokens are mapped to real isolated filesystem
-identities before invoking native transaction code.
+identities before invoking native transaction code. A consumer that
+materializes a transaction sets the transaction directory's modification time
+after placing the observed revisions and before writing the journal record, as
+a writer does.
 
 Hook dependency and schema refinements are specified in [hook-protocol.md](hook-protocol.md).
 Owned claims persist `stable_requirements` as a unique subset of their ordinary

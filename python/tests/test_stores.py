@@ -151,12 +151,12 @@ def _operations(store: StateStore) -> dict[str, Callable[[], object]]:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX private modes")
 @pytest.mark.parametrize("operation", ["read", "write", "delete", "keys", "lock"])
-@pytest.mark.parametrize("unsafe", ["", "records", "locks"])
+@pytest.mark.parametrize("unsafe", ["", "records", "locks", "staging"])
 def test_directory_store_refuses_a_location_others_can_write(
     tmp_path: Path, unsafe: str, operation: str
 ) -> None:
     root = tmp_path / "state"
-    for name in ("records", "locks"):
+    for name in ("records", "locks", "staging"):
         (root / name).mkdir(mode=0o700, parents=True)
     root.chmod(0o700)
     (root / unsafe).chmod(0o777)
@@ -166,24 +166,34 @@ def test_directory_store_refuses_a_location_others_can_write(
     assert sorted(path.relative_to(root).as_posix() for path in root.rglob("*")) == [
         "locks",
         "records",
+        "staging",
     ]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX private modes")
 @pytest.mark.parametrize("operation", ["read", "write", "delete", "keys", "lock"])
-@pytest.mark.parametrize("unsafe", ["state.sqlite3", "state.sqlite3.locks"])
+@pytest.mark.parametrize(
+    "unsafe", ["state.sqlite3", "state.sqlite3.locks", "state.sqlite3.staging"]
+)
 def test_sqlite_store_refuses_a_database_others_can_write(
     tmp_path: Path, unsafe: str, operation: str
 ) -> None:
     path = tmp_path / "state.sqlite3"
     SQLiteStore(path).write("index/a", b"record", expected=None)
     (tmp_path / "state.sqlite3.locks").mkdir(mode=0o700)
+    (tmp_path / "state.sqlite3.staging").mkdir(mode=0o700)
     (tmp_path / unsafe).chmod(0o666 if unsafe == "state.sqlite3" else 0o777)
     with pytest.raises(PermissionError, match="private to its owner") as raised:
         _operations(SQLiteStore(path))[operation]()
     assert raised.value.filename == os.fspath(tmp_path / unsafe)
     (tmp_path / unsafe).chmod(0o600 if unsafe == "state.sqlite3" else 0o700)
     assert SQLiteStore(path).read("index/a") == b"record"
+
+
+def test_built_in_staging_directories(tmp_path: Path) -> None:
+    assert DirectoryStore(tmp_path / "state").staging_directory == tmp_path / "state" / "staging"
+    assert SQLiteStore(tmp_path / "s.sqlite3").staging_directory == tmp_path / "s.sqlite3.staging"
+    assert MemoryStore().staging_directory is None
 
 
 def test_sqlite_extended_busy_codes_raise_store_busy(tmp_path: Path) -> None:

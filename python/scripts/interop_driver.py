@@ -26,6 +26,7 @@ from flyrail import (
     ResourceAuthority,
     ResourceKind,
     ResourceRef,
+    SectionContent,
     inspect_installation,
     recover_installation,
     remove,
@@ -33,22 +34,11 @@ from flyrail import (
 )
 from flyrail import _lifecycle as lifecycle
 from flyrail._codec import decode, encode
-from flyrail._filesystem import target_lock
 from flyrail._observation import ObservationFailure
 from flyrail._resource_io import admit
+from flyrail._state import destination_key, store_lock
+from flyrail.stores import DirectoryStore
 
-STATE_RECORD_NAMES = frozenset(
-    {
-        "authority.json",
-        "authority.json.next",
-        "index.json",
-        "index.json.next",
-        "receipt.json",
-        "receipt.json.next",
-        "transaction.json",
-        "transaction.json.next",
-    }
-)
 MAX_PAYLOAD_SIZE = 1024 * 1024
 
 
@@ -75,8 +65,12 @@ def payload(arguments: argparse.Namespace) -> bytes:
     return cast(str, arguments.payload).encode()
 
 
+def store(arguments: argparse.Namespace) -> DirectoryStore:
+    return DirectoryStore(arguments.state)
+
+
 def installation(arguments: argparse.Namespace) -> InstallationTarget:
-    return InstallationTarget(Path(arguments.index).resolve())
+    return InstallationTarget(store(arguments))
 
 
 def rendered(arguments: argparse.Namespace) -> RenderedBundle:
@@ -85,13 +79,18 @@ def rendered(arguments: argparse.Namespace) -> RenderedBundle:
         "readable": FileMode.READABLE,
         "executable": FileMode.EXECUTABLE,
     }[arguments.mode]
+    content: FileContent | SectionContent = (
+        FileContent(payload(arguments), mode)
+        if arguments.section is None
+        else SectionContent(arguments.section, payload(arguments).decode())
+    )
     return RenderedBundle(
         [
             RenderedArtifact(
                 "guide",
                 Family.INSTRUCTIONS,
                 Path(arguments.destination).resolve(),
-                FileContent(payload(arguments), mode),
+                content,
             )
         ]
     )
@@ -119,7 +118,6 @@ def observation_value(observation: InstallationObservation) -> dict[str, object]
         "resources": [
             {
                 "destination": str(item.destination),
-                "state_root": str(item.state_root),
                 "claims": [
                     {
                         "artifact_id": claim.artifact_id,
@@ -189,30 +187,17 @@ def recover_command(arguments: argparse.Namespace) -> None:
     compact(result_value(result))
 
 
-def record_paths(arguments: argparse.Namespace) -> list[Path]:
-    roots = [Path(arguments.index).resolve()]
-    if arguments.destination is not None:
-        roots.append(ResourceAuthority(Path(arguments.destination).resolve()).state_root)
-    return sorted(
-        (
-            path
-            for root in roots
-            if root.is_dir()
-            for path in root.iterdir()
-            if path.name in STATE_RECORD_NAMES and path.is_file()
-        ),
-        key=lambda path: str(path),
-    )
-
-
 def records_command(arguments: argparse.Namespace) -> None:
+    selected = store(arguments)
     records = []
-    for path in record_paths(arguments):
-        raw = path.read_bytes()
+    for key in selected.keys(""):
+        raw = selected.read(key)
+        if raw is None:
+            continue
         value = decode(raw)
         records.append(
             {
-                "path": str(path),
+                "key": key,
                 "type": type(value).__name__,
                 "bytes": base64.b64encode(raw).decode("ascii"),
                 "canonical": base64.b64encode(encode(value)).decode("ascii"),
@@ -222,13 +207,13 @@ def records_command(arguments: argparse.Namespace) -> None:
 
 
 def hold_command(arguments: argparse.Namespace) -> None:
-    destination = Path(arguments.destination).resolve()
-    authority = ResourceAuthority(destination)
-    reference = ResourceRef(destination, ResourceKind(arguments.kind), authority.state_root)
+    selected = store(arguments)
+    destination = ResourceAuthority(Path(arguments.destination).resolve()).destination
+    reference = ResourceRef(destination, ResourceKind(arguments.kind))
     barrier = Path(arguments.barrier).resolve()
     validate_timeout(arguments.lock_timeout, "lock timeout")
     validate_timeout(arguments.wait_timeout, "wait timeout")
-    with target_lock(reference.state_root, arguments.lock_timeout):
+    with store_lock(selected, f"resource/{destination_key(destination)}", arguments.lock_timeout):
         compact({"status": "reserved"})
         deadline = time.monotonic() + arguments.wait_timeout
         while not barrier.exists():
@@ -236,7 +221,7 @@ def hold_command(arguments: argparse.Namespace) -> None:
                 raise TimeoutError("barrier timed out")
             time.sleep(0.005)
         try:
-            admit(reference)
+            admit(selected, reference)
         except ObservationFailure as error:
             compact({"status": error.error.code.value})
         else:
@@ -277,8 +262,8 @@ def configure_interop_seam(arguments: argparse.Namespace) -> None:
         if phase == "prepare":
             original_prepare = lifecycle.__dict__["prepare"]
 
-            def prepare(plan: object) -> object:
-                journal = original_prepare(plan)
+            def prepare(store: object, plan: object) -> object:
+                journal = original_prepare(store, plan)
                 wait()
                 return journal
 
@@ -286,30 +271,26 @@ def configure_interop_seam(arguments: argparse.Namespace) -> None:
         else:
             original_publish = lifecycle.__dict__["publish"]
 
-            def publish(journal: object) -> None:
-                original_publish(journal)
+            def publish(store: object, journal: object) -> None:
+                original_publish(store, journal)
                 wait()
 
             lifecycle.__dict__["publish"] = publish
     elif ready is not None or release is not None:
         raise ValueError("--barrier-ready and --barrier-release require --barrier-phase")
     if arguments.fail_index_completion:
-        original_atomic = lifecycle.__dict__["atomic"]
+        original_write = lifecycle.__dict__["write_record"]
         index_writes = 0
 
-        def atomic(destination: Path, value: object, **keywords: object) -> None:
+        def write_record(store: object, key: str, value: object, **keywords: object) -> None:
             nonlocal index_writes
-            if destination.name == "index.json":
+            if key.startswith("index/"):
                 index_writes += 1
                 if index_writes == 2:
-                    raise OSError(
-                        errno.EIO,
-                        "injected index-completion failure",
-                        destination,
-                    )
-            original_atomic(destination, value, **keywords)
+                    raise OSError(errno.EIO, "injected index-completion fault")
+            original_write(store, key, value, **keywords)
 
-        lifecycle.__dict__["atomic"] = atomic
+        lifecycle.__dict__["write_record"] = write_record
 
 
 def encode_command() -> None:
@@ -317,7 +298,7 @@ def encode_command() -> None:
 
 
 def add_target_arguments(selected: argparse.ArgumentParser) -> None:
-    selected.add_argument("--index", required=True)
+    selected.add_argument("--state", required=True)
     selected.add_argument("--bundle-id", default="team")
     selected.add_argument("--lock-timeout", type=float, default=0)
 
@@ -334,6 +315,7 @@ def parser() -> argparse.ArgumentParser:
         write_parser.add_argument("--version", default="1")
         write_parser.add_argument("--payload", default="generated\n")
         write_parser.add_argument("--large", type=int)
+        write_parser.add_argument("--section")
         write_parser.add_argument(
             "--mode", choices=("private", "readable", "executable"), default="readable"
         )
@@ -360,10 +342,10 @@ def parser() -> argparse.ArgumentParser:
     add_target_arguments(recover_parser)
     recover_parser.set_defaults(handler=recover_command)
     records_parser = commands.add_parser("records")
-    records_parser.add_argument("--index", required=True)
-    records_parser.add_argument("--destination")
+    records_parser.add_argument("--state", required=True)
     records_parser.set_defaults(handler=records_command)
     hold_parser = commands.add_parser("hold")
+    hold_parser.add_argument("--state", required=True)
     hold_parser.add_argument("--destination", required=True)
     hold_parser.add_argument("--barrier", required=True)
     hold_parser.add_argument("--kind", choices=("document", "tree"), default="document")

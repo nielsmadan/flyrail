@@ -1,19 +1,24 @@
-use crate::authority::{AuthorityError, hierarchy_conflicts};
-use crate::filesystem::{TargetLockGuard, target_lock};
-use crate::observation::{failure, io_failure};
+use crate::observation::{failure, io_failure, managed_metadata, managed_spelling};
 use crate::observations::{ErrorCode, TargetError};
 use crate::resource_io::{
-    ancestors, atomic, atomic_with_publication, cleanup_revision, destroy, move_revision, observe,
-    read, require, require_unchanged_since, validate_kind, validate_state, write_revision,
+    ancestors, cleanup_revision, destroy, error_detail, move_revision, observe, require,
+    require_unchanged_since, resource_ancestors, validate_kind, write_revision,
 };
-use crate::resource_models::{Ancestor, Index, Receipt, ResourceRef, Revision};
-use crate::resource_plan::{ResourcePlan, prepared_index_promotes};
+use crate::resource_models::{
+    Ancestor, Index, Preparation, Receipt, ResourceKind, ResourceRef, Revision,
+};
+use crate::resource_plan::ResourcePlan;
 use crate::security::ensure_private;
+use crate::state::{
+    delete_record, destination_key, hierarchy_conflicts, read_record,
+    recognized_transaction_directory, require_index, resource_key, store_lock, write_record,
+};
+use crate::stores::{StateStore, StoreLock};
 use crate::values::ValueError;
 use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 #[cfg(feature = "interop-test-seams")]
 use std::{
@@ -35,27 +40,26 @@ pub struct Journal {
     schema_version: i64,
 }
 
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) struct ResourceLockGuard {
-    reference: ResourceRef,
-    _guard: TargetLockGuard,
+fn resource_lock_name(destination: &Path) -> String {
+    format!("resource/{}", destination_key(destination))
 }
 
-#[allow(dead_code)]
-impl ResourceLockGuard {
-    pub(crate) fn acquire(reference: &ResourceRef, timeout: Duration) -> Result<Self, TargetError> {
-        Self::acquire_recording(reference, timeout, None)
-    }
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) struct ResourceLockGuard<'a> {
+    reference: ResourceRef,
+    _lock: StoreLock<'a>,
+}
 
-    fn acquire_recording(
+impl<'a> ResourceLockGuard<'a> {
+    pub(crate) fn acquire(
+        store: &'a dyn StateStore,
         reference: &ResourceRef,
         timeout: Duration,
-        on_created: Option<&mut dyn FnMut(&std::path::Path)>,
     ) -> Result<Self, TargetError> {
-        let guard = target_lock(reference.state_root(), timeout, on_created)?;
+        let lock = store_lock(store, &resource_lock_name(reference.destination()), timeout)?;
         Ok(Self {
             reference: reference.clone(),
-            _guard: guard,
+            _lock: lock,
         })
     }
 
@@ -66,173 +70,143 @@ impl ResourceLockGuard {
 
 #[cfg(feature = "interop-test-seams")]
 #[doc(hidden)]
-pub struct InteropResourceLockGuard {
-    _guard: ResourceLockGuard,
+pub struct InteropResourceLockGuard<'a> {
+    _guard: ResourceLockGuard<'a>,
 }
 
 #[cfg(feature = "interop-test-seams")]
 #[doc(hidden)]
-pub fn interop_resource_lock(
+pub fn interop_resource_lock<'a>(
+    store: &'a dyn StateStore,
     reference: &ResourceRef,
     timeout: Duration,
-) -> Result<InteropResourceLockGuard, TargetError> {
-    ResourceLockGuard::acquire(reference, timeout)
+) -> Result<InteropResourceLockGuard<'a>, TargetError> {
+    ResourceLockGuard::acquire(store, reference, timeout)
         .map(|guard| InteropResourceLockGuard { _guard: guard })
 }
 
 #[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn lock_resources(
+pub(crate) fn lock_resources<'a>(
+    store: &'a dyn StateStore,
     references: &[ResourceRef],
     timeout: Duration,
-) -> Result<Vec<ResourceLockGuard>, TargetError> {
+) -> Result<Vec<ResourceLockGuard<'a>>, TargetError> {
     let mut ordered = references.to_vec();
-    crate::resource_plan::state_root_order(&mut ordered);
+    crate::resource_plan::destination_order(&mut ordered);
     ordered
         .iter()
-        .map(|reference| ResourceLockGuard::acquire(reference, timeout))
+        .map(|reference| ResourceLockGuard::acquire(store, reference, timeout))
         .collect()
 }
 
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) struct TransactionLocks {
-    index_root: PathBuf,
-    _index: TargetLockGuard,
-    resources: Vec<ResourceLockGuard>,
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) struct TransactionLocks<'a> {
+    store: &'a dyn StateStore,
+    index_key: String,
+    resources: Vec<ResourceLockGuard<'a>>,
+    _index: StoreLock<'a>,
     created: Vec<Ancestor>,
 }
 
-#[allow(dead_code)]
-impl TransactionLocks {
+fn create_parents(path: &Path, created: &mut Vec<Ancestor>) -> Result<(), TargetError> {
+    let mut parents = path.ancestors().skip(1).collect::<Vec<_>>();
+    parents.reverse();
+    for parent in parents {
+        if parent.exists() {
+            continue;
+        }
+        match fs::DirBuilder::new().mode(0o700).create(parent) {
+            Ok(()) => {
+                if let Some(item) = ancestors(&parent.join("child"))?
+                    .into_iter()
+                    .find(|item| item.path() == parent)
+                {
+                    created.push(item);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(io_failure(&error, parent)),
+        }
+    }
+    Ok(())
+}
+
+fn create_store_parents(
+    store: &dyn StateStore,
+    created: &mut Vec<Ancestor>,
+) -> Result<(), TargetError> {
+    if let Some(location) = store.location() {
+        create_parents(
+            &crate::authority::physical_location(location).map_err(error_detail)?,
+            created,
+        )?;
+    }
+    if let Some(staging) = store.staging_directory() {
+        create_parents(
+            &crate::authority::physical_location(&staging)
+                .map_err(error_detail)?
+                .join("transaction"),
+            created,
+        )?;
+    }
+    Ok(())
+}
+
+impl<'a> TransactionLocks<'a> {
+    #[allow(dead_code)]
     pub(crate) fn acquire(
-        index_root: &std::path::Path,
+        store: &'a dyn StateStore,
+        index_key: &str,
         references: &[ResourceRef],
         timeout: Duration,
     ) -> Result<Self, TargetError> {
-        Self::acquire_after_index_validation(index_root, references, timeout, || Ok(()))
+        Self::acquire_after_index_validation(store, index_key, references, timeout, || Ok(()))
     }
 
     pub(crate) fn acquire_after_index_validation(
-        index_root: &std::path::Path,
+        store: &'a dyn StateStore,
+        index_key: &str,
         references: &[ResourceRef],
         timeout: Duration,
         validate: impl FnOnce() -> Result<(), TargetError>,
     ) -> Result<Self, TargetError> {
-        let mut created_paths = Vec::new();
-        let mut record = |path: &std::path::Path| created_paths.push(path.to_path_buf());
-        let index = target_lock(index_root, timeout, Some(&mut record))?;
+        let mut created = Vec::new();
+        create_store_parents(store, &mut created)?;
+        let index = store_lock(store, index_key, timeout)?;
         validate()?;
         let mut ordered = references.to_vec();
-        crate::resource_plan::state_root_order(&mut ordered);
+        crate::resource_plan::destination_order(&mut ordered);
         let mut resources = Vec::with_capacity(ordered.len());
         for reference in &ordered {
             validate_kind(reference)?;
-            resources.push(ResourceLockGuard::acquire_recording(
-                reference,
-                timeout,
-                Some(&mut record),
-            )?);
-            crate::resource_io::admit(reference)?;
-        }
-        let mut created = Vec::new();
-        for path in created_paths {
-            if let Some(item) = ancestors(&path.join("lock"))?
-                .into_iter()
-                .find(|item| item.path() == path)
-            {
-                created.push(item);
-            }
+            resources.push(ResourceLockGuard::acquire(store, reference, timeout)?);
+            create_parents(reference.destination(), &mut created)?;
+            crate::resource_io::admit(store, reference)?;
         }
         Ok(Self {
-            index_root: index_root.to_path_buf(),
-            _index: index,
+            store,
+            index_key: index_key.to_owned(),
             resources,
+            _index: index,
             created,
         })
     }
 
-    pub(crate) fn resources(&self) -> &[ResourceLockGuard] {
+    pub(crate) fn resources(&self) -> &[ResourceLockGuard<'a>] {
         &self.resources
     }
 
     pub(crate) fn created(&self) -> &[Ancestor] {
         &self.created
     }
-}
 
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn publish_index_transition(
-    locks: &TransactionLocks,
-    index: &Index,
-    expected_revision: &Revision,
-    expected_ancestors: &[Ancestor],
-) -> Result<Revision, TargetError> {
-    let index_root = &locks.index_root;
-    require(index_root, expected_revision)?;
-    let path = index_root.join("index.json");
-    if ancestors(&path)? != expected_ancestors {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "installation index ancestor changed",
-            index_root,
-        ));
-    }
-    atomic(&path, index, Some(expected_ancestors))?;
-    observe(index_root)
-}
-
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn recover_locked_resources(
-    references: &[ResourceRef],
-    guards: &[ResourceLockGuard],
-) -> Result<(), TargetError> {
-    if references.len() != guards.len()
-        || references
-            .iter()
-            .any(|reference| !guards.iter().any(|guard| guard.reference() == reference))
-    {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "resource locks disagree",
-            references
-                .first()
-                .map_or_else(|| std::path::Path::new("/"), ResourceRef::state_root),
-        ));
-    }
-    for guard in guards {
-        recover(guard)?;
-    }
-    Ok(())
-}
-
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn reconcile_prepared_index(
-    locks: &TransactionLocks,
-    current: Option<&Index>,
-    prepared: &Index,
-    expected_revision: &Revision,
-    expected_ancestors: &[Ancestor],
-) -> Result<(), TargetError> {
-    let index_root = &locks.index_root;
-    let promote = prepared_index_promotes(current, prepared).map_err(|error| {
-        failure(
-            ErrorCode::RecoveryNeeded,
-            error.message(),
-            index_root.join("index.json.next"),
+    fn failure(&self, code: ErrorCode, message: &str) -> TargetError {
+        TargetError::new(
+            code,
+            message,
+            self.store.location().map(Path::to_path_buf),
+            None,
         )
-    })?;
-    require(index_root, expected_revision)?;
-    if ancestors(&index_root.join("index.json"))? != expected_ancestors {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "index ancestor changed",
-            index_root,
-        ));
-    }
-    let next = index_root.join("index.json.next");
-    if promote {
-        fs::rename(&next, index_root.join("index.json")).map_err(|error| io_failure(&error, &next))
-    } else {
-        fs::remove_file(&next).map_err(|error| io_failure(&error, &next))
     }
 }
 
@@ -265,19 +239,18 @@ impl TransactionOutcome {
 }
 
 #[allow(
-    dead_code,
     clippy::redundant_pub_crate,
     clippy::too_many_arguments,
     clippy::too_many_lines
 )]
 pub(crate) fn execute_transaction(
-    locks: &TransactionLocks,
+    locks: &TransactionLocks<'_>,
     plans: &[ResourcePlan],
+    previous: Option<&Index>,
     pending: &Index,
     completed: &Index,
-    index_revision: &Revision,
-    index_ancestors: &[Ancestor],
 ) -> Result<TransactionOutcome, TargetError> {
+    let store = locks.store;
     let expected_completion = Index::new(
         pending.bundle_id().to_owned(),
         pending.context_digest().to_owned(),
@@ -287,12 +260,11 @@ pub(crate) fn execute_transaction(
         Vec::new(),
         2,
     )
-    .map_err(|error| failure(ErrorCode::InvalidState, error.message(), &locks.index_root))?;
+    .map_err(|error| locks.failure(ErrorCode::InvalidState, error.message()))?;
     if completed != &expected_completion {
-        return Err(failure(
+        return Err(locks.failure(
             ErrorCode::InvalidState,
             "installation index completion disagrees with preparation",
-            &locks.index_root,
         ));
     }
     if plans.len() != locks.resources().len()
@@ -303,11 +275,7 @@ pub(crate) fn execute_transaction(
                 .any(|guard| guard.reference() == plan.resource())
         })
     {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "resource locks disagree",
-            &locks.index_root,
-        ));
+        return Err(locks.failure(ErrorCode::ConcurrentChange, "resource locks disagree"));
     }
     if let Some(error) = plans.iter().find_map(ResourcePlan::error) {
         return Ok(TransactionOutcome {
@@ -330,8 +298,7 @@ pub(crate) fn execute_transaction(
             )),
         });
     }
-    let pending_revision =
-        publish_index_transition(locks, pending, index_revision, index_ancestors)?;
+    write_record(store, &locks.index_key, pending, previous)?;
     let mut applied = Vec::new();
     let mut unchanged = Vec::new();
     for plan in plans {
@@ -345,15 +312,7 @@ pub(crate) fn execute_transaction(
         let result = (|| {
             inject("resource-precondition")?;
             inject("index-require")?;
-            require(&locks.index_root, &pending_revision)?;
-            inject("index-ancestor")?;
-            if ancestors(&locks.index_root.join("index.json"))? != index_ancestors {
-                return Err(failure(
-                    ErrorCode::ConcurrentChange,
-                    "installation index ancestor changed",
-                    &locks.index_root,
-                ));
-            }
+            require_index(store, &locks.index_key, Some(pending))?;
             inject("guard-lookup")?;
             let acquired = locks
                 .resources()
@@ -363,24 +322,24 @@ pub(crate) fn execute_transaction(
                     failure(
                         ErrorCode::ConcurrentChange,
                         "resource lock disagrees",
-                        plan.resource().state_root(),
+                        plan.resource().destination(),
                     )
                 })?;
             guard = Some(acquired);
-            let prepared = prepare(plan, acquired)?;
+            let prepared = prepare(store, plan, acquired)?;
             journal = Some(prepared.clone());
-            require(&locks.index_root, &pending_revision)?;
-            publish_with(&prepared, || committed.set(true))?;
-            cleanup(&prepared)
+            require_index(store, &locks.index_key, Some(pending))?;
+            publish_with(store, &prepared, || committed.set(true))?;
+            cleanup(store, &prepared)
         })();
         if let Err(error) = result {
             if !committed.get() {
                 committed.set(journal.as_ref().is_some_and(|journal| {
-                    current_receipt(journal)
+                    current_receipt(store, journal)
                         .is_ok_and(|current| current.as_ref() == Some(journal.receipt()))
                 }));
             }
-            let recovery_error = guard.and_then(|guard| recover(guard).err());
+            let recovery_error = guard.and_then(|guard| recover(store, guard).err());
             let final_error = if let Some(recovery) = recovery_error {
                 TargetError::new(
                     error.code(),
@@ -407,9 +366,9 @@ pub(crate) fn execute_transaction(
         }
         applied.push(plan.resource().clone());
     }
-    if let Err(error) = inject("index-completion").and_then(|()| {
-        publish_index_transition(locks, completed, &pending_revision, index_ancestors).map(drop)
-    }) {
+    if let Err(error) = inject("index-completion")
+        .and_then(|()| write_record(store, &locks.index_key, completed, Some(pending)))
+    {
         return Ok(TransactionOutcome {
             completed: applied,
             unchanged,
@@ -425,36 +384,125 @@ pub(crate) fn execute_transaction(
     })
 }
 
-fn paths(reference: &ResourceRef) -> (PathBuf, PathBuf, PathBuf) {
+fn paths(directory: &Path) -> (PathBuf, PathBuf) {
     (
-        reference.state_root().join("transaction.json"),
-        reference.state_root().join("staging/resource"),
-        reference.state_root().join("backup/resource"),
+        directory.join("staging").join("resource"),
+        directory.join("backup").join("resource"),
     )
 }
 
-fn layout(reference: &ResourceRef) -> Result<(), TargetError> {
-    validate_state(reference)?;
-    for name in ["staging", "backup"] {
-        let root = reference.state_root().join(name);
-        let revision = observe(&root)?;
-        if revision
-            .nodes()
-            .iter()
-            .skip(1)
-            .any(|node| node.path() != "resource" && !node.path().starts_with("resource/"))
-        {
-            return Err(failure(
-                ErrorCode::RecoveryNeeded,
-                "unknown transaction data",
-                &root,
-            ));
-        }
-    }
-    Ok(())
+fn journal_key(reference: &ResourceRef) -> String {
+    resource_key(reference.destination(), "journal")
 }
 
-fn path_exists(path: &std::path::Path) -> Result<bool, TargetError> {
+fn receipt_key(reference: &ResourceRef) -> String {
+    resource_key(reference.destination(), "receipt")
+}
+
+fn preparation_key(reference: &ResourceRef) -> String {
+    resource_key(reference.destination(), "preparation")
+}
+
+fn store_failure(store: &dyn StateStore, code: ErrorCode, message: &str) -> TargetError {
+    TargetError::new(code, message, store.location().map(Path::to_path_buf), None)
+}
+
+fn invalid(error: &ValueError, path: &Path) -> TargetError {
+    failure(ErrorCode::InvalidState, error.message(), path)
+}
+
+fn matching(
+    store: &dyn StateStore,
+    preparation: Option<Preparation>,
+    journal: &Journal,
+) -> Result<Preparation, TargetError> {
+    match preparation {
+        Some(preparation)
+            if preparation.resource() == journal.resource()
+                && preparation.transaction_id() == journal.receipt().transaction_id() =>
+        {
+            Ok(preparation)
+        }
+        _ => Err(store_failure(
+            store,
+            ErrorCode::InvalidState,
+            "transaction record has no matching preparation",
+        )),
+    }
+}
+
+fn known(store: &dyn StateStore, preparation: &Preparation) -> bool {
+    recognized_transaction_directory(
+        store,
+        preparation.resource().destination(),
+        preparation.transaction_id(),
+        preparation.directory(),
+    )
+}
+
+fn unrecognized_directory(store: &dyn StateStore) -> TargetError {
+    store_failure(
+        store,
+        ErrorCode::RecoveryNeeded,
+        "transaction record names an unrecognized directory",
+    )
+}
+
+fn recognized(
+    store: &dyn StateStore,
+    preparation: Option<Preparation>,
+) -> Result<Option<Preparation>, TargetError> {
+    if let Some(selected) = &preparation
+        && !known(store, selected)
+    {
+        return Err(unrecognized_directory(store));
+    }
+    Ok(preparation)
+}
+
+fn absent(directory: &Path) -> bool {
+    fs::symlink_metadata(directory).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+}
+
+fn read_preparation(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+) -> Result<Option<Preparation>, TargetError> {
+    read_record(store, &preparation_key(reference), "Preparation")
+}
+
+fn records(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+) -> Result<(Option<Preparation>, Option<Journal>), TargetError> {
+    let preparation = read_preparation(store, reference)?;
+    if let Some(selected) = &preparation
+        && !known(store, selected)
+        && !absent(selected.directory())
+    {
+        return Err(unrecognized_directory(store));
+    }
+    let journal: Option<Journal> = read_record(store, &journal_key(reference), "Journal")?;
+    if let Some(journal) = &journal {
+        matching(store, recognized(store, preparation.clone())?, journal)?;
+    }
+    Ok((preparation, journal))
+}
+
+fn preparation_for(store: &dyn StateStore, journal: &Journal) -> Result<Preparation, TargetError> {
+    let preparation = read_preparation(store, journal.resource())?;
+    matching(store, recognized(store, preparation)?, journal)
+}
+
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn transaction_directory(
+    store: &dyn StateStore,
+    journal: &Journal,
+) -> Result<PathBuf, TargetError> {
+    preparation_for(store, journal).map(|preparation| preparation.directory().to_path_buf())
+}
+
+fn path_exists(path: &Path) -> Result<bool, TargetError> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -462,62 +510,102 @@ fn path_exists(path: &std::path::Path) -> Result<bool, TargetError> {
     }
 }
 
-fn transaction_ancestors(reference: &ResourceRef) -> Result<Vec<Ancestor>, TargetError> {
-    let (_, staged, backup) = paths(reference);
-    let mut result = ancestors(&staged)?;
-    for ancestor in ancestors(&backup)? {
-        if !result.contains(&ancestor) {
-            result.push(ancestor);
-        }
-    }
+fn children(directory: &Path) -> Result<Vec<PathBuf>, TargetError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(io_failure(&error, directory)),
+    };
+    let mut result = entries
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|error| io_failure(&error, directory))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    result.sort();
     Ok(result)
 }
 
-fn authority_error(error: AuthorityError) -> TargetError {
-    match error {
-        AuthorityError::Invalid(error) => {
-            TargetError::new(ErrorCode::InvalidState, error.message(), None, None)
+fn layout(directory: &Path) -> Result<(), TargetError> {
+    managed_spelling(directory)?;
+    for child in children(directory)? {
+        let known = child
+            .file_name()
+            .is_some_and(|name| name == "staging" || name == "backup");
+        if !known {
+            return Err(failure(
+                ErrorCode::RecoveryNeeded,
+                "unknown transaction data",
+                &child,
+            ));
         }
-        AuthorityError::Unsafe { message, path } => {
-            TargetError::new(ErrorCode::UnsafePath, message, Some(path), None)
+        let metadata = fs::symlink_metadata(&child).map_err(|error| io_failure(&error, &child))?;
+        managed_metadata(&metadata, &child)?;
+        if !metadata.is_dir() {
+            return Err(failure(
+                ErrorCode::UnsafePath,
+                "expected a directory",
+                &child,
+            ));
         }
-        AuthorityError::Io {
-            message,
-            path,
-            errno,
-        } => TargetError::new(ErrorCode::IoError, message, path, errno),
+        if children(&child)?
+            .iter()
+            .any(|entry| entry.file_name().is_none_or(|name| name != "resource"))
+        {
+            return Err(failure(
+                ErrorCode::RecoveryNeeded,
+                "unknown transaction data",
+                &child,
+            ));
+        }
     }
+    Ok(())
 }
 
-fn validate_ancestors(journal: &Journal) -> Result<(), TargetError> {
-    if transaction_ancestors(journal.resource())? != journal.ancestors() {
+fn transaction_ancestors(
+    destination: &Path,
+    directory: &Path,
+) -> Result<Vec<Ancestor>, TargetError> {
+    let (staged, backup) = paths(directory);
+    resource_ancestors(destination, &[&staged, &backup])
+}
+
+fn validate_ancestors(
+    store: &dyn StateStore,
+    journal: &Journal,
+    directory: &Path,
+) -> Result<(), TargetError> {
+    let reference = journal.resource();
+    let current = transaction_ancestors(reference.destination(), directory)?;
+    let retained = journal
+        .ancestors()
+        .iter()
+        .filter(|item| current.contains(item) || !item.path().starts_with(directory))
+        .cloned()
+        .collect::<Vec<_>>();
+    if current != retained {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "resource ancestor changed",
-            journal.resource().destination(),
+            reference.destination(),
         ));
     }
-    let (_, staged, backup) = paths(journal.resource());
     for path in [
-        journal.resource().state_root(),
-        staged
-            .parent()
-            .unwrap_or_else(|| journal.resource().state_root()),
-        backup
-            .parent()
-            .unwrap_or_else(|| journal.resource().state_root()),
+        directory.to_path_buf(),
+        directory.join("staging"),
+        directory.join("backup"),
     ] {
-        ensure_private(path)?;
+        if path_exists(&path)? {
+            ensure_private(&path)?;
+        }
     }
-    let authority = journal
-        .resource()
-        .authority_checked()
-        .map_err(authority_error)?;
+    let authority = reference.authority_checked().map_err(error_detail)?;
     let conflicts = hierarchy_conflicts(
+        store,
         &authority,
-        journal.resource().kind() != crate::resource_models::ResourceKind::Document,
-    )
-    .map_err(authority_error)?;
+        reference.kind() != ResourceKind::Document,
+    )?;
     if let Some(conflict) = conflicts.first() {
         return Err(failure(
             ErrorCode::Conflict,
@@ -528,28 +616,99 @@ fn validate_ancestors(journal: &Journal) -> Result<(), TargetError> {
     Ok(())
 }
 
-fn current_receipt(journal: &Journal) -> Result<Option<Receipt>, TargetError> {
-    read(
-        &journal.resource().state_root().join("receipt.json"),
-        "Receipt",
-    )
+fn current_receipt(
+    store: &dyn StateStore,
+    journal: &Journal,
+) -> Result<Option<Receipt>, TargetError> {
+    read_record(store, &receipt_key(journal.resource()), "Receipt")
 }
 
-fn require_journal(journal: &Journal) -> Result<(), TargetError> {
-    if read::<Journal>(&paths(journal.resource()).0, "Journal")?.as_ref() != Some(journal) {
+fn require_journal(
+    store: &dyn StateStore,
+    journal: &Journal,
+    directory: &Path,
+) -> Result<(), TargetError> {
+    let recorded: Option<Journal> =
+        read_record(store, &journal_key(journal.resource()), "Journal")?;
+    if recorded.as_ref() != Some(journal) {
         return Err(failure(
             ErrorCode::RecoveryNeeded,
             "transaction record changed",
-            paths(journal.resource()).0,
+            directory,
         ));
     }
     Ok(())
+}
+
+fn remove_directories(directory: &Path, ignore_failures: bool) -> Result<(), TargetError> {
+    for path in [
+        directory.join("staging"),
+        directory.join("backup"),
+        directory.to_path_buf(),
+    ] {
+        match fs::remove_dir(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound || ignore_failures => {}
+            Err(error) => return Err(io_failure(&error, &path)),
+        }
+    }
+    Ok(())
+}
+
+fn release(store: &dyn StateStore, preparation: &Preparation) {
+    if matches!(store.read(&journal_key(preparation.resource())), Ok(None)) {
+        let _ = delete_record(store, &preparation_key(preparation.resource()), preparation);
+    }
+}
+
+fn discard(directory: &Path, revisions: &[Revision]) {
+    let staged = paths(directory).0;
+    let destroyed = observe(&staged).and_then(|current| {
+        if !current.nodes().is_empty() && revisions.contains(&current) {
+            destroy(&staged, &current)
+        } else {
+            Ok(())
+        }
+    });
+    if destroyed.is_ok() {
+        let _ = remove_directories(directory, true);
+    }
+}
+
+fn touch(directory: &Path) -> Result<(), TargetError> {
+    let now = rustix::fs::Timespec {
+        tv_sec: 0,
+        tv_nsec: rustix::fs::UTIME_NOW,
+    };
+    rustix::fs::utimensat(
+        rustix::fs::CWD,
+        directory,
+        &rustix::fs::Timestamps {
+            last_access: now,
+            last_modification: now,
+        },
+        rustix::fs::AtFlags::empty(),
+    )
+    .map_err(|errno| io_failure(&io::Error::from(errno), directory))
+}
+
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn pending_recovery(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+) -> Result<Vec<PathBuf>, TargetError> {
+    let (preparation, _) = records(store, reference)?;
+    Ok(preparation
+        .map(|preparation| preparation.directory().to_path_buf())
+        .into_iter()
+        .collect())
 }
 
 #[cfg(test)]
 thread_local! {
     static FAULT: std::cell::RefCell<Option<(&'static str, usize)>> =
         const { std::cell::RefCell::new(None) };
+    static CRASH: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(feature = "interop-test-seams")]
@@ -616,8 +775,21 @@ pub(crate) fn set_fault_after(boundary: &'static str, successful_calls: usize) {
     FAULT.with(|fault| *fault.borrow_mut() = Some((boundary, successful_calls)));
 }
 
+#[cfg(test)]
+#[allow(dead_code, clippy::redundant_pub_crate)]
+pub(crate) fn set_crash(boundary: Option<&'static str>) {
+    CRASH.with(|crash| crash.set(boundary));
+}
+
 #[cfg(any(test, feature = "interop-test-seams"))]
 fn inject(boundary: &'static str) -> Result<(), TargetError> {
+    #[cfg(test)]
+    crate::seam::fire(&crate::seam::Seam::Boundary(boundary));
+    #[cfg(test)]
+    if CRASH.with(|crash| crash.get() == Some(boundary)) {
+        CRASH.with(|crash| crash.set(None));
+        std::panic::resume_unwind(Box::new(format!("interrupted at {boundary}")));
+    }
     #[cfg(test)]
     if FAULT.with(|fault| {
         let mut fault = fault.borrow_mut();
@@ -699,126 +871,175 @@ const fn inject(_boundary: &'static str) -> Result<(), TargetError> {
     Ok(())
 }
 
-#[allow(dead_code, clippy::redundant_pub_crate, clippy::too_many_lines)]
+#[allow(clippy::redundant_pub_crate)]
 pub(crate) fn prepare(
+    store: &dyn StateStore,
     plan: &ResourcePlan,
-    guard: &ResourceLockGuard,
+    guard: &ResourceLockGuard<'_>,
 ) -> Result<Journal, TargetError> {
-    if guard.reference() != plan.resource() {
+    let reference = plan.resource();
+    let destination = reference.destination();
+    if guard.reference() != reference {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "resource lock disagrees",
-            plan.resource().state_root(),
+            destination,
         ));
     }
-    let reference = plan.resource();
-    if ancestors(&paths(reference).0)? != plan.ancestors() {
+    let directory = plan.transaction_directory();
+    if !recognized_transaction_directory(
+        store,
+        destination,
+        plan.receipt().transaction_id(),
+        directory,
+    ) {
+        return Err(TargetError::new(
+            ErrorCode::InvalidState,
+            "planned transaction directory is not recognized",
+            None,
+            None,
+        ));
+    }
+    if resource_ancestors(destination, &[&directory.join("staging")])? != plan.ancestors() {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "resource ancestor changed",
-            reference.destination(),
+            destination,
         ));
     }
-    require(reference.state_root(), plan.state_revision())?;
-    require(reference.destination(), plan.before())?;
+    require(destination, plan.before())?;
     if plan.require_existing() && plan.before().nodes().is_empty() {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "required existing resource disappeared",
-            reference.destination(),
+            destination,
         ));
     }
-    let receipt: Option<Receipt> = read(&reference.state_root().join("receipt.json"), "Receipt")?;
+    let receipt: Option<Receipt> = read_record(store, &receipt_key(reference), "Receipt")?;
     if receipt.as_ref() != plan.previous() {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "receipt changed during preparation",
-            reference.state_root(),
+            destination,
         ));
     }
-    ensure_private(reference.state_root())?;
-    let (_, staged_path, backup_path) = paths(reference);
-    let mut storage = Vec::new();
-    for (name, root) in [
-        ("staging", staged_path.parent()),
-        ("backup", backup_path.parent()),
-    ]
-    .into_iter()
-    .filter_map(|(name, root)| root.map(|root| (name, root)))
-    {
-        let expected = if let Some(node) = plan
-            .state_revision()
-            .nodes()
-            .iter()
-            .find(|node| node.path() == name)
-        {
-            Revision::new(vec![
-                crate::resource_models::Node::new(
-                    String::new(),
-                    node.data().map(<[u8]>::to_vec),
-                    node.mode().clone(),
-                    node.uid().clone(),
-                    node.gid().clone(),
-                    node.device().clone(),
-                    node.inode().clone(),
-                    node.security().to_vec(),
-                )
-                .map_err(|error| {
-                    failure(
-                        ErrorCode::InvalidState,
-                        error.message(),
-                        reference.state_root(),
-                    )
-                })?,
-            ])
-            .map_err(|error| {
-                failure(
-                    ErrorCode::InvalidState,
-                    error.message(),
-                    reference.state_root(),
-                )
-            })?
-        } else {
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .create(root)
-                .map_err(|error| io_failure(&error, root))?;
-            observe(root)?
-        };
-        require(root, &expected)?;
-        ensure_private(root)?;
-        storage.push((root.to_path_buf(), expected));
+    if let (Some(retained), _) = records(store, reference)? {
+        return Err(failure(
+            ErrorCode::RecoveryNeeded,
+            "transaction record retained",
+            retained.directory(),
+        ));
     }
-    let storage_ancestors = transaction_ancestors(reference)?;
+    let preparation = Preparation::new(
+        reference.clone(),
+        plan.receipt().transaction_id().to_owned(),
+        directory.to_path_buf(),
+    )
+    .map_err(|error| invalid(&error, destination))?;
+    write_record(store, &preparation_key(reference), &preparation, None)?;
+    inject("preparation")?;
+    match fs::DirBuilder::new().mode(0o700).create(directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            release(store, &preparation);
+            return Err(failure(
+                ErrorCode::RecoveryNeeded,
+                "unrecognized transaction data retained",
+                directory,
+            ));
+        }
+        Err(error) => {
+            release(store, &preparation);
+            return Err(io_failure(&error, directory));
+        }
+    }
+    let mut staged = Vec::new();
+    match stage(store, plan, directory, &mut staged) {
+        Ok(journal) => {
+            inject("prepare")?;
+            Ok(journal)
+        }
+        Err(error) => {
+            discard(directory, &staged);
+            if !path_exists(directory).unwrap_or(true) {
+                release(store, &preparation);
+            }
+            Err(error)
+        }
+    }
+}
+
+fn stage(
+    store: &dyn StateStore,
+    plan: &ResourcePlan,
+    directory: &Path,
+    staged: &mut Vec<Revision>,
+) -> Result<Journal, TargetError> {
+    let storage_ancestors = storage(plan, directory)?;
+    inject("directory")?;
+    if plan.after() != plan.before() {
+        let written = write_revision(&paths(directory).0, plan.after())?;
+        inject("staged")?;
+        staged.push(written);
+    }
+    let revision = staged
+        .first()
+        .cloned()
+        .unwrap_or_else(|| plan.before().clone());
+    let journal = journal_for(store, plan, directory, storage_ancestors, revision)?;
+    *staged = vec![journal.staged().clone(), journal.published().clone()];
+    touch(directory)?;
+    inject("journal")?;
+    write_record(store, &journal_key(plan.resource()), &journal, None)?;
+    Ok(journal)
+}
+
+fn storage(plan: &ResourcePlan, directory: &Path) -> Result<Vec<Ancestor>, TargetError> {
+    let destination = plan.resource().destination();
+    ensure_private(directory)?;
+    let created = [
+        directory.to_path_buf(),
+        directory.join("staging"),
+        directory.join("backup"),
+    ];
+    let mut storage = Vec::new();
+    for path in created.iter().skip(1) {
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(path)
+            .map_err(|error| io_failure(&error, path))?;
+        let expected = observe(path)?;
+        ensure_private(path)?;
+        storage.push((path, expected));
+    }
+    let storage_ancestors = transaction_ancestors(destination, directory)?;
     for (path, expected) in &storage {
         require(path, expected)?;
     }
-    let filtered = storage_ancestors
+    let retained = storage_ancestors
         .iter()
-        .filter(|item| {
-            item.path()
-                != staged_path
-                    .parent()
-                    .unwrap_or_else(|| reference.state_root())
-                && item.path()
-                    != backup_path
-                        .parent()
-                        .unwrap_or_else(|| reference.state_root())
-        })
+        .filter(|item| !created.iter().any(|path| path == item.path()))
         .cloned()
         .collect::<Vec<_>>();
-    if filtered != plan.ancestors() {
+    if retained != plan.ancestors() {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "resource ancestor changed",
-            reference.destination(),
+            destination,
         ));
     }
-    let staged = if plan.after() == plan.before() {
-        plan.before().clone()
-    } else {
-        write_revision(&staged_path, plan.after())?
-    };
+    Ok(storage_ancestors)
+}
+
+fn journal_for(
+    store: &dyn StateStore,
+    plan: &ResourcePlan,
+    directory: &Path,
+    storage_ancestors: Vec<Ancestor>,
+    staged: Revision,
+) -> Result<Journal, TargetError> {
+    let reference = plan.resource();
+    let destination = reference.destination();
     let receipt = plan
         .receipt()
         .with_created_directories(
@@ -834,13 +1055,7 @@ pub(crate) fn prepare(
                 })
                 .collect(),
         )
-        .map_err(|error| {
-            failure(
-                ErrorCode::InvalidState,
-                error.message(),
-                reference.state_root(),
-            )
-        })?;
+        .map_err(|error| invalid(&error, destination))?;
     let journal = Journal::new(
         reference.clone(),
         plan.previous().cloned(),
@@ -852,32 +1067,32 @@ pub(crate) fn prepare(
         storage_ancestors,
         2,
     )
-    .map_err(|error| {
-        failure(
-            ErrorCode::InvalidState,
-            error.message(),
-            reference.state_root(),
-        )
-    })?;
-    validate_ancestors(&journal)?;
-    require(reference.destination(), plan.before())?;
-    atomic(&paths(reference).0, &journal, None)?;
-    inject("prepare")?;
+    .map_err(|error| invalid(&error, destination))?;
+    validate_ancestors(store, &journal, directory)?;
+    require(destination, plan.before())?;
     Ok(journal)
 }
 
 #[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn publish_receipt(journal: &Journal) -> Result<(), TargetError> {
-    publish_receipt_with(journal, || {})
+pub(crate) fn publish_receipt(
+    store: &dyn StateStore,
+    journal: &Journal,
+) -> Result<(), TargetError> {
+    publish_receipt_with(store, journal, || {})
 }
 
-fn publish_receipt_with(journal: &Journal, committed: impl FnOnce()) -> Result<(), TargetError> {
-    require_journal(journal)?;
-    layout(journal.resource())?;
-    validate_ancestors(journal)?;
-    let (_, staged, backup) = paths(journal.resource());
-    let empty = Revision::new(Vec::new())
-        .map_err(|error| failure(ErrorCode::InvalidState, error.message(), &staged))?;
+fn publish_receipt_with(
+    store: &dyn StateStore,
+    journal: &Journal,
+    committed: impl FnOnce(),
+) -> Result<(), TargetError> {
+    inject("publish-receipt")?;
+    let directory = transaction_directory(store, journal)?;
+    require_journal(store, journal, &directory)?;
+    layout(&directory)?;
+    validate_ancestors(store, journal, &directory)?;
+    let (staged, backup) = paths(&directory);
+    let empty = Revision::empty();
     require(&staged, &empty)?;
     require(journal.resource().destination(), journal.published())?;
     require(
@@ -888,55 +1103,47 @@ fn publish_receipt_with(journal: &Journal, committed: impl FnOnce()) -> Result<(
             journal.backup()
         },
     )?;
-    for name in [
-        "authority.json.next",
-        "transaction.json.next",
-        "receipt.json.next",
-    ] {
-        let path = journal.resource().state_root().join(name);
-        if path_exists(&path)? {
-            return Err(failure(
-                ErrorCode::RecoveryNeeded,
-                "unexpected metadata preparation before commit",
-                path,
-            ));
-        }
-    }
-    if current_receipt(journal)?.as_ref() != journal.previous() {
+    if current_receipt(store, journal)?.as_ref() != journal.previous() {
         return Err(failure(
             ErrorCode::ConcurrentChange,
             "receipt changed before commit",
-            journal.resource().state_root(),
+            journal.resource().destination(),
         ));
     }
     inject("receipt")?;
-    atomic_with_publication(
-        &journal.resource().state_root().join("receipt.json"),
+    write_record(
+        store,
+        &receipt_key(journal.resource()),
         journal.receipt(),
-        None,
-        || {
-            committed();
-            inject("receipt-reread")
-        },
+        journal.previous(),
     )?;
+    committed();
+    inject("receipt-reread")?;
     inject("receipt-committed")
 }
 
 #[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn publish(journal: &Journal) -> Result<(), TargetError> {
-    publish_with(journal, || {})
+pub(crate) fn publish(store: &dyn StateStore, journal: &Journal) -> Result<(), TargetError> {
+    publish_with(store, journal, || {})
 }
 
-fn publish_with(journal: &Journal, committed: impl FnOnce()) -> Result<(), TargetError> {
+fn publish_with(
+    store: &dyn StateStore,
+    journal: &Journal,
+    committed: impl FnOnce(),
+) -> Result<(), TargetError> {
     let reference = journal.resource();
-    let (_, staged, backup) = paths(reference);
-    require_journal(journal)?;
-    validate_ancestors(journal)?;
-    require(reference.destination(), journal.before())?;
+    let destination = reference.destination();
+    let directory = transaction_directory(store, journal)?;
+    let (staged, backup) = paths(&directory);
+    require_journal(store, journal, &directory)?;
+    validate_ancestors(store, journal, &directory)?;
+    require(destination, journal.before())?;
     if journal.before() != journal.staged() {
         require(&staged, journal.staged())?;
         if !journal.before().nodes().is_empty() {
-            move_revision(reference.destination(), &backup, journal.backup())?;
+            inject("backup-move")?;
+            move_revision(destination, &backup, journal.backup())?;
             inject("backup")?;
             inject("rename")?;
             require(&backup, journal.backup())?;
@@ -944,20 +1151,24 @@ fn publish_with(journal: &Journal, committed: impl FnOnce()) -> Result<(), Targe
         if !journal.staged().nodes().is_empty() {
             inject("staging")?;
             inject("rename")?;
-            move_revision(&staged, reference.destination(), journal.staged())?;
+            move_revision(&staged, destination, journal.staged())?;
         }
-        require(reference.destination(), journal.published())?;
+        require(destination, journal.published())?;
     }
     inject("publish")?;
-    publish_receipt_with(journal, committed)
+    validate_ancestors(store, journal, &directory)?;
+    require(destination, journal.published())?;
+    publish_receipt_with(store, journal, committed)
 }
 
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn cleanup(journal: &Journal) -> Result<(), TargetError> {
-    require_journal(journal)?;
-    layout(journal.resource())?;
-    validate_ancestors(journal)?;
-    let (_, staged, backup) = paths(journal.resource());
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn cleanup(store: &dyn StateStore, journal: &Journal) -> Result<(), TargetError> {
+    let preparation = preparation_for(store, journal)?;
+    let directory = preparation.directory();
+    require_journal(store, journal, directory)?;
+    layout(directory)?;
+    validate_ancestors(store, journal, directory)?;
+    let (staged, backup) = paths(directory);
     for (path, expected) in [
         (&staged, [journal.staged(), journal.published()]),
         (&backup, [journal.backup(), journal.before()]),
@@ -977,54 +1188,41 @@ pub(crate) fn cleanup(journal: &Journal) -> Result<(), TargetError> {
             destroy(path, &current)?;
         }
     }
-    let next = journal.resource().state_root().join("receipt.json.next");
-    if path_exists(&next)? {
-        if read::<Receipt>(&next, "Receipt")?.as_ref() != Some(journal.receipt()) {
-            return Err(failure(
-                ErrorCode::RecoveryNeeded,
-                "staged receipt changed",
-                &next,
-            ));
-        }
-        fs::remove_file(&next).map_err(|error| io_failure(&error, &next))?;
-    }
+    remove_directories(directory, false)?;
     inject("cleanup")?;
-    require_journal(journal)?;
-    let path = paths(journal.resource()).0;
-    fs::remove_file(&path).map_err(|error| io_failure(&error, &path))
+    delete_record(store, &journal_key(journal.resource()), journal)?;
+    delete_record(store, &preparation_key(journal.resource()), &preparation)
 }
 
-fn preparation_time(reference: &ResourceRef) -> Result<SystemTime, TargetError> {
-    let path = paths(reference).0;
-    let metadata = fs::symlink_metadata(&path).map_err(|error| io_failure(&error, &path))?;
-    metadata
-        .modified()
-        .map_err(|error| io_failure(&error, &path))
+fn preparation_time(directory: &Path) -> Result<SystemTime, TargetError> {
+    fs::symlink_metadata(directory)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|error| io_failure(&error, directory))
 }
 
 #[allow(clippy::redundant_pub_crate)]
-pub(crate) fn rollback(journal: &Journal) -> Result<(), TargetError> {
+pub(crate) fn rollback(store: &dyn StateStore, journal: &Journal) -> Result<(), TargetError> {
     let reference = journal.resource();
-    let (_, staged_path, backup_path) = paths(reference);
-    layout(reference)?;
-    validate_ancestors(journal)?;
-    let actual = observe(reference.destination())?;
+    let destination = reference.destination();
+    let directory = transaction_directory(store, journal)?;
+    let (staged_path, backup_path) = paths(&directory);
+    layout(&directory)?;
+    validate_ancestors(store, journal, &directory)?;
+    let actual = observe(destination)?;
     let staged = observe(&staged_path)?;
     let backup = observe(&backup_path)?;
+    // Only cleanup, after this check passed, removes the directory or moves its time.
     if !actual.nodes().is_empty()
         && (actual == *journal.before()
             || actual == *journal.staged()
             || actual == *journal.published())
+        && path_exists(&directory)?
     {
-        require_unchanged_since(
-            reference.destination(),
-            &actual,
-            preparation_time(reference)?,
-        )?;
+        require_unchanged_since(destination, &actual, preparation_time(&directory)?)?;
     }
     if actual == *journal.before() && backup.nodes().is_empty() {
         inject("rollback")?;
-        return cleanup(journal);
+        return cleanup(store, journal);
     }
     if !staged.nodes().is_empty() && staged != *journal.staged() && staged != *journal.published() {
         return Err(failure(
@@ -1041,7 +1239,7 @@ pub(crate) fn rollback(journal: &Journal) -> Result<(), TargetError> {
         ));
     }
     if journal.before() == journal.staged() {
-        require(reference.destination(), journal.before())?;
+        require(destination, journal.before())?;
     } else if !backup.nodes().is_empty() {
         if !actual.nodes().is_empty() {
             if (actual != *journal.published() && actual != *journal.staged())
@@ -1050,77 +1248,110 @@ pub(crate) fn rollback(journal: &Journal) -> Result<(), TargetError> {
                 return Err(failure(
                     ErrorCode::RecoveryNeeded,
                     "unrecognized published revision",
-                    reference.destination(),
+                    destination,
                 ));
             }
-            move_revision(reference.destination(), &staged_path, &actual)?;
+            move_revision(destination, &staged_path, &actual)?;
         }
-        move_revision(&backup_path, reference.destination(), &backup)?;
-        require(reference.destination(), journal.before())?;
+        move_revision(&backup_path, destination, &backup)?;
+        require(destination, journal.before())?;
     } else if actual == *journal.before() {
     } else if journal.before().nodes().is_empty()
         && actual == *journal.published()
         && staged.nodes().is_empty()
     {
-        move_revision(reference.destination(), &staged_path, &actual)?;
+        move_revision(destination, &staged_path, &actual)?;
     } else {
         return Err(failure(
             ErrorCode::RecoveryNeeded,
             "cannot restore complete previous revision",
-            reference.destination(),
+            destination,
         ));
     }
     inject("rollback")?;
-    cleanup(journal)
+    cleanup(store, journal)
 }
 
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn recover(guard: &ResourceLockGuard) -> Result<(), TargetError> {
-    let reference = guard.reference();
-    let pending = validate_state(reference)?;
-    if pending.is_empty() {
-        return Ok(());
+fn abandon(store: &dyn StateStore, preparation: &Preparation) -> Result<(), TargetError> {
+    let directory = preparation.directory();
+    let (staged, backup) = paths(directory);
+    if path_exists(directory)? {
+        if !known(store, preparation) {
+            return Err(unrecognized_directory(store));
+        }
+        let unrecognized = || {
+            failure(
+                ErrorCode::RecoveryNeeded,
+                "unrecognized transaction data retained",
+                directory,
+            )
+        };
+        let checked = (|| {
+            layout(directory)?;
+            for path in [
+                directory.to_path_buf(),
+                directory.join("staging"),
+                directory.join("backup"),
+            ] {
+                if path_exists(&path)? {
+                    ensure_private(&path)?;
+                }
+            }
+            Ok::<_, TargetError>((observe(&backup)?, observe(&staged)?))
+        })();
+        let (retained, current) = match checked {
+            Ok(value) => value,
+            Err(error) if error.errno().is_none_or(|errno| errno == libc::ENOTSUP) => {
+                return Err(unrecognized());
+            }
+            Err(error) => return Err(error),
+        };
+        if !retained.nodes().is_empty() {
+            return Err(unrecognized());
+        }
+        destroy(&staged, &current)?;
+        remove_directories(directory, false)?;
     }
-    let journal_path = paths(reference).0;
-    let Some(first_pending) = pending.first() else {
+    delete_record(store, &preparation_key(preparation.resource()), preparation)
+}
+
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn recover(
+    store: &dyn StateStore,
+    guard: &ResourceLockGuard<'_>,
+) -> Result<(), TargetError> {
+    let reference = guard.reference();
+    let (preparation, journal) = records(store, reference)?;
+    let Some(preparation) = preparation else {
         return Ok(());
     };
-    let mut journal: Option<Journal> = read(&journal_path, "Journal")?;
-    if journal.is_none() {
-        let next = reference.state_root().join("transaction.json.next");
-        let candidate: Option<Journal> = read(&next, "Journal")?;
-        if candidate
-            .as_ref()
-            .is_some_and(|value| value.resource() == reference)
-        {
-            fs::rename(&next, &journal_path).map_err(|error| io_failure(&error, &next))?;
-            journal = candidate;
-        }
+    if preparation.resource() != reference {
+        return Err(failure(
+            ErrorCode::RecoveryNeeded,
+            "transaction record disagrees",
+            preparation.directory(),
+        ));
     }
     let Some(journal) = journal else {
-        return Err(failure(
-            ErrorCode::RecoveryNeeded,
-            "unrecognized preparation data retained",
-            first_pending,
-        ));
+        return abandon(store, &preparation);
     };
-    if journal.resource() != reference {
+    if journal.previous() == Some(journal.receipt()) {
         return Err(failure(
             ErrorCode::RecoveryNeeded,
-            "unrecognized preparation data retained",
-            first_pending,
+            "transaction record repeats the previous receipt",
+            preparation.directory(),
         ));
     }
-    let current = current_receipt(&journal)?;
+    let current = current_receipt(store, &journal)?;
     if current.as_ref() == Some(journal.receipt()) {
-        cleanup(&journal)
+        cleanup(store, &journal)
     } else if current.as_ref() == journal.previous() {
-        rollback(&journal)
+        rollback(store, &journal)
     } else {
         Err(failure(
             ErrorCode::RecoveryNeeded,
             "receipt disagrees with transaction",
-            reference.state_root(),
+            reference.destination(),
         ))
     }
 }
@@ -1216,19 +1447,23 @@ mod tests {
     use super::*;
     use crate::authority::ResourceAuthority;
     use crate::editors::DocumentProvenance;
-    use crate::resource_io::{admit, reserve};
-    use crate::resource_models::{Count, Generation, Node, ResourceKind};
+    use crate::resource_io::admit;
+    use crate::resource_models::{Count, Node, ResourceKind};
+    use crate::stores::MemoryStore;
     use crate::test_support::checkout_temp_dir;
     use std::io::Write as _;
     use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
     use std::path::Path;
+
+    fn index_key() -> String {
+        crate::state::index_key("team", &"a".repeat(64))
+    }
 
     fn reference(destination: &Path) -> ResourceRef {
         let authority = ResourceAuthority::new(destination).expect("authority");
         ResourceRef::new(
             authority.destination().to_path_buf(),
             ResourceKind::Document,
-            authority.state_root().to_path_buf(),
         )
         .expect("reference")
     }
@@ -1238,9 +1473,32 @@ mod tests {
         ResourceRef::new(
             authority.destination().to_path_buf(),
             ResourceKind::SkillContainer,
-            authority.state_root().to_path_buf(),
         )
         .expect("reference")
+    }
+
+    fn journal_record(store: &dyn StateStore, reference: &ResourceRef) -> Option<Vec<u8>> {
+        store.read(&journal_key(reference)).expect("journal read")
+    }
+
+    fn stored_receipt(store: &dyn StateStore, reference: &ResourceRef) -> Option<Receipt> {
+        read_record(store, &receipt_key(reference), "Receipt").expect("receipt read")
+    }
+
+    fn put_receipt(store: &dyn StateStore, reference: &ResourceRef, receipt: &Receipt) {
+        write_record(store, &receipt_key(reference), receipt, None).expect("receipt record");
+    }
+
+    fn transaction_entries(reference: &ResourceRef) -> Vec<PathBuf> {
+        let parent = reference.destination().parent().expect("parent");
+        fs::read_dir(parent)
+            .expect("listing")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| crate::authority::management_name(&name.to_string_lossy()))
+            })
+            .collect()
     }
 
     fn revision(data: &[u8]) -> Revision {
@@ -1304,21 +1562,29 @@ mod tests {
     }
 
     fn plan(
+        store: &dyn StateStore,
         reference: &ResourceRef,
         before: Revision,
         after: Revision,
         previous: Option<Receipt>,
         next: Receipt,
     ) -> ResourcePlan {
+        let directory = crate::state::choose_transaction_directory(
+            store,
+            reference.destination(),
+            next.transaction_id(),
+        )
+        .expect("transaction directory");
         ResourcePlan::new(
             reference.clone(),
             before,
             after,
             previous,
             next,
-            ancestors(&paths(reference).0).expect("ancestors"),
-            observe(reference.state_root()).expect("state revision"),
-            validate_state(reference).expect("recovery"),
+            resource_ancestors(reference.destination(), &[&directory.join("staging")])
+                .expect("ancestors"),
+            directory,
+            pending_recovery(store, reference).expect("recovery"),
             false,
             None,
         )
@@ -1329,35 +1595,33 @@ mod tests {
     fn prepare_publish_and_cleanup_commit_a_resource_and_receipt() {
         let tmp = checkout_temp_dir("transaction-commit");
         let reference = reference(&tmp.join("AGENTS.md"));
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let before = observe(reference.destination()).expect("before");
         let next = receipt(&reference, '1');
         let plan = plan(
+            &store,
             &reference,
             before,
             revision(b"generated\n"),
             None,
             next.clone(),
         );
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&plan, &guard).expect("prepare");
-        assert!(paths(&reference).0.is_file());
-        publish(&journal).expect("publish");
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &plan, &guard).expect("prepare");
+        assert!(journal_record(&store, &reference).is_some());
+        publish(&store, &journal).expect("publish");
         assert_eq!(
             fs::read(reference.destination()).expect("resource"),
             b"generated\n"
         );
+        assert_eq!(stored_receipt(&store, &reference), Some(next));
+        cleanup(&store, &journal).expect("cleanup");
         assert_eq!(
-            read::<Receipt>(&reference.state_root().join("receipt.json"), "Receipt")
-                .expect("read receipt"),
-            Some(next)
-        );
-        cleanup(&journal).expect("cleanup");
-        assert_eq!(
-            validate_state(&reference).expect("state"),
+            pending_recovery(&store, &reference).expect("state"),
             [] as [PathBuf; 0]
         );
+        assert_eq!(transaction_entries(&reference), [] as [PathBuf; 0]);
     }
 
     #[test]
@@ -1366,28 +1630,36 @@ mod tests {
         let destination = tmp.join("AGENTS.md");
         fs::write(&destination, b"before\n").expect("foreign");
         let reference = reference(&destination);
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let before = observe(&destination).expect("before");
         let next = receipt(&reference, '2');
-        let plan = plan(&reference, before.clone(), revision(b"after\n"), None, next);
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&plan, &guard).expect("prepare");
-        let staged_path = paths(&reference).1;
+        let plan = plan(
+            &store,
+            &reference,
+            before.clone(),
+            revision(b"after\n"),
+            None,
+            next,
+        );
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &plan, &guard).expect("prepare");
+        let staged_path = paths(plan.transaction_directory()).0;
         let staged = observe(&staged_path).expect("staged");
         assert!(cleanup_revision(&staged, journal.staged()));
-        recover(&guard).expect("recover");
+        recover(&store, &guard).expect("recover");
         assert_eq!(observe(&destination).expect("restored"), before);
         assert_eq!(
-            validate_state(&reference).expect("state"),
+            pending_recovery(&store, &reference).expect("state"),
             [] as [PathBuf; 0]
         );
+        assert_eq!(transaction_entries(&reference), [] as [PathBuf; 0]);
     }
 
-    fn journal_modification_time(reference: &ResourceRef) -> SystemTime {
-        fs::symlink_metadata(paths(reference).0)
+    fn boundary(directory: &Path) -> SystemTime {
+        fs::symlink_metadata(directory)
             .and_then(|metadata| metadata.modified())
-            .expect("journal modification time")
+            .expect("transaction directory modification time")
     }
 
     fn revise_modification_time(path: &Path, later: SystemTime) {
@@ -1405,30 +1677,41 @@ mod tests {
         let destination = tmp.join("AGENTS.md");
         exclusive_write(&destination, b"before\n", 0o600);
         let reference = reference(&destination);
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let old = receipt(&reference, '0');
-        atomic(&reference.state_root().join("receipt.json"), &old, None).expect("old receipt");
+        put_receipt(&store, &reference, &old);
         let before = observe(&destination).expect("before");
         let plan = plan(
+            &store,
             &reference,
             before,
             revision(b"after\n"),
             Some(old.clone()),
             receipt(&reference, '1'),
         );
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&plan, &guard).expect("prepare");
-        move_revision(&destination, &paths(&reference).2, journal.backup()).expect("backup move");
-        move_revision(&paths(&reference).1, &destination, journal.staged()).expect("publish move");
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &plan, &guard).expect("prepare");
+        move_revision(
+            &destination,
+            &paths(plan.transaction_directory()).1,
+            journal.backup(),
+        )
+        .expect("backup move");
+        move_revision(
+            &paths(plan.transaction_directory()).0,
+            &destination,
+            journal.staged(),
+        )
+        .expect("publish move");
         // Recycled inodes need the post-preparation identity check.
         revise_modification_time(
             &destination,
-            journal_modification_time(&reference)
+            boundary(plan.transaction_directory())
                 .checked_add(Duration::from_secs(60))
                 .expect("replacement time"),
         );
-        let error = recover(&guard).expect_err("recovery refuses the replacement");
+        let error = recover(&store, &guard).expect_err("recovery refuses the replacement");
         assert_eq!(error.code(), ErrorCode::RecoveryNeeded);
         assert_eq!(
             error.message(),
@@ -1437,14 +1720,18 @@ mod tests {
         assert_eq!(error.path(), Some(destination.as_path()));
         assert_eq!(fs::read(&destination).expect("destination"), b"after\n");
         assert_eq!(
-            read::<Receipt>(&reference.state_root().join("receipt.json"), "Receipt")
-                .expect("receipt read")
-                .expect("receipt present"),
+            stored_receipt(&store, &reference).expect("receipt present"),
             old,
             "the previous receipt is retained"
         );
-        assert!(paths(&reference).0.exists(), "journal is retained");
-        assert!(paths(&reference).2.exists(), "backup is retained");
+        assert!(
+            journal_record(&store, &reference).is_some(),
+            "journal is retained"
+        );
+        assert!(
+            paths(plan.transaction_directory()).1.exists(),
+            "backup is retained"
+        );
     }
 
     #[test]
@@ -1453,50 +1740,60 @@ mod tests {
         let destination = tmp.join("AGENTS.md");
         exclusive_write(&destination, b"before\n", 0o600);
         let reference = reference(&destination);
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let old = receipt(&reference, '0');
-        atomic(&reference.state_root().join("receipt.json"), &old, None).expect("old receipt");
+        put_receipt(&store, &reference, &old);
         let before = observe(&destination).expect("before");
         let plan = plan(
+            &store,
             &reference,
             before,
             revision(b"after\n"),
             Some(old),
             receipt(&reference, '1'),
         );
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        prepare(&plan, &guard).expect("prepare");
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        prepare(&store, &plan, &guard).expect("prepare");
         revise_modification_time(
             &destination,
-            journal_modification_time(&reference)
+            boundary(plan.transaction_directory())
                 .checked_add(Duration::from_secs(60))
                 .expect("replacement time"),
         );
-        let error = recover(&guard).expect_err("recovery refuses the replacement");
+        let error = recover(&store, &guard).expect_err("recovery refuses the replacement");
         assert_eq!(error.code(), ErrorCode::RecoveryNeeded);
         assert_eq!(
             error.message(),
             "destination revision changed after preparation"
         );
         assert_eq!(fs::read(&destination).expect("destination"), b"before\n");
-        assert!(paths(&reference).0.exists(), "journal is retained");
-        assert!(paths(&reference).1.exists(), "staging is retained");
+        assert!(
+            journal_record(&store, &reference).is_some(),
+            "journal is retained"
+        );
+        assert!(
+            paths(plan.transaction_directory()).0.exists(),
+            "staging is retained"
+        );
     }
 
     #[test]
-    fn resource_locks_are_acquired_in_state_root_order() {
+    fn resource_locks_are_acquired_in_destination_order() {
         let tmp = checkout_temp_dir("transaction-lock-order");
+        let store = MemoryStore::new();
         let first = reference(&tmp.join("z"));
         let second = reference(&tmp.join("a"));
-        let guards = lock_resources(&[first, second], Duration::ZERO).expect("locks");
-        let roots: Vec<_> = guards
-            .iter()
-            .map(|guard| guard.reference().state_root())
-            .collect();
-        let mut sorted = roots.clone();
-        sorted.sort();
-        assert_eq!(roots, sorted);
+        let guards = lock_resources(&store, &[first.clone(), second.clone()], Duration::ZERO)
+            .expect("locks");
+        let order: Vec<_> = guards.iter().map(ResourceLockGuard::reference).collect();
+        assert_eq!(order, [&second, &first]);
+        assert_eq!(
+            ResourceLockGuard::acquire(&store, &first, Duration::ZERO)
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::Busy)
+        );
     }
 
     #[test]
@@ -1565,10 +1862,10 @@ mod tests {
             };
             exclusive_write(&destination, &initial, 0o600);
             let reference = reference(&destination);
-            reserve(&reference).expect("reserve");
-            admit(&reference).expect("admit");
+            let store = MemoryStore::new();
+            admit(&store, &reference).expect("admit");
             let old = receipt(&reference, '0');
-            atomic(&reference.state_root().join("receipt.json"), &old, None).expect("old receipt");
+            put_receipt(&store, &reference, &old);
             let before = observe(&destination).expect("before");
             let next = receipt(&reference, '1');
             let after = if name == "ownership-only-adoption" {
@@ -1577,29 +1874,43 @@ mod tests {
                 revision(&generated)
             };
             let plan = plan(
+                &store,
                 &reference,
                 before.clone(),
                 after,
                 Some(old.clone()),
                 next.clone(),
             );
-            let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-            let journal = prepare(&plan, &guard).expect("prepare");
+            let guard =
+                ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+            let journal = prepare(&store, &plan, &guard).expect("prepare");
 
             match name {
                 "prepared" | "ownership-only-adoption" => {}
                 "backup-moved" => {
-                    move_revision(&destination, &paths(&reference).2, journal.backup())
-                        .expect("backup move");
+                    move_revision(
+                        &destination,
+                        &paths(plan.transaction_directory()).1,
+                        journal.backup(),
+                    )
+                    .expect("backup move");
                 }
                 "published-before-receipt"
                 | "foreign-edit-before-commit"
                 | "permissions-changed-before-commit"
                 | "identity-changed-before-commit" => {
-                    move_revision(&destination, &paths(&reference).2, journal.backup())
-                        .expect("backup move");
-                    move_revision(&paths(&reference).1, &destination, journal.staged())
-                        .expect("publish move");
+                    move_revision(
+                        &destination,
+                        &paths(plan.transaction_directory()).1,
+                        journal.backup(),
+                    )
+                    .expect("backup move");
+                    move_revision(
+                        &paths(plan.transaction_directory()).0,
+                        &destination,
+                        journal.staged(),
+                    )
+                    .expect("publish move");
                     match name {
                         "foreign-edit-before-commit" => {
                             fs::write(
@@ -1638,7 +1949,7 @@ mod tests {
                     }
                 }
                 "receipt-committed" | "committed-foreign-edit" => {
-                    publish(&journal).expect("publish and commit");
+                    publish(&store, &journal).expect("publish and commit");
                     if name == "committed-foreign-edit" {
                         fs::write(
                             &destination,
@@ -1654,10 +1965,10 @@ mod tests {
             let expected = case.get("expected").expect("expected transaction");
             let expected_failure =
                 expected.get("status").and_then(crate::json::Json::as_str) == Some("INCOMPLETE");
-            let recovered = recover(&guard);
+            let recovered = recover(&store, &guard);
             assert_eq!(recovered.is_err(), expected_failure, "{name}");
             assert_eq!(
-                paths(&reference).0.exists(),
+                journal_record(&store, &reference).is_some(),
                 expected
                     .get("retain_journal")
                     .and_then(crate::json::Json::as_bool)
@@ -1665,7 +1976,7 @@ mod tests {
                 "{name} journal retention"
             );
             assert_eq!(
-                paths(&reference).2.exists(),
+                paths(plan.transaction_directory()).1.exists(),
                 expected
                     .get("retain_backup")
                     .and_then(crate::json::Json::as_bool)
@@ -1679,9 +1990,7 @@ mod tests {
                 expected_data,
                 "{name} destination"
             );
-            let retained: Receipt = read(&reference.state_root().join("receipt.json"), "Receipt")
-                .expect("receipt read")
-                .expect("receipt present");
+            let retained = stored_receipt(&store, &reference).expect("receipt present");
             assert_eq!(
                 retained,
                 if expected.get("receipt").and_then(crate::json::Json::as_str) == Some("new") {
@@ -1711,43 +2020,46 @@ mod tests {
             let destination = tmp.join("AGENTS.md");
             exclusive_write(&destination, b"before\n", 0o600);
             let reference = reference(&destination);
-            reserve(&reference).expect("reserve");
-            admit(&reference).expect("admit");
+            let store = MemoryStore::new();
+            admit(&store, &reference).expect("admit");
             let old = receipt(&reference, '0');
-            atomic(&reference.state_root().join("receipt.json"), &old, None).expect("old receipt");
+            put_receipt(&store, &reference, &old);
             let before = observe(&destination).expect("before");
             let plan = plan(
+                &store,
                 &reference,
                 before,
                 revision(b"after\n"),
                 Some(old.clone()),
                 receipt(&reference, '1'),
             );
-            let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
+            let guard =
+                ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
 
             let journal = if seam == "prepare" {
                 set_fault(Some(seam));
-                assert!(prepare(&plan, &guard).is_err());
+                assert!(prepare(&store, &plan, &guard).is_err());
                 None
             } else {
-                Some(prepare(&plan, &guard).expect("prepare"))
+                Some(prepare(&store, &plan, &guard).expect("prepare"))
             };
             if let Some(journal) = &journal {
                 set_fault(Some(seam));
                 if seam == "rollback" {
-                    assert!(recover(&guard).is_err());
+                    assert!(recover(&store, &guard).is_err());
                 } else {
-                    let result = publish(journal).and_then(|()| cleanup(journal));
+                    let result = publish(&store, journal).and_then(|()| cleanup(&store, journal));
                     assert!(result.is_err());
                 }
             }
             set_fault(None);
-            recover(&guard).expect("recover after seam");
-            recover(&guard).expect("idempotent recovery");
+            recover(&store, &guard).expect("recover after seam");
+            recover(&store, &guard).expect("idempotent recovery");
             assert_eq!(
-                validate_state(&reference).expect("state"),
+                pending_recovery(&store, &reference).expect("state"),
                 [] as [PathBuf; 0]
             );
+            assert_eq!(transaction_entries(&reference), [] as [PathBuf; 0]);
             let committed = matches!(seam, "receipt-reread" | "cleanup");
             assert_eq!(
                 fs::read(&destination).expect("destination"),
@@ -1765,8 +2077,8 @@ mod tests {
     fn journal_binds_created_directories_to_staged_physical_nodes() {
         let tmp = checkout_temp_dir("transaction-created-directories");
         let reference = container_reference(&tmp.join("skills"));
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let before = Revision::empty();
         let after = Revision::new(vec![
             Node::new(
@@ -1814,9 +2126,9 @@ mod tests {
             2,
         )
         .expect("receipt");
-        let plan = plan(&reference, before, after, None, next);
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&plan, &guard).expect("prepare");
+        let plan = plan(&store, &reference, before, after, None, next);
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &plan, &guard).expect("prepare");
         let physical = journal
             .staged()
             .nodes()
@@ -1831,61 +2143,14 @@ mod tests {
     }
 
     #[test]
-    fn index_preparation_is_reconciled_only_while_index_lock_is_held() {
-        let tmp = checkout_temp_dir("transaction-index");
-        let index_root = tmp.join("index");
-        let reference = reference(&tmp.join("AGENTS.md"));
-        let locks = TransactionLocks::acquire(
-            &index_root,
-            std::slice::from_ref(&reference),
-            Duration::ZERO,
-        )
-        .expect("locks");
-        let generation = Generation::new(
-            "1".to_owned(),
-            "b".repeat(64),
-            "c".repeat(64),
-            vec![(reference.clone(), Vec::new())],
-        )
-        .expect("generation");
-        let prepared = crate::resource_plan::pending_index(
-            "team",
-            &"a".repeat(64),
-            None,
-            Some(generation),
-            vec![reference],
-        )
-        .expect("prepared index");
-        let next = index_root.join("index.json.next");
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&next)
-            .expect("prepared file");
-        file.write_all(&crate::codec::encode(&prepared))
-            .expect("prepared bytes");
-        drop(file);
-        let revision = observe(&index_root).expect("index revision");
-        let parents = ancestors(&index_root.join("index.json")).expect("index ancestors");
-        reconcile_prepared_index(&locks, None, &prepared, &revision, &parents)
-            .expect("promote preparation");
-        assert_eq!(
-            read::<Index>(&index_root.join("index.json"), "Index").expect("read index"),
-            Some(prepared)
-        );
-        assert!(!next.exists());
-    }
-
-    #[test]
     fn transaction_orchestrator_publishes_index_before_resources_and_completes_last() {
         let tmp = checkout_temp_dir("transaction-orchestrator");
-        let index_root = tmp.join("index");
+        let store = MemoryStore::new();
         let reference = reference(&tmp.join("AGENTS.md"));
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        admit(&store, &reference).expect("admit");
         let before = observe(reference.destination()).expect("before");
         let plan = plan(
+            &store,
             &reference,
             before,
             revision(b"generated\n"),
@@ -1893,13 +2158,12 @@ mod tests {
             receipt(&reference, '4'),
         );
         let locks = TransactionLocks::acquire(
-            &index_root,
+            &store,
+            &index_key(),
             std::slice::from_ref(&reference),
             Duration::ZERO,
         )
         .expect("locks");
-        let initial = observe(&index_root).expect("index revision");
-        let parents = ancestors(&index_root.join("index.json")).expect("index ancestors");
         let pending = crate::resource_plan::pending_index(
             "team",
             &"a".repeat(64),
@@ -1911,13 +2175,12 @@ mod tests {
         let completed = crate::resource_plan::completed_index("team", &"a".repeat(64), None)
             .expect("completed");
         let outcome =
-            execute_transaction(&locks, &[plan], &pending, &completed, &initial, &parents)
-                .expect("transaction");
+            execute_transaction(&locks, &[plan], None, &pending, &completed).expect("transaction");
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
         assert_eq!(outcome.unchanged(), [] as [ResourceRef; 0]);
         assert!(outcome.error().is_none());
         assert_eq!(
-            read::<Index>(&index_root.join("index.json"), "Index").expect("index"),
+            crate::state::read_record::<Index>(&store, &index_key(), "Index").expect("index"),
             Some(completed)
         );
         assert_eq!(
@@ -1929,11 +2192,11 @@ mod tests {
     #[test]
     fn index_completion_failure_retains_applied_resource_outcomes() {
         let tmp = checkout_temp_dir("transaction-index-completion-failure");
-        let index_root = tmp.join("index");
+        let store = MemoryStore::new();
         let reference = reference(&tmp.join("AGENTS.md"));
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        admit(&store, &reference).expect("admit");
         let plan = plan(
+            &store,
             &reference,
             observe(reference.destination()).expect("before"),
             revision(b"generated\n"),
@@ -1941,13 +2204,12 @@ mod tests {
             receipt(&reference, '5'),
         );
         let locks = TransactionLocks::acquire(
-            &index_root,
+            &store,
+            &index_key(),
             std::slice::from_ref(&reference),
             Duration::ZERO,
         )
         .expect("locks");
-        let initial = observe(&index_root).expect("index revision");
-        let parents = ancestors(&index_root.join("index.json")).expect("index ancestors");
         let pending = crate::resource_plan::pending_index(
             "team",
             &"a".repeat(64),
@@ -1959,14 +2221,13 @@ mod tests {
         let completed = crate::resource_plan::completed_index("team", &"a".repeat(64), None)
             .expect("completed");
         set_fault(Some("index-completion"));
-        let outcome =
-            execute_transaction(&locks, &[plan], &pending, &completed, &initial, &parents)
-                .expect("partial transaction outcome");
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed)
+            .expect("partial transaction outcome");
         set_fault(None);
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
         assert!(outcome.error().is_some());
         assert_eq!(
-            read::<Index>(&index_root.join("index.json"), "Index").expect("index"),
+            crate::state::read_record::<Index>(&store, &index_key(), "Index").expect("index"),
             Some(pending)
         );
         assert_eq!(
@@ -1978,12 +2239,12 @@ mod tests {
     #[test]
     fn cleanup_failure_preserves_the_permanently_committed_resource() {
         let tmp = checkout_temp_dir("transaction-cleanup-commit");
-        let index_root = tmp.join("index");
+        let store = MemoryStore::new();
         let reference = reference(&tmp.join("AGENTS.md"));
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        admit(&store, &reference).expect("admit");
         let next = receipt(&reference, '6');
         let plan = plan(
+            &store,
             &reference,
             observe(reference.destination()).expect("before"),
             revision(b"generated\n"),
@@ -1991,13 +2252,12 @@ mod tests {
             next.clone(),
         );
         let locks = TransactionLocks::acquire(
-            &index_root,
+            &store,
+            &index_key(),
             std::slice::from_ref(&reference),
             Duration::ZERO,
         )
         .expect("locks");
-        let initial = observe(&index_root).expect("index revision");
-        let parents = ancestors(&index_root.join("index.json")).expect("index ancestors");
         let pending = crate::resource_plan::pending_index(
             "team",
             &"a".repeat(64),
@@ -2010,35 +2270,30 @@ mod tests {
             .expect("completed");
 
         set_fault(Some("cleanup"));
-        let outcome =
-            execute_transaction(&locks, &[plan], &pending, &completed, &initial, &parents)
-                .expect("transaction outcome");
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed)
+            .expect("transaction outcome");
         set_fault(None);
 
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
         assert_eq!(outcome.failed(), Some(&reference));
         assert!(outcome.error().is_some());
-        assert_eq!(
-            read::<Receipt>(&reference.state_root().join("receipt.json"), "Receipt")
-                .expect("receipt"),
-            Some(next)
-        );
+        assert_eq!(stored_receipt(&store, &reference), Some(next));
         assert_eq!(
             fs::read(reference.destination()).expect("resource"),
             b"generated\n"
         );
-        recover(&locks.resources()[0]).expect("recover cleanup");
+        recover(&store, &locks.resources()[0]).expect("recover cleanup");
     }
 
     #[test]
     fn receipt_reread_failure_preserves_the_permanently_committed_resource() {
         let tmp = checkout_temp_dir("transaction-receipt-reread-commit");
-        let index_root = tmp.join("index");
+        let store = MemoryStore::new();
         let reference = reference(&tmp.join("AGENTS.md"));
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        admit(&store, &reference).expect("admit");
         let next = receipt(&reference, '9');
         let plan = plan(
+            &store,
             &reference,
             observe(reference.destination()).expect("before"),
             revision(b"generated\n"),
@@ -2046,13 +2301,12 @@ mod tests {
             next.clone(),
         );
         let locks = TransactionLocks::acquire(
-            &index_root,
+            &store,
+            &index_key(),
             std::slice::from_ref(&reference),
             Duration::ZERO,
         )
         .expect("locks");
-        let initial = observe(&index_root).expect("index revision");
-        let parents = ancestors(&index_root.join("index.json")).expect("index ancestors");
         let pending = crate::resource_plan::pending_index(
             "team",
             &"a".repeat(64),
@@ -2065,44 +2319,34 @@ mod tests {
             .expect("completed");
 
         set_fault(Some("receipt-reread"));
-        let outcome =
-            execute_transaction(&locks, &[plan], &pending, &completed, &initial, &parents)
-                .expect("transaction outcome");
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed)
+            .expect("transaction outcome");
         set_fault(None);
 
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
         assert_eq!(outcome.failed(), Some(&reference));
         assert!(outcome.error().is_some());
-        assert_eq!(
-            read::<Receipt>(&reference.state_root().join("receipt.json"), "Receipt")
-                .expect("receipt"),
-            Some(next)
-        );
+        assert_eq!(stored_receipt(&store, &reference), Some(next));
         assert_eq!(
             fs::read(reference.destination()).expect("resource"),
             b"generated\n"
         );
-        recover(&locks.resources()[0]).expect("recover cleanup");
+        recover(&store, &locks.resources()[0]).expect("recover cleanup");
     }
 
     #[test]
     fn later_precondition_failure_retains_earlier_commit() {
-        for seam in [
-            "resource-precondition",
-            "index-require",
-            "index-ancestor",
-            "guard-lookup",
-        ] {
+        for seam in ["resource-precondition", "index-require", "guard-lookup"] {
             let tmp = checkout_temp_dir(&format!("transaction-later-{seam}"));
-            let index_root = tmp.join("index");
+            let store = MemoryStore::new();
             let first = reference(&tmp.join("first"));
             let second = reference(&tmp.join("second"));
             for reference in [&first, &second] {
-                reserve(reference).expect("reserve");
-                admit(reference).expect("admit");
+                admit(&store, reference).expect("admit");
             }
             let plans = vec![
                 plan(
+                    &store,
                     &first,
                     observe(first.destination()).expect("first before"),
                     revision(b"one\n"),
@@ -2110,6 +2354,7 @@ mod tests {
                     receipt(&first, '7'),
                 ),
                 plan(
+                    &store,
                     &second,
                     observe(second.destination()).expect("second before"),
                     revision(b"two\n"),
@@ -2118,13 +2363,12 @@ mod tests {
                 ),
             ];
             let locks = TransactionLocks::acquire(
-                &index_root,
+                &store,
+                &index_key(),
                 &[first.clone(), second.clone()],
                 Duration::ZERO,
             )
             .expect("locks");
-            let initial = observe(&index_root).expect("index revision");
-            let parents = ancestors(&index_root.join("index.json")).expect("index ancestors");
             let pending = crate::resource_plan::pending_index(
                 "team",
                 &"a".repeat(64),
@@ -2137,9 +2381,8 @@ mod tests {
                 .expect("completed");
 
             set_fault_after(seam, 1);
-            let outcome =
-                execute_transaction(&locks, &plans, &pending, &completed, &initial, &parents)
-                    .expect("transaction outcome");
+            let outcome = execute_transaction(&locks, &plans, None, &pending, &completed)
+                .expect("transaction outcome");
             set_fault(None);
 
             assert_eq!(outcome.completed(), std::slice::from_ref(&first), "{seam}");

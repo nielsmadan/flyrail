@@ -1,35 +1,22 @@
 #![allow(clippy::redundant_pub_crate)]
 
-use crate::authority::{AuthorityError, hierarchy_conflicts, os_error_move_text};
-use crate::codec::{StateCodec, decode_metadata, encode};
-use crate::filesystem::{open_lock_file, rename_exclusive};
-use crate::observation::{
-    failure, io_code, io_failure, io_failure_at, managed_metadata, managed_spelling,
-};
+use crate::authority::AuthorityError;
+use crate::filesystem::rename_exclusive;
+use crate::observation::{failure, io_code, io_failure, io_failure_at, managed_metadata};
 use crate::observations::{ErrorCode, TargetError};
 use crate::resource_models::{Ancestor, Count, Node, ResourceKind, ResourceRef, Revision};
-use crate::security::{ensure_private, security};
+use crate::seam::{self, Seam};
+use crate::security::security;
+use crate::state::{hierarchy_conflicts, read_record, resource_key, write_record};
+use crate::stores::StateStore;
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read as _, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-const STATE_ENTRIES: [&str; 9] = [
-    "lock",
-    "authority.json",
-    "receipt.json",
-    "transaction.json",
-    "staging",
-    "backup",
-    "authority.json.next",
-    "receipt.json.next",
-    "transaction.json.next",
-];
-
-fn error_detail(error: AuthorityError) -> TargetError {
+pub(crate) fn error_detail(error: AuthorityError) -> TargetError {
     match error {
         AuthorityError::Invalid(value) => {
             TargetError::new(ErrorCode::InvalidState, value.message(), None, None)
@@ -43,204 +30,6 @@ fn error_detail(error: AuthorityError) -> TargetError {
             errno,
         } => TargetError::new(io_code(errno), message, path, errno),
     }
-}
-
-fn io_move_failure(error: &io::Error, from: &Path, to: &Path) -> TargetError {
-    let errno = error.raw_os_error();
-    TargetError::new(
-        io_code(errno),
-        os_error_move_text(error, from, to),
-        Some(from.to_path_buf()),
-        errno,
-    )
-}
-
-#[allow(clippy::case_sensitive_file_extension_comparisons)]
-pub fn validate_state(reference: &ResourceRef) -> Result<Vec<PathBuf>, TargetError> {
-    let state_root = reference.state_root();
-    managed_spelling(state_root)?;
-    let snapshot = observe(state_root)?;
-    if snapshot.nodes().is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut recovery: Vec<PathBuf> = Vec::new();
-    for node in snapshot
-        .nodes()
-        .iter()
-        .skip(1)
-        .filter(|node| !node.path().contains('/'))
-    {
-        let name = node.path();
-        let child = state_root.join(name);
-        if !STATE_ENTRIES.contains(&name) {
-            return Err(failure(
-                ErrorCode::InvalidState,
-                "unknown resource state entry",
-                &child,
-            ));
-        }
-        if name == "staging" || name == "backup" {
-            if node.data().is_some() {
-                return Err(failure(
-                    ErrorCode::UnsafePath,
-                    "expected a directory",
-                    &child,
-                ));
-            }
-            let prefix = format!("{name}/");
-            if snapshot
-                .nodes()
-                .iter()
-                .any(|candidate| candidate.path().starts_with(&prefix))
-            {
-                recovery.push(child.clone());
-            }
-        } else if node.data().is_none() {
-            return Err(failure(
-                ErrorCode::InvalidState,
-                "metadata must be a regular file",
-                &child,
-            ));
-        }
-        if name == "transaction.json" || name.ends_with(".next") {
-            recovery.push(child);
-        }
-    }
-    require(state_root, &snapshot)?;
-    let header = state_root.join("authority.json");
-    if let Some(recorded) = read_reference(&header)?
-        && &recorded != reference
-    {
-        return Err(failure(
-            ErrorCode::InvalidState,
-            "authority identity disagrees",
-            state_root,
-        ));
-    }
-    require(state_root, &snapshot)?;
-    Ok(recovery)
-}
-
-fn read_reference(path: &Path) -> Result<Option<ResourceRef>, TargetError> {
-    read(path, "ResourceRef")
-}
-
-fn atomic_header(header: &Path, reference: &ResourceRef) -> Result<(), TargetError> {
-    atomic(header, reference, None)
-}
-
-pub(crate) fn read<T: StateCodec>(path: &Path, tag: &str) -> Result<Option<T>, TargetError> {
-    let parents = ancestors(path)?;
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            managed_metadata(&metadata, path)?;
-            Some(metadata)
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(io_failure(&error, path)),
-    };
-    let Some(metadata) = metadata else {
-        if ancestors(path)? != parents {
-            return Err(failure(
-                ErrorCode::ConcurrentChange,
-                "resource ancestor changed",
-                path,
-            ));
-        }
-        return Ok(None);
-    };
-    if !metadata.is_file() {
-        return Err(failure(
-            ErrorCode::InvalidState,
-            "expected a regular file",
-            path,
-        ));
-    }
-    let bytes = read_file(path, &metadata)?;
-    let value = decode_metadata(&bytes, tag)
-        .map_err(|error| failure(ErrorCode::InvalidState, error.message(), path))?;
-    if ancestors(path)? != parents {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "resource ancestor changed",
-            path,
-        ));
-    }
-    Ok(Some(value))
-}
-
-pub(crate) fn atomic<T: StateCodec>(
-    path: &Path,
-    value: &T,
-    expected_ancestors: Option<&[Ancestor]>,
-) -> Result<(), TargetError> {
-    atomic_with_publication(path, value, expected_ancestors, || Ok(()))
-}
-
-pub(crate) fn atomic_with_publication<T: StateCodec>(
-    path: &Path,
-    value: &T,
-    expected_ancestors: Option<&[Ancestor]>,
-    published: impl FnOnce() -> Result<(), TargetError>,
-) -> Result<(), TargetError> {
-    let before = observe(path)?;
-    let parents = ancestors(path)?;
-    if expected_ancestors.is_some_and(|expected| expected != parents) {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "metadata ancestor changed",
-            path,
-        ));
-    }
-    let mut staged = path
-        .file_name()
-        .map_or_else(OsString::new, std::ffi::OsStr::to_os_string);
-    staged.push(".next");
-    let temporary = path.with_file_name(staged);
-    match fs::symlink_metadata(&temporary) {
-        Ok(_) => {
-            return Err(failure(
-                ErrorCode::RecoveryNeeded,
-                "unrecognized metadata preparation",
-                &temporary,
-            ));
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(io_failure(&error, &temporary)),
-    }
-    let payload = encode(value);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|error| io_failure(&error, &temporary))?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .map_err(|error| io_failure(&error, &temporary))?;
-    ensure_private(&temporary)?;
-    file.write_all(&payload)
-        .map_err(|error| io_failure_at(&error, None))?;
-    drop(file);
-    let snapshot = observe(&temporary)?;
-    if snapshot.data() != Some(payload.as_slice()) {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "metadata staging changed",
-            &temporary,
-        ));
-    }
-    require(path, &before)?;
-    if ancestors(path)? != parents {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "metadata ancestor changed",
-            path,
-        ));
-    }
-    require(&temporary, &snapshot)?;
-    fs::rename(&temporary, path).map_err(|error| io_move_failure(&error, &temporary, path))?;
-    published()?;
-    require(path, &snapshot)?;
-    Ok(())
 }
 
 fn metadata_count(value: u64) -> Count {
@@ -290,6 +79,21 @@ pub(crate) fn ancestors(path: &Path) -> Result<Vec<Ancestor>, TargetError> {
         }
     }
     Ok(first.into_iter().flatten().collect())
+}
+
+pub(crate) fn resource_ancestors(
+    destination: &Path,
+    paths: &[&Path],
+) -> Result<Vec<Ancestor>, TargetError> {
+    let mut result: Vec<Ancestor> = Vec::new();
+    for path in std::iter::once(destination).chain(paths.iter().copied()) {
+        for item in ancestors(path)? {
+            if !result.contains(&item) {
+                result.push(item);
+            }
+        }
+    }
+    Ok(result)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -651,8 +455,8 @@ pub(crate) fn require_unchanged_since(
         let modified = metadata
             .modified()
             .map_err(|error| io_failure(&error, &selected))?;
-        let created = metadata.created().ok();
-        if modified > boundary || created.is_some_and(|created| created > boundary) {
+        let born = metadata.created().ok();
+        if changed_after(boundary, modified, born, cfg!(target_os = "macos")) {
             return Err(failure(
                 ErrorCode::RecoveryNeeded,
                 "destination revision changed after preparation",
@@ -661,6 +465,15 @@ pub(crate) fn require_unchanged_since(
         }
     }
     Ok(())
+}
+
+fn changed_after(
+    boundary: SystemTime,
+    modified: SystemTime,
+    born: Option<SystemTime>,
+    birth_time: bool,
+) -> bool {
+    modified > boundary || (birth_time && born.is_some_and(|born| born > boundary))
 }
 
 #[allow(dead_code)]
@@ -685,13 +498,23 @@ pub(crate) fn write_revision(path: &Path, revision: &Revision) -> Result<Revisio
             file.write_all(node.data().unwrap_or_default())
                 .map_err(|error| io_failure_at(&error, None))?;
         }
-        let Some(mode) = node.mode().as_u32() else {
+        let (Some(mode), Some(uid), Some(gid)) = (
+            node.mode().as_u32(),
+            node.uid().as_u32(),
+            node.gid().as_u32(),
+        ) else {
             return Err(failure(
                 ErrorCode::InvalidState,
                 "invalid revision metadata",
                 &destination,
             ));
         };
+        let metadata =
+            fs::metadata(&destination).map_err(|error| io_failure(&error, &destination))?;
+        if (metadata.uid(), metadata.gid()) != (uid, gid) {
+            std::os::unix::fs::chown(&destination, Some(uid), Some(gid))
+                .map_err(|error| io_failure(&error, &destination))?;
+        }
         fs::set_permissions(&destination, fs::Permissions::from_mode(mode))
             .map_err(|error| io_failure(&error, &destination))?;
     }
@@ -763,6 +586,7 @@ pub(crate) fn destroy(path: &Path, revision: &Revision) -> Result<(), TargetErro
         if node.data().is_none() {
             fs::remove_dir(&selected).map_err(|error| io_failure(&error, &selected))?;
         } else {
+            seam::fire(&Seam::Unlink(&selected));
             fs::remove_file(&selected).map_err(|error| io_failure(&error, &selected))?;
         }
     }
@@ -799,56 +623,27 @@ pub(crate) fn validate_kind(reference: &ResourceRef) -> Result<(), TargetError> 
     Ok(())
 }
 
-pub fn reserve(reference: &ResourceRef) -> Result<(), TargetError> {
-    let state_root = reference.state_root();
-    managed_spelling(state_root)?;
-    let lock_path = state_root.join("lock");
-    match fs::symlink_metadata(&lock_path) {
-        Ok(metadata) => managed_metadata(&metadata, &lock_path)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(io_failure(&error, &lock_path)),
-    }
-    let mut missing: Vec<PathBuf> = Vec::new();
-    let mut parent = state_root.to_path_buf();
-    while !parent.exists() {
-        let Some(next) = parent.parent().map(Path::to_path_buf) else {
-            break;
-        };
-        missing.push(parent.clone());
-        parent = next;
-    }
-    for path in missing.iter().rev() {
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(path)
-            .map_err(|error| io_failure(&error, path))?;
-        ensure_private(path)?;
-    }
-    ensure_private(state_root)?;
-    open_lock_file(&lock_path)?;
-    Ok(())
-}
-
-pub fn admit(reference: &ResourceRef) -> Result<(), TargetError> {
+pub fn admit(store: &dyn StateStore, reference: &ResourceRef) -> Result<(), TargetError> {
     let authority = reference.authority_checked().map_err(error_detail)?;
-    validate_state(reference)?;
-    let header = reference.state_root().join("authority.json");
-    if read_reference(&header)?.is_none() {
-        let prepared = reference.state_root().join("authority.json.next");
-        if read_reference(&prepared)? == Some(reference.clone()) {
-            fs::rename(&prepared, &header)
-                .map_err(|error| io_move_failure(&error, &prepared, &header))?;
-        } else {
-            atomic_header(&header, reference)?;
+    let key = resource_key(reference.destination(), "authority");
+    match read_record::<ResourceRef>(store, &key, "ResourceRef")? {
+        None => write_record(store, &key, reference, None)?,
+        Some(current) if &current != reference => {
+            return Err(failure(
+                ErrorCode::InvalidState,
+                "authority identity disagrees",
+                reference.destination(),
+            ));
         }
+        Some(_) => {}
     }
     validate_kind(reference)?;
     let whole_tree = reference.kind() != ResourceKind::Document;
-    let conflicts = hierarchy_conflicts(&authority, whole_tree).map_err(error_detail)?;
+    let conflicts = hierarchy_conflicts(store, &authority, whole_tree)?;
     if let Some(conflict) = conflicts.first() {
         return Err(failure(
             ErrorCode::Conflict,
-            "ancestor or descendant resource fence conflicts",
+            "ancestor or descendant resource conflicts",
             conflict,
         ));
     }
@@ -865,188 +660,68 @@ pub fn admit(reference: &ResourceRef) -> Result<(), TargetError> {
 mod tests {
     use super::*;
     use crate::authority::ResourceAuthority;
-    use crate::codec::decode;
+    use crate::codec::{decode, encode};
+    use crate::stores::MemoryStore;
     use crate::test_support::{case_sensitive, checkout_temp_dir};
 
-    fn document_reference(destination: &Path) -> ResourceRef {
+    fn reference(destination: &Path, kind: ResourceKind) -> ResourceRef {
         let authority = ResourceAuthority::new(destination).expect("authority");
-        ResourceRef::new(
-            authority.destination().to_path_buf(),
-            ResourceKind::Document,
-            authority.state_root().to_path_buf(),
-        )
-        .expect("resource")
+        ResourceRef::new(authority.destination().to_path_buf(), kind).expect("resource")
+    }
+
+    fn document_reference(destination: &Path) -> ResourceRef {
+        reference(destination, ResourceKind::Document)
     }
 
     fn tree_reference(destination: &Path) -> ResourceRef {
-        let authority = ResourceAuthority::new(destination).expect("authority");
-        ResourceRef::new(
-            authority.destination().to_path_buf(),
-            ResourceKind::Tree,
-            authority.state_root().to_path_buf(),
-        )
-        .expect("resource")
+        reference(destination, ResourceKind::Tree)
     }
 
-    fn prepare(destination: &Path) -> ResourceRef {
-        let reference = document_reference(destination);
-        reserve(&reference).expect("reserve");
-        reference
-    }
-
-    fn header_bytes(reference: &ResourceRef) -> Vec<u8> {
-        fs::read(reference.state_root().join("authority.json")).expect("authority.json")
-    }
-
-    fn mode_of(path: &Path) -> u32 {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::symlink_metadata(path)
-            .expect("metadata")
-            .permissions()
-            .mode()
+    fn authority_key(reference: &ResourceRef) -> String {
+        resource_key(reference.destination(), "authority")
     }
 
     #[test]
-    fn admission_writes_and_replays_the_resource_header() {
+    fn admission_writes_and_replays_the_authority_record() {
         let tmp = checkout_temp_dir("admission-header");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        admit(&reference).expect("admit");
-        let header = decode::<ResourceRef>(&header_bytes(&reference)).expect("header");
-        assert_eq!(header, reference);
-        admit(&reference).expect("re-admit");
+        let store = MemoryStore::new();
+        let reference = document_reference(&tmp.join("AGENTS.md"));
+        admit(&store, &reference).expect("admit");
+        let recorded = store.read(&authority_key(&reference)).unwrap().unwrap();
+        assert_eq!(decode::<ResourceRef>(&recorded).expect("record"), reference);
+        admit(&store, &reference).expect("re-admit");
         assert_eq!(
-            decode::<ResourceRef>(&header_bytes(&reference)).expect("header"),
-            reference
+            store.read(&authority_key(&reference)).unwrap(),
+            Some(recorded)
         );
-        assert!(reference.state_root().join("lock").is_file());
-        assert_eq!(mode_of(reference.state_root()) & 0o777, 0o700);
-        assert_eq!(
-            mode_of(&reference.state_root().join("authority.json")) & 0o777,
-            0o600
-        );
-    }
-
-    #[test]
-    fn admission_adopts_a_matching_prepared_header() {
-        let tmp = checkout_temp_dir("adoption");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        let prepared = reference.state_root().join("authority.json.next");
-        let staged = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&prepared)
-            .expect("prepared header");
-        staged
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .expect("prepared permissions");
-        drop(staged);
-        fs::write(&prepared, encode(&reference)).expect("prepared payload");
-        admit(&reference).expect("admit");
-        assert!(!prepared.exists());
-        assert_eq!(
-            decode::<ResourceRef>(&header_bytes(&reference)).expect("header"),
-            reference
-        );
-    }
-
-    #[test]
-    fn admission_refuses_unrecognized_metadata_preparation() {
-        let tmp = checkout_temp_dir("unrecognized-preparation");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        let prepared = reference.state_root().join("authority.json.next");
-        let staged = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&prepared)
-            .expect("prepared header");
-        staged
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .expect("prepared permissions");
-        drop(staged);
-        fs::write(
-            &prepared,
-            encode(&document_reference(&tmp.join("OTHER.md"))),
-        )
-        .expect("prepared payload");
-        let error = admit(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::RecoveryNeeded);
-        assert_eq!(error.message(), "unrecognized metadata preparation");
-        assert_eq!(error.path(), Some(prepared.as_path()));
-    }
-
-    #[test]
-    fn admission_refuses_unknown_state_entries() {
-        let tmp = checkout_temp_dir("unknown-entry");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        fs::write(reference.state_root().join("rogue.json"), b"{}").expect("rogue entry");
-        let error = admit(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::InvalidState);
-        assert_eq!(error.message(), "unknown resource state entry");
-        assert_eq!(
-            error.path(),
-            Some(reference.state_root().join("rogue.json")).as_deref()
-        );
+        assert_eq!(fs::read_dir(&*tmp).expect("listing").count(), 0);
     }
 
     #[test]
     fn admission_refuses_disagreeing_authority_identity() {
         let tmp = checkout_temp_dir("identity");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        let header = reference.state_root().join("authority.json");
-        let staged = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&header)
-            .expect("header");
-        staged
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .expect("header permissions");
-        drop(staged);
-        fs::write(&header, encode(&document_reference(&tmp.join("OTHER.md"))))
-            .expect("header payload");
-        let error = admit(&reference).unwrap_err();
+        let store = MemoryStore::new();
+        let reference = document_reference(&tmp.join("AGENTS.md"));
+        let other = tree_reference(&tmp.join("AGENTS.md"));
+        assert!(
+            store
+                .write(&authority_key(&reference), &encode(&other), None)
+                .unwrap()
+        );
+        let error = admit(&store, &reference).unwrap_err();
         assert_eq!(error.code(), ErrorCode::InvalidState);
         assert_eq!(error.message(), "authority identity disagrees");
-        assert_eq!(error.path(), Some(reference.state_root()));
-    }
-
-    #[test]
-    fn admission_refuses_irregular_metadata() {
-        let tmp = checkout_temp_dir("irregular-metadata");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        fs::create_dir(reference.state_root().join("receipt.json")).expect("metadata dir");
-        let error = admit(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::InvalidState);
-        assert_eq!(error.message(), "metadata must be a regular file");
-        assert_eq!(
-            error.path(),
-            Some(reference.state_root().join("receipt.json")).as_deref()
-        );
-    }
-
-    #[test]
-    fn admission_refuses_managed_symlinked_header() {
-        let tmp = checkout_temp_dir("symlinked-header");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        let header = reference.state_root().join("authority.json");
-        fs::write(tmp.join("outside.json"), encode(&reference)).expect("outside payload");
-        std::os::unix::fs::symlink(tmp.join("outside.json"), &header).expect("symlink");
-        let error = admit(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::UnsafePath);
-        assert_eq!(
-            error.message(),
-            "managed symlinks, reparse points and special files are unsupported"
-        );
+        assert_eq!(error.path(), Some(reference.destination()));
     }
 
     #[test]
     fn admission_refuses_kind_disagreement() {
         let tmp = checkout_temp_dir("kind");
+        let store = MemoryStore::new();
         let document = tmp.join("AGENTS.md");
         fs::write(&document, b"document").expect("document");
-        prepare(&document);
         let tree = tree_reference(&document);
-        let error = admit(&tree).unwrap_err();
+        let error = admit(&store, &tree).unwrap_err();
         assert_eq!(error.code(), ErrorCode::UnsafePath);
         assert_eq!(
             error.message(),
@@ -1055,8 +730,8 @@ mod tests {
         assert_eq!(error.path(), Some(document.as_path()));
         let directory = tmp.join("tree");
         fs::create_dir(&directory).expect("tree dir");
-        let as_document = prepare(&directory);
-        let error = admit(&as_document).unwrap_err();
+        let as_document = document_reference(&directory);
+        let error = admit(&store, &as_document).unwrap_err();
         assert_eq!(error.code(), ErrorCode::UnsafePath);
         assert_eq!(
             error.message(),
@@ -1065,95 +740,23 @@ mod tests {
     }
 
     #[test]
-    fn admission_refuses_ancestor_and_descendant_fences() {
+    fn admission_refuses_ancestor_and_descendant_resources() {
         let tmp = checkout_temp_dir("admission-fences");
+        let store = MemoryStore::new();
         let tree_destination = tmp.join("config");
         let child_destination = tree_destination.join("child.md");
         fs::create_dir(&tree_destination).expect("tree dir");
         let tree = tree_reference(&tree_destination);
-        reserve(&tree).expect("tree reserve");
-        let child = prepare(&child_destination);
-        let error = admit(&child).unwrap_err();
+        admit(&store, &tree).expect("tree admission");
+        let child = document_reference(&child_destination);
+        let error = admit(&store, &child).unwrap_err();
         assert_eq!(error.code(), ErrorCode::Conflict);
-        assert_eq!(
-            error.message(),
-            "ancestor or descendant resource fence conflicts"
-        );
-        assert_eq!(error.path(), Some(tree.state_root()));
-        let error = admit(&tree).unwrap_err();
+        assert_eq!(error.message(), "ancestor or descendant resource conflicts");
+        assert_eq!(error.path(), Some(tree.destination()));
+        let error = admit(&store, &tree).unwrap_err();
         assert_eq!(error.code(), ErrorCode::Conflict);
-        assert_eq!(
-            error.message(),
-            "ancestor or descendant resource fence conflicts"
-        );
-        assert_eq!(error.path(), Some(child.state_root()));
-    }
-
-    #[test]
-    fn validate_state_reports_pending_recovery_without_refusing() {
-        let tmp = checkout_temp_dir("recovery-state");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        let state_root = reference.state_root();
-        let staging = state_root.join("staging");
-        fs::create_dir(&staging).expect("staging dir");
-        fs::write(staging.join("payload"), b"pending").expect("staged payload");
-        let transaction = state_root.join("transaction.json");
-        let staged = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&transaction)
-            .expect("journal");
-        staged
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .expect("journal permissions");
-        drop(staged);
-        fs::write(&transaction, b"{}").expect("journal payload");
-        admit(&reference).expect("pending recovery does not refuse admission");
-        let mut recovery = validate_state(&reference).expect("recovery paths");
-        recovery.sort();
-        let mut expected = vec![staging, transaction];
-        expected.sort();
-        assert_eq!(recovery, expected);
-    }
-
-    #[test]
-    fn admission_without_a_state_root_reports_io_error() {
-        let tmp = checkout_temp_dir("missing-state");
-        let reference = document_reference(&tmp.join("AGENTS.md"));
-        let prepared = reference.state_root().join("authority.json.next");
-        let error = admit(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::IoError);
-        assert_eq!(
-            error.message(),
-            format!(
-                "[Errno 2] No such file or directory: {}",
-                crate::json::python_str_repr(&prepared.to_string_lossy())
-            )
-        );
-        assert_eq!(error.path(), Some(prepared.as_path()));
-        assert_eq!(error.errno(), Some(libc::ENOENT));
-    }
-
-    #[test]
-    fn reserve_is_idempotent_and_keeps_management_private() {
-        let tmp = checkout_temp_dir("reserve");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        reserve(&reference).expect("second reserve");
-        assert!(reference.state_root().join("lock").is_file());
-        assert_eq!(mode_of(reference.state_root()) & 0o777, 0o700);
-        fs::set_permissions(reference.state_root(), fs::Permissions::from_mode(0o750))
-            .expect("permissive mode");
-        let error = reserve(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::Unsupported);
-        assert_eq!(
-            error.message(),
-            format!(
-                "[Errno {}] management storage must be private to its owner: PosixPath('{}')",
-                libc::ENOTSUP,
-                reference.state_root().display()
-            )
-        );
-        assert_eq!(error.errno(), Some(libc::ENOTSUP));
+        assert_eq!(error.message(), "ancestor or descendant resource conflicts");
+        assert_eq!(error.path(), Some(child.destination()));
     }
 
     #[test]
@@ -1166,70 +769,57 @@ mod tests {
         let physical = tmp.join("Config");
         fs::create_dir(&physical).expect("physical dir");
         let requested = tmp.join("config").join("AGENTS.md");
-        let state_root = crate::authority::state_path(&requested);
-        let recorded =
-            ResourceRef::new(requested, ResourceKind::Document, state_root).expect("resource");
-        reserve(&recorded).expect("reserve");
-        let error = admit(&recorded).unwrap_err();
+        let recorded = ResourceRef::new(requested, ResourceKind::Document).expect("resource");
+        let error = admit(&MemoryStore::new(), &recorded).unwrap_err();
         assert_eq!(error.code(), ErrorCode::InvalidState);
         assert_eq!(error.message(), "resource canonical destination changed");
     }
 
-    fn write_header(path: &Path, payload: &[u8]) {
-        let staged = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .expect("header");
-        staged
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .expect("header permissions");
-        drop(staged);
-        fs::write(path, payload).expect("header payload");
-    }
-
     #[test]
-    fn admission_refuses_wrong_typed_authority_metadata() {
+    fn admission_refuses_wrong_typed_and_noncanonical_authority_records() {
         let tmp = checkout_temp_dir("wrong-typed-header");
-        let reference = prepare(&tmp.join("AGENTS.md"));
-        let header = reference.state_root().join("authority.json");
-        write_header(&header, b"{\"enum\": \"Ownership\", \"value\": \"file\"}\n");
-        let error = admit(&reference).unwrap_err();
+        let store = MemoryStore::new();
+        let reference = document_reference(&tmp.join("AGENTS.md"));
+        let key = authority_key(&reference);
+        assert!(
+            store
+                .write(
+                    &key,
+                    b"{\"enum\": \"Ownership\", \"value\": \"file\"}\n",
+                    None
+                )
+                .unwrap()
+        );
+        let error = admit(&store, &reference).unwrap_err();
         assert_eq!(error.code(), ErrorCode::InvalidState);
-        assert_eq!(error.message(), "metadata record has the wrong type");
-        assert_eq!(error.path(), Some(header.as_path()));
+        assert_eq!(error.message(), format!("{key}: record has the wrong type"));
+        assert_eq!(error.path(), None);
 
-        let noncanonical = prepare(&tmp.join("OTHER.md"));
-        let foreign = noncanonical.state_root().join("authority.json");
-        write_header(&foreign, b"{\"path\": \"/a/./b\"}\n");
-        let error = admit(&noncanonical).unwrap_err();
+        let other = document_reference(&tmp.join("OTHER.md"));
+        let foreign = authority_key(&other);
+        let mut spaced = encode(&other);
+        spaced.insert(1, b' ');
+        assert!(store.write(&foreign, &spaced, None).unwrap());
+        let error = admit(&store, &other).unwrap_err();
         assert_eq!(error.code(), ErrorCode::InvalidState);
-        assert_eq!(error.message(), "state record is not canonical");
-        assert_eq!(error.path(), Some(foreign.as_path()));
+        assert_eq!(
+            error.message(),
+            format!("{foreign}: record is not canonical")
+        );
     }
 
     #[test]
-    fn management_spelling_rejects_file_ancestors_like_python() {
+    fn observation_rejects_file_ancestors_like_python() {
         let tmp = checkout_temp_dir("file-ancestor");
         let file = tmp.join("plainfile");
         fs::write(&file, b"file").expect("regular file");
-        let destination = file.join("doc.md");
-        let state_root = crate::authority::state_path(&destination);
-        let reference =
-            ResourceRef::new(destination, ResourceKind::Document, state_root).expect("resource");
-        let error = validate_state(&reference).unwrap_err();
+        let error = observe(&file.join("doc.md")).unwrap_err();
         assert_eq!(error.code(), ErrorCode::UnsafePath);
         assert_eq!(
             error.message(),
             "resource ancestor is not an ordinary directory"
         );
         assert_eq!(error.path(), Some(file.as_path()));
-        let error = reserve(&reference).unwrap_err();
-        assert_eq!(error.code(), ErrorCode::UnsafePath);
-        assert_eq!(
-            error.message(),
-            "resource ancestor is not an ordinary directory"
-        );
     }
 
     #[test]
@@ -1272,5 +862,38 @@ mod tests {
         fs::create_dir(&parent).expect("new parent");
         fs::write(&path, b"content").expect("replacement file");
         assert_ne!(ancestors(&path).expect("rebound ancestors"), expected);
+    }
+
+    #[test]
+    fn birth_time_is_compared_only_on_macos() {
+        let boundary = SystemTime::UNIX_EPOCH
+            .checked_add(std::time::Duration::from_secs(1_000_000))
+            .expect("boundary");
+        let born = boundary
+            .checked_add(std::time::Duration::from_secs(60))
+            .expect("birth time");
+        assert!(changed_after(boundary, boundary, Some(born), true));
+        assert!(!changed_after(boundary, boundary, Some(born), false));
+    }
+
+    #[test]
+    fn a_destination_modified_before_the_boundary_is_unchanged_whenever_it_was_born() {
+        let tmp = checkout_temp_dir("birth-time");
+        let path = tmp.join("AGENTS.md");
+        fs::write(&path, b"# mine\n").expect("file");
+        let earlier = SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(120))
+            .expect("earlier time");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open")
+            .set_times(fs::FileTimes::new().set_modified(earlier))
+            .expect("earlier modification time");
+        let revision = observe(&path).expect("revision");
+        let boundary = earlier
+            .checked_add(std::time::Duration::from_secs(60))
+            .expect("boundary");
+        assert!(require_unchanged_since(&path, &revision, boundary).is_ok());
     }
 }

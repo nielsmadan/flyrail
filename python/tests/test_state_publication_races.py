@@ -111,7 +111,11 @@ def _append(path: Path, tree: bool) -> None:
 
 
 def _retained(root: Path, destination: Path) -> bool:
-    candidates = [destination, *root.glob(".flyrail-*.txn/*/resource")]
+    candidates = [
+        destination,
+        *root.glob(".flyrail-*.txn/*/resource"),
+        *root.glob("state/staging/*/*/resource"),
+    ]
     files = [item for path in candidates for item in (path.rglob("*") if path.is_dir() else [path])]
     return any(path.is_file() and FOREIGN in path.read_bytes() for path in files)
 

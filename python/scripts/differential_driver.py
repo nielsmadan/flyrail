@@ -1,8 +1,9 @@
 import argparse
 import json
-import shutil
+import re
 import sys
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -30,7 +31,12 @@ from flyrail.editors import (
 from flyrail.lifecycle import inspect_installation, recover_installation, remove, sync
 from flyrail.models import BundleEntry, BundleIdentity
 from flyrail.rendered import Dependency, RenderedArtifact, RenderedBundle, model_value
+from flyrail.stores import DirectoryStore
 from flyrail.values import Scalar, Value, semantic_bytes, value_from_record
+
+TRANSACTION_DIRECTORY = re.compile(
+    r"((?:^|/)(?:\.flyrail-)?[0-9a-f]{64}-)[0-9a-f]{32}(?=\.txn|/|$)"
+)
 
 
 def emit(category: str, case: str, field: str, value: bytes) -> None:
@@ -263,9 +269,10 @@ def error_record(error: object | None, root: Path) -> object:
 
 def relative_path(path: Path, root: Path) -> str:
     try:
-        return "$ROOT/" + path.relative_to(root).as_posix()
+        text = "$ROOT/" + path.relative_to(root).as_posix()
     except ValueError:
-        return path.as_posix()
+        text = path.as_posix()
+    return TRANSACTION_DIRECTORY.sub(r"\g<1>" + "0" * 32, text)
 
 
 def result_record(result: InstallationResult, root: Path) -> bytes:
@@ -296,7 +303,6 @@ def result_record(result: InstallationResult, root: Path) -> bytes:
                         "destination": relative_path(resource.destination, root),
                         "error": error_record(resource.error, root),
                         "revision": resource.revision_digest,
-                        "state_root": relative_path(resource.state_root, root),
                     }
                     for resource in observation.resources
                 ],
@@ -329,23 +335,32 @@ def normalize_state(value: object, root: Path) -> object:
             for key in ("device", "inode", "uid", "gid"):
                 fields[key] = 0
             fields["security"] = {"bytes": ""}
-        if result.get("type") == "Receipt":
+        if result.get("type") in {"Receipt", "Preparation"}:
             fields["transaction_id"] = "0" * 32
     return result
 
 
+def state_key(key: str, record: dict[str, object], root: Path) -> str:
+    if not key.startswith("resource/"):
+        return key
+    fields = cast(dict[str, dict[str, dict[str, object]]], record["fields"])
+    resource = fields if record["type"] == "ResourceRef" else fields["resource"]["fields"]
+    destination = Path(cast(dict[str, str], resource["destination"])["path"])
+    return f"resource/{relative_path(destination, root)}/{key.rsplit('/', 1)[1]}"
+
+
 def state_snapshot(name: str, step: str, root: Path, target: InstallationTarget) -> None:
-    candidates = [target.index_root / "index.json", target.index_root / "index.json.next"]
-    candidates.extend(root.rglob("receipt.json"))
-    for path in sorted(set(candidates)):
-        if not path.is_file():
+    store = target.store
+    for key in store.keys(""):
+        raw = store.read(key)
+        if raw is None:
             continue
-        raw = path.read_bytes()
         value = decode(raw)
         if encode(value) != raw:
-            raise ValueError(f"state record is not canonical: {path}")
-        normalized = stable_json(normalize_state(json.loads(raw), root)) + b"\n"
-        emit("lifecycle", name, f"{step}-state-{relative_path(path, root)}", normalized)
+            raise ValueError(f"state record is not canonical: {key}")
+        record = json.loads(raw)
+        normalized = stable_json(normalize_state(record, root)) + b"\n"
+        emit("lifecycle", name, f"{step}-state-{state_key(key, record, root)}", normalized)
 
 
 def lifecycle_result(
@@ -365,7 +380,7 @@ def run_lifecycle(corpus: list[list[str]], root: Path) -> None:
         _, name, kind, initial, first, second, acquisition_name = row
         case_root = root / name
         case_root.mkdir()
-        target = InstallationTarget(case_root / "index")
+        target = InstallationTarget(DirectoryStore(root / ".state" / name))
         first_rendered, ids = lifecycle_rendered(case_root, kind, first)
         destination = first_rendered.artifacts[0].destination
         if initial != "-":
@@ -385,7 +400,6 @@ def run_lifecycle(corpus: list[list[str]], root: Path) -> None:
         second_rendered, _ = lifecycle_rendered(case_root, kind, second)
         updated = sync(lifecycle_bundle("2", ids), second_rendered, target)
         lifecycle_result(name, "3-update", updated, case_root, target)
-        shutil.copyfile(target.index_root / "index.json", target.index_root / "index.json.next")
         recovered = recover_installation("team", target)
         lifecycle_result(name, "4-recover", recovered, case_root, target)
         observed = inspect_installation("team", target)

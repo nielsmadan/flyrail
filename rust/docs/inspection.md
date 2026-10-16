@@ -49,14 +49,21 @@ the OpenCode skill preset. Use `Target::directory` for custom layouts. See
 ## Configuration inspection
 
 `inspect_installation(bundle_id, target)` reads current, pending, previous, and
-residual index membership plus referenced receipts and actual owned content. It
-does not acquire locks, recover transactions, create directories, or change
-permissions.
+residual index membership plus referenced receipts and actual owned content
+from the target's store. It does not acquire locks, recover transactions,
+create directories, or change permissions. Reads may still touch the store —
+for example updating access times on a `DirectoryStore`.
 
 `InstallationObservation` reports recorded version and digests, pending state,
 resource observations, and errors. Each resource exposes its destination,
-authority state root, claim attribution/status, revision digest, diagnostics, and
-recovery paths. Full foreign bytes and takeover baselines are not exposed.
+claim attribution/status, revision digest, diagnostics, and recovery paths. A
+nonempty `recovery_paths` names the transaction directory recorded by the
+resource's preparation — in the store's staging directory, or
+`P/.flyrail-<hash>-<transaction-id>.txn` beside destination `P/N` when the
+store is on another mount — left behind by an interrupted write; a later
+recovery removes it. A transaction directory that no record in the store
+names is not reported. Full foreign bytes and takeover baselines are not
+exposed.
 
 `is_current` requires intact recorded claims with no unresolved membership or
 recovery. `matches(bundle, rendered)` additionally compares the desired bundle
@@ -65,10 +72,10 @@ Inspect again to observe later changes.
 
 ## Skill inspection
 
-`inspect(bundle, targets)` returns ordered `TargetInspection<T>` values. Each
-contains the original target, canonical root, adjacent authority path, optional
-alias index, and skill-facing `Observation`. Independent target errors do not stop
-the remaining targets.
+`inspect(bundle, targets, store)` returns ordered `TargetInspection<T>` values,
+reading recorded membership from the given `store`. Each contains the original
+target, canonical root, optional alias index, and skill-facing `Observation`.
+Independent target errors do not stop the remaining targets.
 
 `ObservationState` is `Installed`, `Absent`, `RecoveryNeeded`, or `Unknown`.
 Inventory entries expose paths, sizes, SHA-256 digests, and executable intent, not
@@ -76,16 +83,19 @@ file contents. Modifications identify changed owned claims; conflicts represent
 desired unowned content. Use a general lifecycle preview for complete proposed
 resource changes.
 
-The skill adapter uses a sibling index named
-`.<container>.flyrail-index-<bundle-id>`. Equivalent directory and agent-preset
-routes can inspect, update, or remove the same physical installation.
+The skill adapter identifies an installation within `store` by an
+`InstallationTarget` whose context is the canonical physical container's
+destination, not a name derived from anything beside it. Equivalent directory
+and agent-preset routes that canonicalize to the same container can inspect,
+update, or remove that installation in later calls, regardless of their
+order, as long as they are given the same store.
 
 ## Safety
 
 Canonicalization resolves physical aliases and rejects managed symlinks, hard
 links, special files, ambiguous portable names, and incompatible hierarchy
-claims. Rendered destinations, authorities, indexes, and retained bundle sources
-must not overlap.
+claims. Rendered destinations and retained bundle sources must not overlap
+the store's location or staging directory.
 
 Malformed state and contradictory ownership fail closed. Inspection may observe a
 live writer; pending state alone does not prove interruption. Only a locked

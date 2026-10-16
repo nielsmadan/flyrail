@@ -2570,6 +2570,34 @@
       }
     }
   ],
+  "preparations": [
+    {
+      "name": "create-section",
+      "record": {
+        "type": "Preparation",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "11111111111111111111111111111111",
+          "directory": {
+            "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7-11111111111111111111111111111111.txn"
+          },
+          "schema_version": 2
+        }
+      }
+    }
+  ],
   "transactions": [
     {
       "name": "prepared",

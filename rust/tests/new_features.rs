@@ -5,18 +5,21 @@
     clippy::unwrap_used
 )]
 
+mod support;
+
 use flyrail::{
     Acquisition, Agent, Artifact, Audience, Bundle, BundleEntry, BundleIdentity, ChangeAction,
-    Command, Content, ErrorCode, Family, FileContent, FileMode, HookArtifact, HookEvent,
-    HookOutcome, InstructionArtifact, McpArtifact, McpTransport, NativeArtifact, NoticeKind,
-    ObservationState, OperationStatus, Platform, RenderContext, SkillArtifact, SupportAsset,
-    Surface, Target, TargetScope, TreeContent, detect_agents, inspect, install, preview,
-    preview_removal, render, render_many, render_skills, summarize, sync,
+    Command, Content, DirectoryStore, ErrorCode, Family, FileContent, FileMode, HookArtifact,
+    HookEvent, HookOutcome, InstructionArtifact, McpArtifact, McpTransport, NativeArtifact,
+    NoticeKind, ObservationState, OperationStatus, Platform, RenderContext, SkillArtifact,
+    StateStore, SupportAsset, Surface, Target, TargetScope, TreeContent, detect_agents, inspect,
+    install, preview, preview_removal, render, render_many, render_skills, summarize, sync,
     translate_instruction_artifact, translate_mcp_artifact, uninstall, update,
 };
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct TempRoot(PathBuf);
@@ -53,6 +56,10 @@ fn temp_root(name: &str) -> TempRoot {
         .join(format!("rust-new-features-{name}-{nonce}"));
     fs::create_dir_all(&root).expect("root");
     TempRoot(root)
+}
+
+fn directory_store(path: &Path) -> Arc<dyn StateStore> {
+    Arc::new(DirectoryStore::new(path).expect("store"))
 }
 
 fn instruction_bundle(version: &str, artifacts: &[(&str, &str)]) -> Bundle {
@@ -110,7 +117,7 @@ fn droid_refuses_selected_artifacts_and_blocks_mixed_rendering() {
         &bundle,
         &refused,
         &droid
-            .installation(root.join(".droid-index"))
+            .installation(directory_store(&root.join(".droid-state")), None)
             .expect("target"),
         Acquisition::Conflict,
         false,
@@ -244,6 +251,7 @@ fn droid_refusal_covers_hooks_and_only_selected_native_artifacts() {
 #[test]
 fn droid_skill_lifecycle_refuses_before_touching_the_target() {
     let root = temp_root("droid-lifecycle");
+    let store = directory_store(&root.join(".state"));
     let bundle = skill_bundle();
     let target = Target::project(Agent::Droid, &root).expect("target");
 
@@ -253,11 +261,13 @@ fn droid_skill_lifecycle_refuses_before_touching_the_target() {
     assert_eq!(rendered.routing_context(), []);
 
     for result in [
-        install(&bundle, [target.clone()])
+        install(&bundle, [target.clone()], &store)
             .expect("install")
             .remove(0),
-        update(&bundle, [target.clone()]).expect("update").remove(0),
-        uninstall("skills", [target.clone()])
+        update(&bundle, [target.clone()], &store)
+            .expect("update")
+            .remove(0),
+        uninstall("skills", [target.clone()], &store)
             .expect("uninstall")
             .remove(0),
     ] {
@@ -269,7 +279,9 @@ fn droid_skill_lifecycle_refuses_before_touching_the_target() {
         assert!(fs::read_dir(&root).expect("root").next().is_none());
     }
 
-    let inspected = inspect(&bundle, [target]).expect("inspect").remove(0);
+    let inspected = inspect(&bundle, [target], &store)
+        .expect("inspect")
+        .remove(0);
     assert_eq!(inspected.observation().state(), ObservationState::Unknown);
     assert_eq!(
         inspected.observation().error().expect("error").code(),
@@ -288,7 +300,7 @@ fn summaries_report_create_unchanged_update_delete_and_shared_destinations() {
     )
     .expect("context");
     let installation = context
-        .installation(root.join(".index"))
+        .installation(directory_store(&root.join(".state")), None)
         .expect("installation");
     let rendered = render(&first, &context).expect("render");
     let creation = preview(
@@ -382,7 +394,7 @@ fn summaries_report_recovery_paths_as_conflicts() {
     )
     .expect("context");
     let installation = context
-        .installation(root.join(".index"))
+        .installation(directory_store(&root.join(".state")), None)
         .expect("installation");
     let rendered = render(&bundle, &context).expect("render");
     sync(
@@ -402,12 +414,22 @@ fn summaries_report_recovery_paths_as_conflicts() {
         false,
     )
     .expect("preview");
-    let recovery = observed.resources()[0]
-        .resource()
-        .state_root()
-        .join("staging");
-    fs::create_dir_all(&recovery).expect("staging");
-    fs::write(recovery.join("leftover"), "interrupted\n").expect("leftover");
+    let resource = observed.resources()[0].resource().clone();
+    let transaction = "f".repeat(32);
+    let recovery = flyrail::authority::transaction_path(resource.destination(), &transaction)
+        .expect("transaction path");
+    let preparation = flyrail::Preparation::new(resource.clone(), transaction, recovery.clone())
+        .expect("preparation");
+    assert!(
+        installation
+            .store()
+            .write(
+                &support::resource_key(resource.destination(), "preparation"),
+                &flyrail::encode(&preparation),
+                None
+            )
+            .expect("interrupted preparation")
+    );
 
     let interrupted = preview(
         &bundle,

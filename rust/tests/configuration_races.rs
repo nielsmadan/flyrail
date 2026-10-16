@@ -1,16 +1,20 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 
+mod support;
+
 use flyrail::{
-    Acquisition, Artifact, Bundle, BundleIdentity, Content, Family, FileContent, FileMode,
-    InstallationTarget, InstructionArtifact, OperationStatus, RenderedArtifact, RenderedBundle,
-    ResourceAuthority, SectionContent, SkillArtifact, TargetError, TreeContent, apply_preview,
-    preview, sync,
+    Acquisition, Artifact, Bundle, BundleIdentity, Content, DirectoryStore, Family, FileContent,
+    FileMode, InstallationTarget, InstructionArtifact, OperationStatus, RenderedArtifact,
+    RenderedBundle, ResourceAuthority, ResourceKind, ResourceRef, SectionContent, SkillArtifact,
+    StateStore, TargetError, TreeContent, apply_preview, encode, preview, sync,
 };
 use std::fs;
 use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use support::resource_key;
 
 fn temp_root(label: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -24,6 +28,10 @@ fn temp_root(label: &str) -> PathBuf {
     fs::create_dir_all(&root).expect("temporary root");
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("private root");
     fs::canonicalize(root).expect("canonical root")
+}
+
+fn directory_store(path: &Path) -> Arc<dyn StateStore> {
+    Arc::new(DirectoryStore::new(path).expect("store"))
 }
 
 fn bundle(version: &str) -> Bundle {
@@ -103,7 +111,8 @@ fn previews_reject_all_observed_revision_changes_without_overwriting_payloads() 
         fs::create_dir(&parent).expect("project");
         let path = parent.join("AGENTS.md");
         fs::write(&path, b"# foreign\n").expect("foreign");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = InstallationTarget::without_context(directory_store(&root.join("state")))
+            .expect("target");
         sync(
             &instruction_bundle("1"),
             &section(&path, "generated"),
@@ -121,10 +130,11 @@ fn previews_reject_all_observed_revision_changes_without_overwriting_payloads() 
             false,
         )
         .expect("preview");
-        let state = ResourceAuthority::new(&path)
+        let destination = ResourceAuthority::new(&path)
             .expect("authority")
-            .state_root()
+            .destination()
             .to_path_buf();
+        let store = target.store();
         match change {
             "foreign" => {
                 let bytes = fs::read(&path)
@@ -145,8 +155,9 @@ fn previews_reject_all_observed_revision_changes_without_overwriting_payloads() 
                 fs::write(&path, value).expect("owned change");
             }
             "receipt" => {
-                let receipt = state.join("receipt.json");
-                let mut bytes = fs::read(&receipt).expect("receipt");
+                let key = resource_key(&destination, "receipt");
+                let original = store.read(&key).expect("read").expect("receipt");
+                let mut bytes = original.clone();
                 let marker = b"\"transaction_id\":\"";
                 let start = bytes
                     .windows(marker.len())
@@ -154,15 +165,24 @@ fn previews_reject_all_observed_revision_changes_without_overwriting_payloads() 
                     .expect("transaction")
                     + marker.len();
                 bytes[start] = if bytes[start] == b'f' { b'e' } else { b'f' };
-                fs::write(receipt, bytes).expect("receipt change");
+                assert!(
+                    store
+                        .write(&key, &bytes, Some(&original))
+                        .expect("receipt change")
+                );
             }
             "index" => {
-                let index = target.index_root().join("index.json");
-                let bytes = fs::read(&index).expect("index");
-                let changed = String::from_utf8(bytes)
+                let key = format!("index/team/{}", target.context_digest());
+                let bytes = target.store().read(&key).expect("read").expect("index");
+                let changed = String::from_utf8(bytes.clone())
                     .expect("utf8")
                     .replace("\"version\":\"1\"", "\"version\":\"different\"");
-                fs::write(index, changed).expect("index change");
+                assert!(
+                    target
+                        .store()
+                        .write(&key, changed.as_bytes(), Some(&bytes))
+                        .expect("index change")
+                );
             }
             "mode" => {
                 fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).expect("chmod");
@@ -173,7 +193,11 @@ fn previews_reject_all_observed_revision_changes_without_overwriting_payloads() 
                 fs::write(&path, b"replacement").expect("replace payload");
             }
             "recovery" => {
-                fs::write(state.join("transaction.json"), b"{}").expect("recovery marker");
+                assert!(
+                    store
+                        .write(&resource_key(&destination, "journal"), b"{}", None)
+                        .expect("recovery marker")
+                );
             }
             "hardlink" => {
                 fs::hard_link(&path, root.join("linked")).expect("hardlink");
@@ -205,22 +229,31 @@ fn previews_reject_all_observed_revision_changes_without_overwriting_payloads() 
 }
 
 #[test]
-fn tombstoned_empty_fences_exclude_child_and_tree_boundaries() {
+fn tombstoned_authority_records_still_exclude_other_boundaries() {
     let root = temp_root("tombstone-race");
     let tree = root.join("tree");
     fs::create_dir(&tree).expect("tree");
-    let state = ResourceAuthority::new(&tree)
+    let store = directory_store(&root.join("state"));
+    let canonical = ResourceAuthority::new(&tree)
         .expect("authority")
-        .state_root()
+        .destination()
         .to_path_buf();
-    fs::create_dir(&state).expect("state");
-    fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).expect("private state");
+    let tombstone = ResourceRef::new(canonical.clone(), ResourceKind::Tree).expect("reference");
+    assert!(
+        store
+            .write(
+                &resource_key(&canonical, "authority"),
+                &encode(&tombstone),
+                None
+            )
+            .expect("tombstone")
+    );
 
     let child = rendered(&tree.join("child"), b"x");
     let child_result = sync(
         &bundle("1"),
         &child,
-        &InstallationTarget::without_context(root.join("index")).expect("target"),
+        &InstallationTarget::without_context(Arc::clone(&store)).expect("target"),
         Acquisition::Conflict,
         false,
         Duration::ZERO,
@@ -230,6 +263,12 @@ fn tombstoned_empty_fences_exclude_child_and_tree_boundaries() {
     assert_eq!(
         child_result.error().map(TargetError::code),
         Some(flyrail::ErrorCode::Conflict)
+    );
+    assert!(
+        store
+            .read(&resource_key(&canonical.join("child"), "authority"))
+            .expect("child authority")
+            .is_some()
     );
 
     let desired_tree = RenderedBundle::new(
@@ -252,10 +291,16 @@ fn tombstoned_empty_fences_exclude_child_and_tree_boundaries() {
         [],
     )
     .expect("rendered tree");
+    let other = InstallationTarget::new(
+        store,
+        [(String::from("installation"), String::from("other"))],
+        [],
+    )
+    .expect("target");
     let result = sync(
         &bundle("1"),
         &desired_tree,
-        &InstallationTarget::without_context(root.join("other-index")).expect("target"),
+        &other,
         Acquisition::Conflict,
         false,
         Duration::ZERO,

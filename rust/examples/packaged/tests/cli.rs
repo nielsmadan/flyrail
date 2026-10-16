@@ -140,6 +140,7 @@ fn value_options_reject_following_options_without_writes() {
     let root = root("missing-values");
     for option in [
         "--target",
+        "--state",
         "--project",
         "--agent",
         "--node",
@@ -149,7 +150,7 @@ fn value_options_reject_following_options_without_writes() {
         "--guidance",
         "--asset-root",
     ] {
-        let output = if option == "--target" {
+        let output = if matches!(option, "--target" | "--state") {
             run(&["ai", "install", option, "--replace-modified"])
         } else {
             run(&["config", "status", option, "--replace-modified"])
@@ -223,7 +224,12 @@ fn config_paths_match_strict_false_resolution() {
         assert_eq!(value["project"], expected);
         assert_eq!(
             value["observation"]["target"]["context"],
-            serde_json::json!([])
+            serde_json::json!([
+                ["agent", "claude"],
+                ["root", expected],
+                ["scope", "project"],
+                ["surface", "cli"]
+            ])
         );
         let routing = value["observation"]["target"]["routing_context"]
             .as_array()
@@ -231,8 +237,8 @@ fn config_paths_match_strict_false_resolution() {
         assert!(routing.contains(&serde_json::json!(["root", expected])));
         assert!(routing.contains(&serde_json::json!(["execution", expected])));
         assert_eq!(
-            value["observation"]["target"]["index_root"],
-            format!("{expected}/.cache/example-checksum-config-claude")
+            value["observation"]["target"]["store"],
+            format!("{expected}/.cache/example-checksum-config")
         );
         assert!(value["observation"]["render_digest"].is_null());
         assert_eq!(value["configured_current"], false);
@@ -309,17 +315,17 @@ print(json.dumps({c.__name__: sorted(f.name for f in dataclasses.fields(c)) for 
             "InstallationObservation": ["bundle_digest", "bundle_id", "error", "is_current",
                 "pending", "render_digest", "resources", "target", "version"],
             "InstallationResult": ["error", "notices", "observation", "resources", "status"],
-            "InstallationTarget": ["context", "index_root", "routing_context"],
+            "InstallationTarget": ["context", "routing_context", "store"],
             "InventoryEntry": ["executable", "path", "sha256", "size"],
             "Observation": ["conflicts", "content_matches", "error", "installations", "installed",
                 "modifications", "recorded_content_matches", "recovery_paths", "state",
                 "version_matches"],
             "ResourceObservation": ["claims", "destination", "error", "recovery_paths",
-                "revision_digest", "state_root"],
-            "ResourceRef": ["destination", "kind", "schema_version", "state_root"],
+                "revision_digest"],
+            "ResourceRef": ["destination", "kind", "schema_version"],
             "ResourceResult": ["error", "recovery_paths", "resource", "status"],
-            "TargetInspection": ["alias_of", "observation", "root", "state_root", "target"],
-            "TargetResult": ["alias_of", "error", "observation", "recovery_paths", "root", "state_root",
+            "TargetInspection": ["alias_of", "observation", "root", "target"],
+            "TargetResult": ["alias_of", "error", "observation", "recovery_paths", "root",
                 "status", "target"],
         })
     );
@@ -425,11 +431,14 @@ fn packaged_lifecycle_is_repeatable_multi_target_and_source_independent() {
     let root = root("lifecycle");
     let first = root.join("first");
     let second = root.join("second");
+    let state = root.join("state");
     let args = [
         "--target",
         first.to_str().expect("UTF-8"),
         "--target",
         second.to_str().expect("UTF-8"),
+        "--state",
+        state.to_str().expect("UTF-8"),
     ];
     let mut command = vec!["ai", "status"];
     command.extend(args);
@@ -437,14 +446,7 @@ fn packaged_lifecycle_is_repeatable_multi_target_and_source_independent() {
     assert_eq!(status["results"][0]["observation"]["state"], "absent");
     assert_eq!(
         keys(&status["results"][0]),
-        [
-            "alias_of",
-            "is_current",
-            "observation",
-            "root",
-            "state_root",
-            "target"
-        ]
+        ["alias_of", "is_current", "observation", "root", "target"]
     );
     assert_eq!(
         keys(&status["results"][0]["observation"]),
@@ -480,7 +482,10 @@ fn packaged_lifecycle_is_repeatable_multi_target_and_source_independent() {
             .is_some_and(|entries| !entries.is_empty())
     );
     let bundle = flyrail_example_checksum::packaged_bundle().expect("packaged bundle");
-    let inspected = flyrail::inspect(&bundle, [first.clone()]).expect("inspect installation");
+    let store: std::sync::Arc<dyn flyrail::StateStore> =
+        std::sync::Arc::new(flyrail::DirectoryStore::new(&state).expect("store"));
+    let inspected =
+        flyrail::inspect(&bundle, [first.clone()], &store).expect("inspect installation");
     let expected = inspected[0]
         .observation()
         .installed()
@@ -621,9 +626,13 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
     );
     let target = context
         .installation(
-            project
-                .join(".cache")
-                .join("example-checksum-config-claude"),
+            std::sync::Arc::new(
+                flyrail::DirectoryStore::new(
+                    project.join(".cache").join("example-checksum-config"),
+                )
+                .expect("store"),
+            ),
+            None,
         )
         .expect("installation target");
     let rendered = flyrail::render(&bundle, &context).expect("render configuration");
@@ -657,8 +666,14 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
         serde_json::json!(expected.target().routing_context())
     );
     assert_eq!(
-        installed["observation"]["target"]["index_root"],
-        expected.target().index_root().display().to_string()
+        installed["observation"]["target"]["store"],
+        serde_json::json!(
+            expected
+                .target()
+                .store()
+                .location()
+                .map(|path| path.display().to_string())
+        )
     );
     assert_eq!(
         keys(&installed["observation"]),
@@ -676,11 +691,11 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
     );
     assert_eq!(
         keys(&installed["observation"]["target"]),
-        ["context", "index_root", "routing_context"]
+        ["context", "routing_context", "store"]
     );
     assert_eq!(
         installed["observation"]["target"]["context"],
-        serde_json::json!([])
+        serde_json::json!(expected.target().context())
     );
     let routing = installed["observation"]["target"]["routing_context"]
         .as_array()
@@ -701,7 +716,6 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
                         "error",
                         "recovery_paths",
                         "revision_digest",
-                        "state_root",
                     ]
             }))
     );
@@ -711,7 +725,6 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
         .map(|resource| {
             serde_json::json!({
                 "destination": resource.destination().display().to_string(),
-                "state_root": resource.state_root().display().to_string(),
                 "claims": resource.claims().iter().map(|claim| serde_json::json!({
                     "claim_id": claim.claim_id(),
                     "bundle_id": claim.bundle_id(),
@@ -751,10 +764,6 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
             actual["resource"]["destination"],
             expected_ref.destination().display().to_string()
         );
-        assert_eq!(
-            actual["resource"]["state_root"],
-            expected_ref.state_root().display().to_string()
-        );
         let kind = match expected_ref.kind() {
             flyrail::ResourceKind::Document => "document",
             flyrail::ResourceKind::Tree => "tree",
@@ -778,11 +787,19 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
             .as_array()
             .is_some_and(|resources| resources.iter().all(|resource| {
                 keys(resource) == ["error", "recovery_paths", "resource", "status"]
-                    && keys(&resource["resource"])
-                        == ["destination", "kind", "schema_version", "state_root"]
+                    && keys(&resource["resource"]) == ["destination", "kind", "schema_version"]
             }))
     );
-    let observation_resource = &installed["observation"]["resources"][0];
+    let observation_resource = installed["observation"]["resources"]
+        .as_array()
+        .and_then(|resources| {
+            resources.iter().find(|resource| {
+                resource["destination"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("/.claude/skills"))
+            })
+        })
+        .expect("skill container observation");
     assert_eq!(observation_resource["error"], Value::Null);
     assert_eq!(
         observation_resource["recovery_paths"],
@@ -793,19 +810,14 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
             .as_str()
             .is_some_and(|path| path.ends_with("/.claude/skills"))
     );
-    assert!(
-        observation_resource["state_root"]
-            .as_str()
-            .is_some_and(|path| path.contains("/.claude/.flyrail-"))
-    );
-    let expected_resource = &expected.resources()[0];
+    let expected_resource = expected
+        .resources()
+        .iter()
+        .find(|resource| resource.destination().ends_with(".claude/skills"))
+        .expect("expected skill container");
     assert_eq!(
         observation_resource["destination"],
         expected_resource.destination().display().to_string()
-    );
-    assert_eq!(
-        observation_resource["state_root"],
-        expected_resource.state_root().display().to_string()
     );
     assert_eq!(
         observation_resource["revision_digest"],
@@ -820,7 +832,14 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
     assert_eq!(claim["render_digest"], expected_claim.render_digest());
     assert_eq!(claim["status"], expected_claim.status().as_str());
     assert_eq!(claim["claim_id"], expected_claim.claim_id());
-    let resource = &installed["resources"][0];
+    let resource = installed["resources"]
+        .as_array()
+        .and_then(|resources| {
+            resources.iter().find(|resource| {
+                resource["resource"]["destination"] == observation_resource["destination"]
+            })
+        })
+        .expect("skill container result");
     assert_eq!(resource["status"], "applied");
     assert_eq!(resource["error"], Value::Null);
     assert_eq!(resource["recovery_paths"], serde_json::json!([]));
@@ -829,10 +848,6 @@ fn combined_configuration_executes_hook_and_covers_every_agent() {
     assert_eq!(
         resource["resource"]["destination"],
         observation_resource["destination"]
-    );
-    assert_eq!(
-        resource["resource"]["state_root"],
-        observation_resource["state_root"]
     );
     assert!(
         installed["prerequisites"]

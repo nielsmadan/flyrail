@@ -10,8 +10,8 @@ use crate::editors::{
 };
 use crate::json::{Json, write_escaped};
 use crate::resource_models::{
-    Ancestor, Count, Generation, Index, Node, OwnedClaim, Receipt, ResourceKind, ResourceRef,
-    Revision,
+    Ancestor, Count, Generation, Index, Node, OwnedClaim, Preparation, Receipt, ResourceKind,
+    ResourceRef, Revision,
 };
 use crate::resource_transaction::Journal;
 use crate::values::{Scalar, Value, ValueError, semantic_record, value_from_record};
@@ -246,7 +246,7 @@ enum Decoded {
     Semantic(Value),
 }
 
-const RECORD_TAGS: [&str; 20] = [
+const RECORD_TAGS: [&str; 21] = [
     "Claim",
     "DocumentSchema",
     "Key",
@@ -267,6 +267,7 @@ const RECORD_TAGS: [&str; 20] = [
     "Generation",
     "Index",
     "Journal",
+    "Preparation",
 ];
 
 fn decoded(value: &Json) -> Result<Decoded, ValueError> {
@@ -432,6 +433,10 @@ fn decoded_record(tag: &str, value: &Json) -> Result<bool, ValueError> {
         }
         "Journal" => {
             Journal::from_state(value)?;
+            true
+        }
+        "Preparation" => {
+            Preparation::from_state(value)?;
             true
         }
         _ => false,
@@ -1354,7 +1359,6 @@ impl StateCodec for ResourceRef {
                 ("destination", encoded_path(self.destination())),
                 ("kind", self.kind().to_state()),
                 ("schema_version", Json::Int(self.schema_version())),
-                ("state_root", encoded_path(self.state_root())),
             ],
         )
     }
@@ -1363,7 +1367,7 @@ impl StateCodec for ResourceRef {
         let fields = record_fields(
             value,
             "ResourceRef",
-            &["destination", "kind", "state_root", "schema_version"],
+            &["destination", "kind", "schema_version"],
         )?;
         decode_fields(fields)?;
         Self::with_schema(
@@ -1374,10 +1378,6 @@ impl StateCodec for ResourceRef {
             classified::<ResourceKind>(
                 field(fields, "kind")?,
                 ValueError::type_error("resource kind must be a ResourceKind"),
-            )?,
-            expect_path(
-                field(fields, "state_root")?,
-                ValueError::new("resource state path disagrees with destination"),
             )?,
             schema_version(
                 field(fields, "schema_version")?,
@@ -1754,6 +1754,50 @@ impl StateCodec for Journal {
     }
 }
 
+impl StateCodec for Preparation {
+    fn to_state(&self) -> Json {
+        object(
+            "Preparation",
+            vec![
+                ("directory", encoded_path(self.directory())),
+                ("resource", self.resource().to_state()),
+                ("schema_version", Json::Int(self.schema_version())),
+                (
+                    "transaction_id",
+                    Json::Str(self.transaction_id().to_owned()),
+                ),
+            ],
+        )
+    }
+
+    fn from_state(value: &Json) -> Result<Self, ValueError> {
+        let fields = record_fields(
+            value,
+            "Preparation",
+            &["resource", "transaction_id", "directory", "schema_version"],
+        )?;
+        decode_fields(fields)?;
+        Self::with_schema(
+            classified::<ResourceRef>(
+                field(fields, "resource")?,
+                ValueError::type_error("preparation requires a resource"),
+            )?,
+            text_like(
+                field(fields, "transaction_id")?,
+                ValueError::new("invalid hexadecimal identity"),
+            )?,
+            expect_path(
+                field(fields, "directory")?,
+                ValueError::new("expected an absolute concrete path"),
+            )?,
+            schema_version(
+                field(fields, "schema_version")?,
+                ValueError::new("preparation schema must be 2"),
+            )?,
+        )
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -1763,7 +1807,6 @@ impl StateCodec for Journal {
 )]
 mod tests {
     use super::*;
-    use crate::authority::state_path;
     use crate::resource_models::Receipt as ReceiptModel;
     use crate::resource_transaction::Journal as JournalModel;
     use crate::test_support::fixture;
@@ -1800,16 +1843,7 @@ mod tests {
                     .as_str()
                     .ok_or_else(|| ValueError::new("invalid state record"))?;
                 let name = original.rsplit('/').next().unwrap_or("");
-                if name.starts_with(".flyrail-") {
-                    let target = if original.contains("config.json") {
-                        root.join("config.json")
-                    } else {
-                        root.join("AGENTS.md")
-                    };
-                    Ok(encoded_path(&state_path(&target)))
-                } else {
-                    Ok(encoded_path(&root.join(name)))
-                }
+                Ok(encoded_path(&root.join(name)))
             }
             Json::Object(items) => {
                 let mut result = Vec::new();
@@ -1817,28 +1851,6 @@ mod tests {
                     result.push((key.clone(), relocated(value, root)?));
                 }
                 let mut record = Json::Object(result);
-                if record.get("type").and_then(Json::as_str) == Some("ResourceRef") {
-                    let fields = record
-                        .get("fields")
-                        .and_then(Json::as_object)
-                        .expect("fixture fields");
-                    let destination = fields
-                        .iter()
-                        .find(|(key, _)| key == "destination")
-                        .and_then(|(_, destination)| destination.get("path"))
-                        .and_then(Json::as_str)
-                        .expect("fixture destination");
-                    let path = PathBuf::from(destination);
-                    record = set_field(
-                        &record,
-                        "fields",
-                        &set_field(
-                            fields_owned(&record),
-                            "state_root",
-                            &encoded_path(&state_path(&path)),
-                        ),
-                    );
-                }
                 if record.get("type").and_then(Json::as_str) == Some("Receipt") {
                     let fields = record
                         .get("fields")
@@ -1914,27 +1926,27 @@ mod tests {
         let expected = [
             (
                 "created-section",
-                "ece5ca7bd0f494939c66a805f2f1a55a4536afe8b7478a10c5706ce6ea1b0a51",
+                "1707a7b5e01b8cbdfb38a4c1672d3d194d7d71f6f5f0de177f587c99a24a6173",
             ),
             (
                 "taken-over-section",
-                "14f8f570c0088150f5bad3fa058f1b9e08ef6a85776c64679af3077798766548",
+                "bdb08a71aaafc8659817ee1454b32de3f13646abf06a6e44739097ea7a71ef81",
             ),
             (
                 "adopted-section",
-                "fe332172d1afafb73d0edaf6e9faaa618fc6a1c53971e1a871939df4e970189a",
+                "13a94f0567e83a75ca6ab68f5d536e8d1afc0f1db5f056064829260e5117e722",
             ),
             (
                 "taken-over-member",
-                "4ab959413e74c1e80c23a3038553590e42e612ad7b1af59065c2b77b3553df67",
+                "70b2a778afb80feb8d6ef7e83e0a7d5fedc57a91c8a8085d01e121c6e7b23121",
             ),
             (
                 "created-document-schema",
-                "55ebad1404ed5ff05cb637f95d5c78be1e325174268ee26fd1f54c0bba4e6bd1",
+                "7132ca049258fa097bb8c0f980500f23c443e262e9631714f94c20c890103b75",
             ),
             (
                 "empty-document-schema",
-                "9ff338f41b1724de0c468cb18614e9f4a217e6fefb6109d4fa348ae47d8fba5f",
+                "428ec3b7a5c5f401c3b5a776fadedeba98bc7134d46b17aa8ac30d67e0de4204",
             ),
         ];
         for (name, digest) in expected {
@@ -1972,11 +1984,11 @@ mod tests {
         let expected = [
             (
                 "create-section",
-                "75104c6444bb68ae115b52502db2c9066f8672e45b8ac9f03dd3f10c47173a03",
+                "1047c6c1919a5f496fd893445e98353cde1cae99c24dce84bb5a4f40aa8119b9",
             ),
             (
                 "adopt-section",
-                "72e4d04a846e8c99e68690eaf05ba5fab7e40df84fab9b5164958ff8f6f5e0aa",
+                "9b7ea27d2cfcbacbb89d2082dd28e72c7b3a8e00e978407abf2e3af9bcc7116b",
             ),
         ];
         for (name, digest) in expected {
@@ -2000,6 +2012,52 @@ mod tests {
                 encode(&value),
                 encode_state(&moved),
                 "journal {name} re-encode must be canonical"
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_preparations_decode_and_reencode_byte_identically() {
+        let Some(data) = fixture("configurations.json") else {
+            eprintln!("skipping: shared fixtures are unavailable");
+            return;
+        };
+        let root = PathBuf::from("/pin");
+        let expected = [(
+            "create-section",
+            "c392d66b505eafb807a5cb156e64667127aefcc9d5a59d8588740c57133c003b",
+        )];
+        let cases = data
+            .get("preparations")
+            .and_then(Json::as_array)
+            .expect("preparations");
+        assert_eq!(cases.len(), expected.len());
+        for (name, digest) in expected {
+            let record = cases
+                .iter()
+                .find(|item| item.get("name").and_then(Json::as_str) == Some(name))
+                .and_then(|item| item.get("record"))
+                .expect("preparation record");
+            let moved = relocated(record, &root).expect("relocation");
+            let value =
+                decode::<Preparation>(&encode_state(&moved)).expect("fixture preparation decodes");
+            assert_eq!(
+                digest_of(&value.to_state()),
+                digest,
+                "preparation {name} re-encode digest"
+            );
+            assert_eq!(
+                encode(&value),
+                encode_state(&moved),
+                "preparation {name} re-encode must be canonical"
+            );
+            assert_eq!(
+                value.directory(),
+                crate::authority::transaction_path(
+                    value.resource().destination(),
+                    value.transaction_id()
+                )
+                .expect("transaction path")
             );
         }
     }
@@ -2114,6 +2172,7 @@ mod tests {
             "Index" => run::<Index>(data),
             "Receipt" => run::<Receipt>(data),
             "Journal" => run::<Journal>(data),
+            "Preparation" => run::<Preparation>(data),
             "OwnedClaim" => run::<OwnedClaim>(data),
             other => panic!("unhandled state type {other}"),
         }
@@ -2122,7 +2181,7 @@ mod tests {
     #[test]
     #[allow(clippy::too_many_lines)]
     fn decode_outcomes_match_the_python_reference() {
-        let cases: [(&str, &str, &str); 59] = [
+        let cases: [(&str, &str, &str); 64] = [
             (
                 "Ancestor",
                 r#"{"fields":{"device":0,"gid":0,"inode":0,"mode":4095,"path":{"path":"/a"},"security":{"bytes":""},"uid":0},"type":"Ancestor"}"#,
@@ -2356,28 +2415,53 @@ mod tests {
             ),
             (
                 "ResourceRef",
-                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":3,"state_root":{"path":"/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"}},"type":"ResourceRef"}"#,
+                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":3},"type":"ResourceRef"}"#,
                 "authority schema must be 2",
             ),
             (
                 "ResourceRef",
-                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":true,"state_root":{"path":"/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"}},"type":"ResourceRef"}"#,
+                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":true},"type":"ResourceRef"}"#,
                 "authority schema must be 2",
             ),
             (
                 "ResourceRef",
-                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":"document","schema_version":2,"state_root":{"path":"/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"}},"type":"ResourceRef"}"#,
+                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":"document","schema_version":2},"type":"ResourceRef"}"#,
                 "invalid state record",
             ),
             (
                 "ResourceRef",
-                r#"{"fields":{"destination":"/pin/AGENTS.md","kind":{"enum":"ResourceKind","value":"document"},"schema_version":2,"state_root":{"path":"/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"}},"type":"ResourceRef"}"#,
+                r#"{"fields":{"destination":"/pin/AGENTS.md","kind":{"enum":"ResourceKind","value":"document"},"schema_version":2},"type":"ResourceRef"}"#,
                 "expected an absolute concrete path",
             ),
             (
                 "ResourceRef",
-                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2,"state_root":"/pin/x"},"type":"ResourceRef"}"#,
-                "resource state path disagrees with destination",
+                r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2,"state_root":{"path":"/pin/x"}},"type":"ResourceRef"}"#,
+                "state record fields do not match schema",
+            ),
+            (
+                "Preparation",
+                r#"{"fields":{"directory":{"path":"/pin/x"},"resource":{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2},"type":"ResourceRef"},"schema_version":2,"transaction_id":"1111"},"type":"Preparation"}"#,
+                "invalid hexadecimal identity",
+            ),
+            (
+                "Preparation",
+                r#"{"fields":{"directory":{"path":"x"},"resource":{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2},"type":"ResourceRef"},"schema_version":2,"transaction_id":"11111111111111111111111111111111"},"type":"Preparation"}"#,
+                "state paths must be absolute without traversal",
+            ),
+            (
+                "Preparation",
+                r#"{"fields":{"directory":{"path":"/pin/x"},"resource":5,"schema_version":2,"transaction_id":"11111111111111111111111111111111"},"type":"Preparation"}"#,
+                "invalid state record",
+            ),
+            (
+                "Preparation",
+                r#"{"fields":{"directory":{"path":"/pin/x"},"resource":{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2},"type":"ResourceRef"},"schema_version":3,"transaction_id":"11111111111111111111111111111111"},"type":"Preparation"}"#,
+                "preparation schema must be 2",
+            ),
+            (
+                "Preparation",
+                r#"{"fields":{"directory":{"path":"/pin/x"},"resource":{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2},"type":"ResourceRef"},"schema_version":2,"transaction_id":"11111111111111111111111111111111"},"type":"Preparation"}"#,
+                "",
             ),
             (
                 "Index",
@@ -2426,7 +2510,7 @@ mod tests {
 
     #[test]
     fn decode_pair_outcomes_match_the_python_reference() {
-        let reference = r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2,"state_root":{"path":"/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"}},"type":"ResourceRef"}"#;
+        let reference = r#"{"fields":{"destination":{"path":"/pin/AGENTS.md"},"kind":{"enum":"ResourceKind","value":"document"},"schema_version":2},"type":"ResourceRef"}"#;
         let digest = "0000000000000000000000000000000000000000000000000000000000000000";
         let cases: [(&str, &str); 5] = [
             (

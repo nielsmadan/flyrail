@@ -1,8 +1,9 @@
 use flyrail::{
-    Acquisition, Agent, HookRuntime, HookShell, InstallationObservation, InstallationResult,
-    Notice, OperationStatus, Platform, RenderContext, ResourceKind, ResourceRef, SkillOptions,
-    Target, TargetError, TargetInspection, TargetResult, inspect, inspect_installation, install,
-    remove, render, sync, uninstall_with_options, update_with_options,
+    Acquisition, Agent, DirectoryStore, HookRuntime, HookShell, InstallationObservation,
+    InstallationResult, Notice, OperationStatus, Platform, RenderContext, ResourceKind,
+    ResourceRef, SkillOptions, StateStore, Target, TargetError, TargetInspection, TargetResult,
+    inspect, inspect_installation, install, remove, render, sync, uninstall_with_options,
+    update_with_options,
 };
 use flyrail_example_checksum::{
     BUNDLE_ID, CONFIG_BUNDLE_ID, GUIDANCE, configuration_bundle, packaged_bundle, sha256_reader,
@@ -16,6 +17,7 @@ use std::fs;
 use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -23,8 +25,8 @@ const USAGE: &str = "\
 Usage:
   flyrail-checksum --version
   flyrail-checksum digest FILE
-  flyrail-checksum ai status|install --target TARGET [--target TARGET ...]
-  flyrail-checksum ai update|uninstall --target TARGET [--target TARGET ...] [--replace-modified]
+  flyrail-checksum ai status|install --target TARGET [--target TARGET ...] --state STATE
+  flyrail-checksum ai update|uninstall --target TARGET [--target TARGET ...] --state STATE [--replace-modified]
   flyrail-checksum config status|update --project PROJECT --agent AGENT --mcp-command COMMAND --mcp-url URL [options]
   flyrail-checksum config uninstall --project PROJECT --agent AGENT [--replace-modified]
 
@@ -34,6 +36,7 @@ Agents: claude, codex, opencode, pi, cursor, copilot, droid";
 struct AiRequest {
     action: String,
     targets: Vec<PathBuf>,
+    state: PathBuf,
     replace_modified: bool,
 }
 
@@ -74,6 +77,7 @@ fn parse_ai(arguments: &[OsString]) -> Result<AiRequest, String> {
         return Err(format!("unknown AI action '{action}'"));
     }
     let mut targets = Vec::new();
+    let mut state = None;
     let mut replace_modified = false;
     let mut index = 1;
     while let Some(argument) = arguments.get(index) {
@@ -82,6 +86,7 @@ fn parse_ai(arguments: &[OsString]) -> Result<AiRequest, String> {
             "--target" => {
                 targets.push(path_value(arguments, &mut index, &option)?);
             }
+            "--state" => state = Some(path_value(arguments, &mut index, &option)?),
             "--replace-modified" => replace_modified = true,
             _ => return Err(format!("unknown option '{option}'")),
         }
@@ -90,12 +95,14 @@ fn parse_ai(arguments: &[OsString]) -> Result<AiRequest, String> {
     if targets.is_empty() {
         return Err(String::from("at least one --target is required"));
     }
+    let state = state.ok_or_else(|| String::from("--state is required"))?;
     if replace_modified && !matches!(action.as_str(), "update" | "uninstall") {
         return Err(format!("{action} does not accept --replace-modified"));
     }
     Ok(AiRequest {
         action,
         targets,
+        state,
         replace_modified,
     })
 }
@@ -274,7 +281,6 @@ fn inspection_json(result: &TargetInspection<Target>) -> Value {
     json!({
         "target": target_json(result.target()),
         "root": result.root().display().to_string(),
-        "state_root": result.state_root().display().to_string(),
         "alias_of": result.alias_of(),
         "observation": observation_json(result.observation()),
         "is_current": result.observation().is_current(),
@@ -285,7 +291,6 @@ fn result_json(result: &TargetResult<Target>) -> Value {
     json!({
         "target": target_json(result.target()),
         "root": result.root().display().to_string(),
-        "state_root": result.state_root().display().to_string(),
         "alias_of": result.alias_of(),
         "status": result.status().as_str(),
         "observation": observation_json(result.observation()),
@@ -311,10 +316,12 @@ fn ai(request: &AiRequest) -> Result<i32, Box<dyn Error>> {
         .iter()
         .map(Target::directory)
         .collect::<Result<Vec<_>, _>>()?;
+    let store: Arc<dyn StateStore> = Arc::new(DirectoryStore::new(&request.state)?);
     if request.action == "uninstall" {
         let results = uninstall_with_options(
             BUNDLE_ID,
             targets,
+            &store,
             SkillOptions::new(request.replace_modified, Duration::ZERO),
         )?;
         let exit = i32::from(results.iter().any(|result| !clean(result)));
@@ -326,7 +333,7 @@ fn ai(request: &AiRequest) -> Result<i32, Box<dyn Error>> {
         return Err("packaged bundle ID differs from the host's stable ID".into());
     }
     if request.action == "status" {
-        let results = inspect(&bundle, targets)?;
+        let results = inspect(&bundle, targets, &store)?;
         let exit = i32::from(
             results
                 .iter()
@@ -339,11 +346,12 @@ fn ai(request: &AiRequest) -> Result<i32, Box<dyn Error>> {
         return Ok(exit);
     }
     let results = if request.action == "install" {
-        install(&bundle, targets)?
+        install(&bundle, targets, &store)?
     } else {
         update_with_options(
             &bundle,
             targets,
+            &store,
             SkillOptions::new(request.replace_modified, Duration::ZERO),
         )?
     };
@@ -446,7 +454,7 @@ fn installation_observation_json(observation: &InstallationObservation) -> Value
     json!({
         "bundle_id": observation.bundle_id(),
         "target": {
-            "index_root": observation.target().index_root().display().to_string(),
+            "store": observation.target().store().location().map(|path| path.display().to_string()),
             "context": observation.target().context(),
             "routing_context": observation.target().routing_context(),
         },
@@ -458,7 +466,6 @@ fn installation_observation_json(observation: &InstallationObservation) -> Value
         "error": error_json(observation.error()),
         "resources": observation.resources().iter().map(|resource| json!({
             "destination": resource.destination().display().to_string(),
-            "state_root": resource.state_root().display().to_string(),
             "claims": resource.claims().iter().map(|claim| json!({
                 "claim_id": claim.claim_id(),
                 "bundle_id": claim.bundle_id(),
@@ -488,7 +495,6 @@ fn resource_ref_json(resource: &ResourceRef) -> Value {
     json!({
         "destination": resource.destination().display().to_string(),
         "kind": resource_kind(resource.kind()),
-        "state_root": resource.state_root().display().to_string(),
         "schema_version": resource.schema_version(),
     })
 }
@@ -553,12 +559,11 @@ fn config(mut request: ConfigRequest) -> Result<i32, Box<dyn Error>> {
         Target::project(request.agent, &request.project)?,
         platform(),
     )?;
-    let index_root = request
-        .project
-        .join(".cache")
-        .join(format!("{CONFIG_BUNDLE_ID}-{}", request.agent));
+    let store: Arc<dyn StateStore> = Arc::new(DirectoryStore::new(
+        request.project.join(".cache").join(CONFIG_BUNDLE_ID),
+    )?);
     if request.action == "uninstall" {
-        let target = base_context.installation(index_root)?;
+        let target = base_context.installation(Arc::clone(&store), None)?;
         let result = remove(
             CONFIG_BUNDLE_ID,
             &target,
@@ -606,7 +611,7 @@ fn config(mut request: ConfigRequest) -> Result<i32, Box<dyn Error>> {
     if let Some(root) = &request.asset_root {
         context = context.with_asset_root(absolute(root)?)?;
     }
-    let target = context.installation(index_root)?;
+    let target = context.installation(store, None)?;
     let desired = render(&bundle, &context)?;
     let result = if request.action == "update" {
         Some(sync(

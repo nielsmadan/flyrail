@@ -95,20 +95,6 @@ pub(crate) fn os_error_text(error: &io::Error, path: Option<&Path>) -> String {
     )
 }
 
-pub(crate) fn os_error_move_text(error: &io::Error, from: &Path, to: &Path) -> String {
-    error.raw_os_error().map_or_else(
-        || error.to_string(),
-        |errno| {
-            format!(
-                "[Errno {errno}] {}: {} -> {}",
-                strerror_text(error, errno),
-                crate::json::python_str_repr(&from.to_string_lossy()),
-                crate::json::python_str_repr(&to.to_string_lossy())
-            )
-        },
-    )
-}
-
 pub(crate) fn os_error_builtin_text(errno: i32, message: &str, path: &Path) -> String {
     format!(
         "[Errno {errno}] {message}: PosixPath({})",
@@ -319,67 +305,51 @@ pub(crate) fn sha256_hex(digest: &[u8]) -> String {
     out
 }
 
-pub fn state_path(destination: &Path) -> PathBuf {
+fn name_key(destination: &Path) -> String {
     let name = match destination.components().next_back() {
         Some(Component::Normal(name)) => name.to_string_lossy().into_owned(),
         Some(Component::ParentDir) => String::from(".."),
         _ => String::new(),
     };
-    let digest = {
-        let mut hasher = Sha256::new();
-        hasher.update(portable_path_key(&name).as_bytes());
-        hasher.finalize()
-    };
-    let state = format!(".flyrail-{}.state", sha256_hex(&digest));
-    match destination.parent() {
-        Some(parent) => parent.join(state),
-        None if destination.is_absolute() => PathBuf::from("/").join(state),
-        None => PathBuf::from(state),
+    sha256_hex(&Sha256::digest(portable_path_key(&name).as_bytes()))
+}
+
+pub fn transaction_path(destination: &Path, transaction_id: &str) -> Result<PathBuf, ValueError> {
+    if transaction_id.len() != 32
+        || !transaction_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(ValueError::new(
+            "transaction id must be 32 lowercase hexadecimal characters",
+        ));
     }
+    let name = format!(".flyrail-{}-{transaction_id}.txn", name_key(destination));
+    Ok(match destination.parent() {
+        Some(parent) => parent.join(name),
+        None if destination.is_absolute() => PathBuf::from("/").join(name),
+        None => PathBuf::from(name),
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceAuthority {
     destination: PathBuf,
-    state_root: PathBuf,
 }
 
 impl ResourceAuthority {
     pub fn new(destination: impl AsRef<Path>) -> Result<Self, AuthorityError> {
-        let destination = canonical_destination(destination)?;
-        let state_root = state_path(&destination);
         Ok(Self {
-            destination,
-            state_root,
+            destination: canonical_destination(destination)?,
         })
     }
 
-    pub(crate) const fn unchecked(destination: PathBuf, state_root: PathBuf) -> Self {
-        Self {
-            destination,
-            state_root,
-        }
+    pub(crate) const fn unchecked(destination: PathBuf) -> Self {
+        Self { destination }
     }
 
     pub fn destination(&self) -> &Path {
         &self.destination
-    }
-
-    pub fn state_root(&self) -> &Path {
-        &self.state_root
-    }
-
-    pub fn lock_path(&self) -> PathBuf {
-        self.state_root.join("lock")
-    }
-
-    pub fn ancestor_fences(&self) -> Vec<PathBuf> {
-        self.destination
-            .ancestors()
-            .skip(1)
-            .filter(|parent| parent.parent().is_some_and(|root| root != *parent))
-            .map(state_path)
-            .collect()
     }
 }
 
@@ -636,58 +606,102 @@ pub fn canonical_destination(path: impl AsRef<Path>) -> Result<PathBuf, Authorit
     Ok(canonical)
 }
 
-#[allow(clippy::case_sensitive_file_extension_comparisons)]
-fn management_name(name: &str) -> bool {
-    let folded = portable_path_key(name);
-    folded.starts_with(".flyrail-") && folded.ends_with(".state")
+fn owned_components(path: &Path) -> Vec<Option<OsString>> {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Prefix(_) | Component::RootDir => Some(None),
+            Component::CurDir => None,
+            Component::ParentDir => Some(Some(OsString::from(".."))),
+            Component::Normal(name) => Some(Some(name.to_os_string())),
+        })
+        .collect()
 }
 
-pub fn hierarchy_conflicts(
-    authority: &ResourceAuthority,
-    whole_tree: bool,
-) -> Result<Vec<PathBuf>, AuthorityError> {
-    let mut conflicts: Vec<PathBuf> = Vec::new();
-    for fence in authority.ancestor_fences() {
-        if std::fs::metadata(&fence).is_ok()
-            || std::fs::symlink_metadata(&fence)
-                .is_ok_and(|metadata| metadata.file_type().is_symlink())
-        {
-            conflicts.push(fence);
+fn lenient_resolve(path: &Path) -> PathBuf {
+    const MAX_LINKS: usize = 40;
+    let mut pending: std::collections::VecDeque<Option<OsString>> = owned_components(path).into();
+    let mut links = 0;
+    let mut resolved = PathBuf::from("/");
+    while let Some(component) = pending.pop_front() {
+        let Some(name) = component else {
+            resolved = PathBuf::from("/");
+            continue;
+        };
+        if name == ".." {
+            resolved.pop();
+            continue;
+        }
+        let candidate = resolved.join(&name);
+        let target = std::fs::symlink_metadata(&candidate)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            .then(|| std::fs::read_link(&candidate).ok())
+            .flatten()
+            .filter(|_| links < MAX_LINKS);
+        if let Some(target) = target {
+            links += 1;
+            for (offset, part) in owned_components(&target).into_iter().enumerate() {
+                pending.insert(offset, part);
+            }
+        } else {
+            resolved = candidate;
         }
     }
-    if whole_tree && std::fs::metadata(authority.destination()).is_ok() {
-        let mut pending: Vec<PathBuf> = vec![authority.destination().to_path_buf()];
-        while let Some(directory) = pending.pop() {
-            let metadata = std::fs::symlink_metadata(&directory)
-                .map_err(|error| io_destination(&error, Some(&directory)))?;
-            check_safe(&metadata, &directory)?;
-            if !metadata.is_dir() {
-                return Err(unsafe_destination(
-                    "whole-tree resource must be a directory",
-                    &directory,
-                ));
+    resolved
+}
+
+pub(crate) fn physical_location(path: &Path) -> Result<PathBuf, AuthorityError> {
+    let absolute = std::path::absolute(path).map_err(|error| io_destination(&error, Some(path)))?;
+    let mut existing = lenient_resolve(&absolute);
+    let mut missing: Vec<OsString> = Vec::new();
+    while !existing.is_dir() {
+        let Some(name) = existing.file_name().map(OsStr::to_os_string) else {
+            break;
+        };
+        missing.insert(0, name);
+        existing.pop();
+    }
+    let mut physical = physical_directory(&existing)?;
+    physical.extend(missing);
+    Ok(physical)
+}
+
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+pub(crate) fn management_name(name: &str) -> bool {
+    let folded = portable_path_key(name);
+    folded.starts_with(".flyrail-") && folded.ends_with(".txn")
+}
+
+pub(crate) fn transaction_entries(destination: &Path) -> Result<Vec<PathBuf>, AuthorityError> {
+    let mut entries = Vec::new();
+    let mut pending: Vec<PathBuf> = vec![destination.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let metadata = std::fs::symlink_metadata(&directory)
+            .map_err(|error| io_destination(&error, Some(&directory)))?;
+        check_safe(&metadata, &directory)?;
+        if !metadata.is_dir() {
+            return Err(unsafe_destination(
+                "whole-tree resource must be a directory",
+                &directory,
+            ));
+        }
+        let children = std::fs::read_dir(&directory)
+            .map_err(|error| io_destination(&error, Some(&directory)))?;
+        for entry in children {
+            let entry = entry.map_err(|error| io_destination(&error, Some(&directory)))?;
+            let child = entry.path();
+            if management_name(&entry.file_name().to_string_lossy()) {
+                entries.push(child);
+                continue;
             }
-            let entries = std::fs::read_dir(&directory)
-                .map_err(|error| io_destination(&error, Some(&directory)))?;
-            for entry in entries {
-                let entry = entry.map_err(|error| io_destination(&error, Some(&directory)))?;
-                let child = entry.path();
-                let child_name = entry.file_name();
-                if management_name(&child_name.to_string_lossy()) {
-                    conflicts.push(child);
-                    continue;
-                }
-                let metadata = std::fs::symlink_metadata(&child)
-                    .map_err(|error| io_destination(&error, Some(&child)))?;
-                check_safe(&metadata, &child)?;
-                if metadata.is_dir() {
-                    pending.push(child);
-                }
+            let metadata = std::fs::symlink_metadata(&child)
+                .map_err(|error| io_destination(&error, Some(&child)))?;
+            check_safe(&metadata, &child)?;
+            if metadata.is_dir() {
+                pending.push(child);
             }
         }
     }
-    conflicts.sort();
-    Ok(conflicts)
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -786,8 +800,7 @@ mod tests {
                 .expect("claim identity");
             let claim =
                 claim_vector(kind, selector).unwrap_or_else(|error| panic!("{name}: {error}"));
-            let authority =
-                ResourceAuthority::unchecked(destination.clone(), state_path(&destination));
+            let authority = ResourceAuthority::unchecked(destination.clone());
             let actual = claim
                 .identity(&authority)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
@@ -871,80 +884,110 @@ mod tests {
                     .expect("authority destination"),
             );
             assert_eq!(
-                state_path(&destination).to_string_lossy().as_ref(),
-                item.get("state_root")
+                crate::state::destination_key(&destination),
+                item.get("destination_key")
                     .and_then(Json::as_str)
-                    .expect("state_root"),
-                "state path mismatch for {name}"
+                    .expect("destination_key"),
+                "destination key mismatch for {name}"
             );
-            let authority =
-                ResourceAuthority::unchecked(destination.clone(), state_path(&destination));
+            let transaction_id = item
+                .get("transaction_id")
+                .and_then(Json::as_str)
+                .expect("transaction_id");
             assert_eq!(
-                authority.lock_path().to_string_lossy().as_ref(),
-                item.get("lock_path")
+                transaction_path(&destination, transaction_id)
+                    .expect("transaction path")
+                    .to_string_lossy()
+                    .as_ref(),
+                item.get("transaction_path")
                     .and_then(Json::as_str)
-                    .expect("lock_path"),
-                "lock path mismatch for {name}"
+                    .expect("transaction_path"),
+                "transaction path mismatch for {name}"
             );
         }
     }
 
+    const TRANSACTION: &str = "0123456789abcdef0123456789abcdef";
+
+    fn admitted(
+        store: &crate::stores::MemoryStore,
+        authority: &ResourceAuthority,
+        kind: crate::resource_models::ResourceKind,
+    ) {
+        let reference =
+            crate::resource_models::ResourceRef::new(authority.destination().to_path_buf(), kind)
+                .expect("reference");
+        crate::state::write_record(
+            store,
+            &crate::state::resource_key(authority.destination(), "authority"),
+            &reference,
+            None,
+        )
+        .expect("authority record");
+    }
+
+    fn conflicts(
+        store: &crate::stores::MemoryStore,
+        authority: &ResourceAuthority,
+        whole_tree: bool,
+    ) -> Result<Vec<PathBuf>, crate::observations::TargetError> {
+        crate::state::hierarchy_conflicts(store, authority, whole_tree)
+    }
+
     #[test]
-    fn state_path_hash_uses_portable_name_only() {
+    fn transaction_path_hash_uses_portable_name_only() {
         let destination = Path::new("/tmp/targets/AGENTS.md");
         let expected = format!(
-            ".flyrail-{}.state",
-            sha256_hex(&{
-                let mut hasher = Sha256::new();
-                hasher.update(portable_path_key("AGENTS.md").as_bytes());
-                hasher.finalize()
-            })
+            ".flyrail-{}-{TRANSACTION}.txn",
+            sha256_hex(&Sha256::digest(portable_path_key("AGENTS.md").as_bytes()))
         );
         assert_eq!(
-            state_path(destination),
+            transaction_path(destination, TRANSACTION).expect("path"),
             Path::new("/tmp/targets").join(&expected)
         );
         assert_eq!(
-            state_path(destination).file_name(),
-            state_path(Path::new("/elsewhere/AGENTS.md")).file_name(),
-            "state path name depends on the file name only"
+            transaction_path(destination, TRANSACTION)
+                .expect("path")
+                .file_name(),
+            transaction_path(Path::new("/elsewhere/AGENTS.md"), TRANSACTION)
+                .expect("path")
+                .file_name(),
+            "transaction path name depends on the file name only"
         );
     }
 
     #[test]
-    fn state_path_hashes_trailing_parent_dir_like_python() {
-        let expected = Path::new("/a").join(
-            ".flyrail-5ec1f7e700f37c3d0b2981d04855fc34b94aaa15457b05ca571817442d228f81.state",
-        );
-        assert_eq!(state_path(Path::new("/a/..")), expected);
+    fn transaction_path_hashes_trailing_parent_dir_like_python() {
+        let expected = Path::new("/a").join(format!(
+            ".flyrail-5ec1f7e700f37c3d0b2981d04855fc34b94aaa15457b05ca571817442d228f81-{TRANSACTION}.txn"
+        ));
         assert_eq!(
-            state_path(Path::new("/a/.")),
-            state_path(Path::new("/a")),
+            transaction_path(Path::new("/a/.."), TRANSACTION).expect("path"),
+            expected
+        );
+        assert_eq!(
+            transaction_path(Path::new("/a/."), TRANSACTION).expect("path"),
+            transaction_path(Path::new("/a"), TRANSACTION).expect("path"),
             "a trailing current-directory component folds into the previous name"
         );
-        assert_eq!(
-            state_path(Path::new("/")).file_name(),
-            state_path(Path::new(".")).file_name(),
-            "root and bare current-directory names both hash the empty name"
-        );
     }
 
     #[test]
-    fn ancestor_fences_cover_parents_but_not_root() {
-        let authority =
-            ResourceAuthority::unchecked(PathBuf::from("/a/b/c"), state_path(Path::new("/a/b/c")));
-        let fences: Vec<String> = authority
-            .ancestor_fences()
-            .iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            fences,
-            vec![
-                "/a/.flyrail-3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d.state",
-                "/.flyrail-ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb.state",
-            ]
-        );
+    fn transaction_paths_require_a_transaction_id() {
+        for transaction_id in [
+            "",
+            &"0".repeat(31),
+            &"A".repeat(32),
+            &format!("../{}", "0".repeat(29)),
+        ] {
+            assert_eq!(
+                transaction_path(Path::new("/tmp/AGENTS.md"), transaction_id)
+                    .unwrap_err()
+                    .message(),
+                "transaction id must be 32 lowercase hexadecimal characters",
+                "{transaction_id:?}"
+            );
+        }
     }
 
     #[test]
@@ -967,7 +1010,7 @@ mod tests {
                 "resource destination cannot be a root or contain traversal",
             ),
             (
-                "/tmp/.FLYRAIL-x.STATE",
+                "/tmp/.FLYRAIL-x.TXN",
                 "resource destination enters reserved management state",
             ),
             (
@@ -1016,7 +1059,7 @@ mod tests {
                 "resource destination cannot be a root or contain traversal",
             ),
             (
-                b"/tmp/.flyrail-x.state/\xff".as_slice(),
+                b"/tmp/.flyrail-x.txn/\xff".as_slice(),
                 "resource destination enters reserved management state",
             ),
         ];
@@ -1112,10 +1155,14 @@ mod tests {
             .expect("home authority");
         let from_project = ResourceAuthority::new(&document).expect("project authority");
         assert_eq!(from_home, from_project);
-        assert_eq!(from_home.state_root().parent(), Some(project.as_path()));
-        assert_eq!(from_home.lock_path(), from_home.state_root().join("lock"));
         assert_eq!(
-            hierarchy_conflicts(&from_home, false).expect("conflicts"),
+            transaction_path(from_home.destination(), TRANSACTION)
+                .expect("path")
+                .parent(),
+            Some(project.as_path())
+        );
+        assert_eq!(
+            conflicts(&crate::stores::MemoryStore::new(), &from_home, false).expect("conflicts"),
             Vec::<PathBuf>::new()
         );
         assert_eq!(directory_names(&project), vec![String::from("AGENTS.md")]);
@@ -1128,17 +1175,28 @@ mod tests {
         let project =
             ResourceAuthority::new(tmp.join("home/project/AGENTS.md")).expect("project authority");
         assert_eq!(home.destination(), &tmp.join("home/AGENTS.md"));
-        assert_ne!(project.state_root(), home.state_root());
-        assert!(
-            !project
-                .ancestor_fences()
-                .iter()
-                .any(|fence| fence.as_path() == home.state_root())
+        assert_ne!(
+            transaction_path(project.destination(), TRANSACTION).expect("path"),
+            transaction_path(home.destination(), TRANSACTION).expect("path")
+        );
+        let store = crate::stores::MemoryStore::new();
+        admitted(
+            &store,
+            &home,
+            crate::resource_models::ResourceKind::Document,
+        );
+        assert_eq!(
+            conflicts(&store, &project, false).expect("conflicts"),
+            Vec::<PathBuf>::new()
         );
         assert_eq!(directory_names(&tmp), [] as [String; 0]);
         assert_eq!(
-            state_path(&tmp.join("ABSENT.md")),
-            state_path(&tmp.join("absent.md"))
+            transaction_path(&tmp.join("ABSENT.md"), TRANSACTION).expect("path"),
+            transaction_path(&tmp.join("absent.md"), TRANSACTION).expect("path")
+        );
+        assert_eq!(
+            crate::state::destination_key(&tmp.join("ABSENT.md")),
+            crate::state::destination_key(&tmp.join("absent.md"))
         );
     }
 
@@ -1146,13 +1204,13 @@ mod tests {
     fn long_resource_names_have_bounded_sibling_state_names() {
         let tmp = crate::test_support::checkout_temp_dir("bounded-state");
         let authority = ResourceAuthority::new(tmp.join("a".repeat(240))).expect("long authority");
-        assert!(
-            authority
-                .state_root()
+        assert_eq!(
+            transaction_path(authority.destination(), TRANSACTION)
+                .expect("path")
                 .file_name()
-                .expect("state name")
-                .len()
-                < 100
+                .expect("transaction name")
+                .len(),
+            110
         );
     }
 
@@ -1180,52 +1238,56 @@ mod tests {
 
     #[test]
     fn persistent_fences_detect_tree_child_conflict_even_without_receipts() {
+        use crate::resource_models::ResourceKind;
         let tmp = crate::test_support::checkout_temp_dir("persistent-fences");
         let tree = ResourceAuthority::new(tmp.join("config")).expect("tree authority");
         let child =
             ResourceAuthority::new(tmp.join("config/nested/hooks.json")).expect("child authority");
-        std::fs::create_dir_all(child.state_root()).expect("child fence");
-        std::fs::create_dir(tree.state_root()).expect("tree fence");
+        let store = crate::stores::MemoryStore::new();
+        admitted(&store, &child, ResourceKind::Document);
+        admitted(&store, &tree, ResourceKind::Tree);
         assert_eq!(
-            hierarchy_conflicts(&tree, true).expect("tree conflicts"),
-            vec![child.state_root().to_path_buf()]
+            conflicts(&store, &tree, true).expect("tree conflicts"),
+            vec![child.destination().to_path_buf()]
         );
         assert_eq!(
-            hierarchy_conflicts(&child, false).expect("child conflicts"),
-            vec![tree.state_root().to_path_buf()]
+            conflicts(&store, &child, false).expect("child conflicts"),
+            vec![tree.destination().to_path_buf()]
         );
         let sibling = ResourceAuthority::new(tmp.join("sibling.md")).expect("sibling authority");
         assert_eq!(
-            hierarchy_conflicts(&sibling, false).expect("sibling conflicts"),
+            conflicts(&store, &sibling, false).expect("sibling conflicts"),
             Vec::<PathBuf>::new()
         );
     }
 
     #[test]
     fn fence_order_excludes_both_parent_and_child_admission() {
+        use crate::resource_models::ResourceKind;
         let tmp = crate::test_support::checkout_temp_dir("fence-order");
+        let store = crate::stores::MemoryStore::new();
         let tree = ResourceAuthority::new(tmp.join("config")).expect("tree authority");
-        std::fs::create_dir(tree.state_root()).expect("tree fence");
+        admitted(&store, &tree, ResourceKind::Tree);
         assert_eq!(
-            hierarchy_conflicts(&tree, true).expect("tree conflicts"),
+            conflicts(&store, &tree, true).expect("tree conflicts"),
             Vec::<PathBuf>::new()
         );
         let child = ResourceAuthority::new(tmp.join("config/child.md")).expect("child authority");
-        std::fs::create_dir_all(child.state_root()).expect("child fence");
+        admitted(&store, &child, ResourceKind::Document);
         assert_eq!(
-            hierarchy_conflicts(&child, false).expect("child conflicts"),
-            vec![tree.state_root().to_path_buf()]
+            conflicts(&store, &child, false).expect("child conflicts"),
+            vec![tree.destination().to_path_buf()]
         );
         assert_eq!(
-            hierarchy_conflicts(&tree, true).expect("tree conflicts"),
-            vec![child.state_root().to_path_buf()]
+            conflicts(&store, &tree, true).expect("tree conflicts"),
+            vec![child.destination().to_path_buf()]
         );
     }
 
     #[test]
     fn resource_cannot_enter_management_state_or_regular_ancestor() {
         let tmp = crate::test_support::checkout_temp_dir("reserved-destinations");
-        let reserved = ResourceAuthority::new(tmp.join(".flyrail-deadbeef.state/receipt.json"));
+        let reserved = ResourceAuthority::new(tmp.join(".flyrail-deadbeef.txn/staging"));
         assert_eq!(
             reserved.unwrap_err().message(),
             "resource destination enters reserved management state"
@@ -1238,7 +1300,7 @@ mod tests {
             "resource ancestor must be a directory"
         );
         let authority = ResourceAuthority::new(&file).expect("file authority");
-        let whole_tree = hierarchy_conflicts(&authority, true);
+        let whole_tree = conflicts(&crate::stores::MemoryStore::new(), &authority, true);
         assert_eq!(
             whole_tree.unwrap_err().message(),
             "whole-tree resource must be a directory"
@@ -1248,8 +1310,8 @@ mod tests {
     #[test]
     fn resource_rejects_portable_management_names() {
         let tmp = crate::test_support::checkout_temp_dir("portable-management");
-        for name in [".flyrail-deadbeef.state", ".FLYRAIL-deadbeef.STATE"] {
-            for destination in [tmp.join(name), tmp.join(name).join("receipt.json")] {
+        for name in [".flyrail-deadbeef.txn", ".FLYRAIL-deadbeef.TXN"] {
+            for destination in [tmp.join(name), tmp.join(name).join("staging")] {
                 let rejected = ResourceAuthority::new(&destination);
                 assert_eq!(
                     rejected.unwrap_err().message(),
@@ -1263,7 +1325,7 @@ mod tests {
     #[test]
     fn canonical_physical_path_cannot_enter_management_state() {
         let tmp = crate::test_support::checkout_temp_dir("physical-management");
-        let physical = tmp.join(".FLYRAIL-deadbeef.STATE");
+        let physical = tmp.join(".FLYRAIL-deadbeef.TXN");
         std::fs::create_dir(&physical).expect("management dir");
         let direct = canonical_child(&physical, "receipt.json").expect("canonical child");
         assert_eq!(
@@ -1283,11 +1345,11 @@ mod tests {
     fn tree_hierarchy_detects_case_aliased_management_fences() {
         let tmp = crate::test_support::checkout_temp_dir("aliased-fences");
         let tree = tmp.join("tree");
-        let fence = tree.join(".FLYRAIL-deadbeef.STATE");
+        let fence = tree.join(".FLYRAIL-deadbeef.TXN");
         std::fs::create_dir_all(&fence).expect("case-aliased fence");
         let authority = ResourceAuthority::new(&tree).expect("tree authority");
         assert_eq!(
-            hierarchy_conflicts(&authority, true).expect("conflicts"),
+            conflicts(&crate::stores::MemoryStore::new(), &authority, true).expect("conflicts"),
             vec![fence]
         );
     }
@@ -1358,7 +1420,7 @@ mod tests {
             )
         );
         let authority = ResourceAuthority::new(&tree).expect("tree authority");
-        let walked = hierarchy_conflicts(&authority, true);
+        let walked = conflicts(&crate::stores::MemoryStore::new(), &authority, true);
         assert_eq!(
             walked.unwrap_err().message(),
             format!(

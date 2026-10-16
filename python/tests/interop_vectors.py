@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from conformance import FIXTURES
 
 from flyrail._codec import decode
-from flyrail.authority import Claim, ResourceAuthority, state_path
+from flyrail.authority import Claim, ResourceAuthority
 
 TEMPORARY_ROOT = Path(__file__).resolve().parents[2] / ".cache" / "tmp"
 REJECTED = b'{"fields":{},"type":"Nope"}\n'
@@ -27,17 +27,9 @@ def relocate(record: object, root: Path) -> object:
     if not isinstance(record, dict):
         return record
     if set(record) == {"path"}:
-        original = cast(str, record["path"])
-        name = original.rsplit("/", 1)[-1]
-        if name.startswith(".flyrail-"):
-            target = root / ("config.json" if "config.json" in original else "AGENTS.md")
-            return {"path": state_path(target).as_posix()}
+        name = cast(str, record["path"]).rsplit("/", 1)[-1]
         return {"path": (root / name).as_posix()}
     result = {key: relocate(value, root) for key, value in record.items()}
-    if result.get("type") == "ResourceRef":
-        fields = cast(dict[str, object], result["fields"])
-        destination = Path(cast(dict[str, str], fields["destination"])["path"])
-        fields["state_root"] = {"path": state_path(destination).as_posix()}
     if result.get("type") == "Receipt":
         fields = cast(dict[str, object], result["fields"])
         resource = cast(dict[str, object], fields["resource"])
@@ -58,7 +50,11 @@ def relocate(record: object, root: Path) -> object:
 def fixture_records() -> list[tuple[str, bytes, str]]:
     data = json.loads((FIXTURES / "configurations.json").read_text(encoding="utf-8"))
     result = []
-    for kind, type_name in (("receipts", "Receipt"), ("journals", "Journal")):
+    for kind, type_name in (
+        ("receipts", "Receipt"),
+        ("journals", "Journal"),
+        ("preparations", "Preparation"),
+    ):
         for case in cast(list[dict[str, Any]], data[kind]):
             result.append((case["name"], canonical(case["record"]), type_name))
     return result

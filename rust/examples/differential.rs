@@ -2,16 +2,18 @@
 
 use flyrail::{
     Acquisition, Artifact, Bundle, BundleEntry, BundleIdentity, Claim, ClaimSelector, Content,
-    Dependency, DocumentFormat, DocumentProvenance, DocumentRequest, Family, FileContent, FileMode,
-    InstallationResult, InstallationTarget, InstructionArtifact, Key, ModelValue, OwnedSelection,
-    Ownership, RenderedArtifact, RenderedBundle, ResourceAuthority, Scalar, SectionContent,
-    Selector, SelectorPart, StructuredContent, TargetError, Value, decode, edit_document, encode,
-    inspect_installation, recover_installation, remove, sync,
+    Dependency, DirectoryStore, DocumentFormat, DocumentProvenance, DocumentRequest, Family,
+    FileContent, FileMode, Index, InstallationResult, InstallationTarget, InstructionArtifact,
+    Journal, Key, ModelValue, OwnedSelection, Ownership, Preparation, Receipt, RenderedArtifact,
+    RenderedBundle, ResourceAuthority, ResourceRef, Scalar, SectionContent, Selector, SelectorPart,
+    StructuredContent, TargetError, Value, decode, edit_document, encode, inspect_installation,
+    recover_installation, remove, sync,
 };
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 fn main() {
@@ -516,10 +518,33 @@ fn optional(value: Option<&str>) -> String {
 }
 
 fn relative_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root).map_or_else(
+    let text = path.strip_prefix(root).map_or_else(
         |_| path.to_string_lossy().replace('\\', "/"),
         |relative| format!("$ROOT/{}", relative.to_string_lossy().replace('\\', "/")),
-    )
+    );
+    text.split('/')
+        .map(zeroed_transaction_id)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn zeroed_transaction_id(component: &str) -> String {
+    let (stem, suffix) = component
+        .strip_suffix(".txn")
+        .map_or((component, ""), |stem| (stem, ".txn"));
+    let key = stem.strip_prefix(".flyrail-").unwrap_or(stem);
+    let hex = |text: &str| {
+        text.bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    };
+    match key.split_once('-') {
+        Some((digest, identifier))
+            if digest.len() == 64 && identifier.len() == 32 && hex(digest) && hex(identifier) =>
+        {
+            format!("{}{}{suffix}", &stem[..stem.len() - 32], "0".repeat(32))
+        }
+        _ => component.to_owned(),
+    }
 }
 
 fn error_record(error: Option<&TargetError>, root: &Path) -> String {
@@ -563,10 +588,6 @@ fn result_record(result: &InstallationResult, root: &Path) -> Vec<u8> {
             ),
             ("error", error_record(resource.error(), root)),
             ("revision", optional(resource.revision_digest())),
-            (
-                "state_root",
-                json_string(&relative_path(resource.state_root(), root)),
-            ),
         ])
     }));
     let resources = json_array(result.resources().iter().map(|resource| {
@@ -605,38 +626,58 @@ fn state_snapshot(
     root: &Path,
     target: &InstallationTarget,
 ) -> Result<(), String> {
-    let mut candidates = vec![
-        target.index_root().join("index.json"),
-        target.index_root().join("index.json.next"),
-    ];
-    collect_receipts(root, &mut candidates).map_err(|error| error.to_string())?;
-    candidates.sort();
-    candidates.dedup();
-    for path in candidates {
-        if !path.is_file() {
+    let store = target.store();
+    for key in store.keys("").map_err(|error| error.to_string())? {
+        let Some(raw) = store.read(&key).map_err(|error| error.to_string())? else {
             continue;
+        };
+        if canonical_record(&raw)? != raw {
+            return Err(format!("state record is not canonical: {key}"));
         }
-        let raw = fs::read(&path).map_err(|error| error.to_string())?;
-        if path.file_name().and_then(|name| name.to_str()) == Some("receipt.json") {
-            let value: flyrail::Receipt = decode(&raw).map_err(|error| error.to_string())?;
-            if encode(&value) != raw {
-                return Err(String::from("receipt is not canonical"));
-            }
-        } else {
-            let value: flyrail::Index = decode(&raw).map_err(|error| error.to_string())?;
-            if encode(&value) != raw {
-                return Err(String::from("index is not canonical"));
-            }
-        }
-        let normalized = normalize_state(&raw, root)?;
+        let record: serde_json::Value =
+            serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         emit(
             "lifecycle",
             name,
-            &format!("{step}-state-{}", relative_path(&path, root)),
-            &normalized,
+            &format!("{step}-state-{}", state_key(&key, &record, root)?),
+            &normalize_state(&raw, root)?,
         );
     }
     Ok(())
+}
+
+fn canonical_record(raw: &[u8]) -> Result<Vec<u8>, String> {
+    let record: serde_json::Value =
+        serde_json::from_slice(raw).map_err(|error| error.to_string())?;
+    match record.get("type").and_then(serde_json::Value::as_str) {
+        Some("Index") => decode::<Index>(raw).map(|value| encode(&value)),
+        Some("Journal") => decode::<Journal>(raw).map(|value| encode(&value)),
+        Some("Preparation") => decode::<Preparation>(raw).map(|value| encode(&value)),
+        Some("Receipt") => decode::<Receipt>(raw).map(|value| encode(&value)),
+        Some("ResourceRef") => decode::<ResourceRef>(raw).map(|value| encode(&value)),
+        _ => return Err(String::from("unknown state record")),
+    }
+    .map_err(|error| error.to_string())
+}
+
+fn state_key(key: &str, record: &serde_json::Value, root: &Path) -> Result<String, String> {
+    if !key.starts_with("resource/") {
+        return Ok(key.to_owned());
+    }
+    let fields = &record["fields"];
+    let resource = if record["type"] == "ResourceRef" {
+        fields
+    } else {
+        &fields["resource"]["fields"]
+    };
+    let destination = resource["destination"]["path"]
+        .as_str()
+        .ok_or_else(|| format!("{key}: record names no destination"))?;
+    let name = key.rsplit('/').next().unwrap_or_default();
+    Ok(format!(
+        "resource/{}/{name}",
+        relative_path(Path::new(destination), root)
+    ))
 }
 
 fn normalize_state(raw: &[u8], root: &Path) -> Result<Vec<u8>, String> {
@@ -666,7 +707,7 @@ fn normalize_state(raw: &[u8], root: &Path) -> Result<Vec<u8>, String> {
                             fields.insert(key.to_owned(), serde_json::Value::from(0));
                         }
                         fields.insert(String::from("security"), serde_json::json!({"bytes": ""}));
-                    } else if type_name.as_deref() == Some("Receipt") {
+                    } else if matches!(type_name.as_deref(), Some("Receipt" | "Preparation")) {
                         fields.insert(
                             String::from("transaction_id"),
                             serde_json::Value::String("0".repeat(32)),
@@ -684,19 +725,6 @@ fn normalize_state(raw: &[u8], root: &Path) -> Result<Vec<u8>, String> {
     let mut encoded = serde_json::to_vec(&value).map_err(|error| error.to_string())?;
     encoded.push(b'\n');
     Ok(encoded)
-}
-
-fn collect_receipts(root: &Path, paths: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            collect_receipts(&path, paths)?;
-        } else if entry.file_name() == "receipt.json" {
-            paths.push(path);
-        }
-    }
-    Ok(())
 }
 
 fn payload_snapshot(root: &Path) -> Result<Vec<u8>, String> {
@@ -759,7 +787,9 @@ fn run_lifecycle(rows: &[Vec<String>], root: &Path) -> Result<(), String> {
     for row in selected(rows, "lifecycle") {
         let case_root = root.join(&row[1]);
         fs::create_dir(&case_root).map_err(|error| error.to_string())?;
-        let target = InstallationTarget::without_context(case_root.join("index"))
+        let store = DirectoryStore::new(root.join(".state").join(&row[1]))
+            .map_err(|error| error.to_string())?;
+        let target = InstallationTarget::without_context(Arc::new(store))
             .map_err(|error| error.to_string())?;
         let (first_rendered, ids) = lifecycle_rendered(&case_root, &row[2], &row[4])?;
         let destination = first_rendered.artifacts()[0].destination();
@@ -808,11 +838,6 @@ fn run_lifecycle(rows: &[Vec<String>], root: &Path) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
         lifecycle_result(&row[1], "3-update", &updated, &case_root, &target)?;
-        fs::copy(
-            target.index_root().join("index.json"),
-            target.index_root().join("index.json.next"),
-        )
-        .map_err(|error| error.to_string())?;
         let recovered = recover_installation("team", &target, Duration::ZERO)
             .map_err(|error| error.to_string())?;
         lifecycle_result(&row[1], "4-recover", &recovered, &case_root, &target)?;

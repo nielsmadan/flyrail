@@ -4,7 +4,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from flyrail._resource_io import ancestors, failure, observe
+from flyrail._resource_io import failure, observe, resource_ancestors
 from flyrail._resource_models import (
     Node,
     OwnedClaim,
@@ -15,8 +15,8 @@ from flyrail._resource_models import (
 )
 from flyrail._resource_transaction import pending_recovery
 from flyrail._schema import edit_schema_document, matches
-from flyrail._state import read_record, resource_key
-from flyrail.authority import Claim, Ownership, transaction_path
+from flyrail._state import choose_transaction_directory, read_record, resource_key
+from flyrail.authority import Claim, Ownership
 from flyrail.bundle import Bundle
 from flyrail.configuration import ClaimObservation, ResourceObservation, ResourcePlan
 from flyrail.content import FileContent, FileMode, SectionContent, StructuredContent, TreeContent
@@ -475,13 +475,15 @@ def plan_resource(
         and replace(receipt, transaction_id=previous.transaction_id) == previous
     ):
         receipt = previous
+    directory = choose_transaction_directory(store, ref.destination, receipt.transaction_id)
     return ResourcePlan(
         ref,
         before,
         planned,
         previous,
         receipt,
-        ancestors(transaction_path(ref.destination, receipt.transaction_id) / "staging"),
+        resource_ancestors(ref.destination, directory / "staging"),
+        directory,
         recovery,
         required,
         error,

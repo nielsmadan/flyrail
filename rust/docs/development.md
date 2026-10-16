@@ -39,10 +39,14 @@ python3 python/scripts/check.py sync
 ```
 
 The differential suite compares typed values, bundle/render digests, document
-edits, and lifecycle observations against the Python implementation. The
-operational interop suite runs both implementations against the same private
-state and verifies cross-language inspect/update/remove, lock exclusion, recovery,
-and unknown-state refusal. The Python `scripts/interop_driver.py` is covered by
+edits, lifecycle observations and normalized store records against the Python
+implementation. The two implementations never share a state store. The
+operational interop suite runs each lifecycle scenario once per implementation,
+each with its own `DirectoryStore`, and compares every step's result, destination
+bytes and modes, and store records after normalizing transaction ids, node
+identities and the case root. It also has a Python application and a Rust
+application share one instruction file through separate stores, and covers codec
+round trips, store lock exclusion and unknown-state refusal. The Python `scripts/interop_driver.py` is covered by
 the existing Ruff and strict-mypy `scripts` include; it also runs through the Rust
 interop integration test. No separate lint recipe is needed.
 

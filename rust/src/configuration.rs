@@ -1,32 +1,33 @@
-use crate::authority::{AuthorityError, canonical_destination};
 use crate::bundle::Bundle;
 use crate::editors::{Acquisition, EditStatus};
 use crate::json::Json;
 use crate::models::OperationStatus;
 use crate::observations::TargetError;
 use crate::rendered::{Notice, RenderedBundle};
-use crate::resource_models::{Ancestor, Generation, Index, ResourceRef, Revision, digest};
+use crate::resource_models::{Generation, Index, ResourceRef, digest};
+use crate::stores::StateStore;
 use crate::validation::validate_identifier;
 use crate::values::ValueError;
 use std::collections::HashSet;
+use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub use crate::resource_plan::ResourcePlan;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct InstallationTarget {
-    index_root: PathBuf,
+    store: Arc<dyn StateStore>,
     context: Vec<(String, String)>,
     routing_context: Vec<(String, String)>,
 }
 
 impl InstallationTarget {
     pub fn new(
-        index_root: impl AsRef<Path>,
+        store: Arc<dyn StateStore>,
         context: impl IntoIterator<Item = (String, String)>,
         routing_context: impl IntoIterator<Item = (String, String)>,
-    ) -> Result<Self, AuthorityError> {
-        let index_root = canonical_destination(index_root)?;
+    ) -> Result<Self, ValueError> {
         let mut context = context.into_iter().collect::<Vec<_>>();
         let mut routing_context = routing_context.into_iter().collect::<Vec<_>>();
         check_context(&context)?;
@@ -34,18 +35,18 @@ impl InstallationTarget {
         context.sort();
         routing_context.sort();
         Ok(Self {
-            index_root,
+            store,
             context,
             routing_context,
         })
     }
 
-    pub fn without_context(index_root: impl AsRef<Path>) -> Result<Self, AuthorityError> {
-        Self::new(index_root, std::iter::empty(), std::iter::empty())
+    pub fn without_context(store: Arc<dyn StateStore>) -> Result<Self, ValueError> {
+        Self::new(store, std::iter::empty(), std::iter::empty())
     }
 
-    pub fn index_root(&self) -> &Path {
-        &self.index_root
+    pub const fn store(&self) -> &Arc<dyn StateStore> {
+        &self.store
     }
 
     pub fn context(&self) -> &[(String, String)] {
@@ -57,24 +58,42 @@ impl InstallationTarget {
     }
 
     pub fn context_digest(&self) -> String {
-        digest(&Json::Array(vec![
-            crate::codec::encoded_path(&self.index_root),
-            Json::Array(
-                self.context
-                    .iter()
-                    .map(|(key, value)| {
-                        Json::Array(vec![Json::Str(key.clone()), Json::Str(value.clone())])
-                    })
-                    .collect(),
-            ),
-        ]))
+        digest(&Json::Array(
+            self.context
+                .iter()
+                .map(|(key, value)| {
+                    Json::Array(vec![Json::Str(key.clone()), Json::Str(value.clone())])
+                })
+                .collect(),
+        ))
     }
 }
 
-fn check_context(context: &[(String, String)]) -> Result<(), AuthorityError> {
+impl PartialEq for InstallationTarget {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::addr_eq(Arc::as_ptr(&self.store), Arc::as_ptr(&other.store))
+            && self.context == other.context
+            && self.routing_context == other.routing_context
+    }
+}
+
+impl Eq for InstallationTarget {}
+
+impl fmt::Debug for InstallationTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("InstallationTarget")
+            .field("store", &self.store.location())
+            .field("context", &self.context)
+            .field("routing_context", &self.routing_context)
+            .finish()
+    }
+}
+
+fn check_context(context: &[(String, String)]) -> Result<(), ValueError> {
     let mut keys = HashSet::with_capacity(context.len());
     if !context.iter().all(|(key, _)| keys.insert(key.as_str())) {
-        return Err(ValueError::new("target context keys must be unique").into());
+        return Err(ValueError::new("target context keys must be unique"));
     }
     Ok(())
 }
@@ -137,7 +156,6 @@ impl ClaimObservation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceObservation {
     destination: PathBuf,
-    state_root: PathBuf,
     claims: Vec<ClaimObservation>,
     revision_digest: Option<String>,
     error: Option<TargetError>,
@@ -147,14 +165,12 @@ pub struct ResourceObservation {
 impl ResourceObservation {
     pub(crate) const fn observed(
         destination: PathBuf,
-        state_root: PathBuf,
         claims: Vec<ClaimObservation>,
         revision_digest: String,
         recovery_paths: Vec<PathBuf>,
     ) -> Self {
         Self {
             destination,
-            state_root,
             claims,
             revision_digest: Some(revision_digest),
             error: None,
@@ -165,7 +181,6 @@ impl ResourceObservation {
     pub(crate) fn failed(reference: &ResourceRef, error: TargetError) -> Self {
         Self {
             destination: reference.destination().to_path_buf(),
-            state_root: reference.state_root().to_path_buf(),
             claims: Vec::new(),
             revision_digest: None,
             error: Some(error),
@@ -175,9 +190,6 @@ impl ResourceObservation {
 
     pub fn destination(&self) -> &Path {
         &self.destination
-    }
-    pub fn state_root(&self) -> &Path {
-        &self.state_root
     }
     pub fn claims(&self) -> &[ClaimObservation] {
         &self.claims
@@ -361,8 +373,6 @@ pub struct LifecyclePreview {
     acquisition: Acquisition,
     replace_modified: bool,
     index: Option<Index>,
-    index_revision: Option<Revision>,
-    index_ancestors: Vec<Ancestor>,
     generation: Option<Generation>,
     resources: Vec<ResourcePlan>,
     error: Option<TargetError>,
@@ -378,8 +388,6 @@ impl LifecyclePreview {
         acquisition: Acquisition,
         replace_modified: bool,
         index: Option<Index>,
-        index_revision: Option<Revision>,
-        index_ancestors: Vec<Ancestor>,
         generation: Option<Generation>,
         resources: Vec<ResourcePlan>,
         error: Option<TargetError>,
@@ -392,8 +400,6 @@ impl LifecyclePreview {
             acquisition,
             replace_modified,
             index,
-            index_revision,
-            index_ancestors,
             generation,
             resources,
             error,
@@ -429,12 +435,6 @@ impl LifecyclePreview {
     pub const fn index(&self) -> Option<&Index> {
         self.index.as_ref()
     }
-    pub const fn index_revision(&self) -> Option<&Revision> {
-        self.index_revision.as_ref()
-    }
-    pub fn index_ancestors(&self) -> &[Ancestor] {
-        &self.index_ancestors
-    }
     pub const fn generation(&self) -> Option<&Generation> {
         self.generation.as_ref()
     }
@@ -445,15 +445,8 @@ impl LifecyclePreview {
         self.error.as_ref()
     }
 
-    pub(crate) fn with_observations(
-        &self,
-        index_revision: Revision,
-        index_ancestors: Vec<Ancestor>,
-        resources: Vec<ResourcePlan>,
-    ) -> Self {
+    pub(crate) fn with_resources(&self, resources: Vec<ResourcePlan>) -> Self {
         let mut result = self.clone();
-        result.index_revision = Some(index_revision);
-        result.index_ancestors = index_ancestors;
         result.resources = resources;
         result
     }

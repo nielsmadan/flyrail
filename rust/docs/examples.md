@@ -15,17 +15,24 @@ Build and run them from `rust/`:
 cargo build -p flyrail-example-notes -p flyrail-example-checksum
 cargo run -p flyrail-example-notes -- words README.md
 cargo run -p flyrail-example-checksum -- digest README.md
+demo="$(cd .. && pwd)/.cache"
 cargo run -p flyrail-example-notes -- ai install \
-  --source examples/filesystem/bundle --target ../.cache/demo-notes-skills
+  --source examples/filesystem/bundle --target "$demo/demo-notes-skills" \
+  --state "$demo/demo-notes-state"
 cargo run -p flyrail-example-checksum -- ai install \
-  --target ../.cache/demo-checksum-skills
+  --target "$demo/demo-checksum-skills" --state "$demo/demo-checksum-state"
 ```
 
-The target passed to `ai` is the skill container itself. Repeat `--target` for
-several destinations. `status` is read-only, `install` refuses a different owned
-generation, `update` can also install, and `uninstall` is source-free.
-`--replace-modified` is available only for update/removal and authorizes bounded
-same-owner replacement; it does not acquire foreign ownership.
+The target passed to `ai` is the skill container itself. Destinations may not
+contain `..` components, so the commands spell the checkout's `.cache`
+directory as an absolute path. Repeat `--target` for several destinations.
+`--state` selects the application's own state directory
+and constructs a `DirectoryStore` there, passed explicitly to every call;
+flyrail has no default store or location of its own. `status` is read-only,
+`install` refuses a different owned generation, `update` can also install, and
+`uninstall` is source-free. `--replace-modified` is available only for
+update/removal and authorizes bounded same-owner replacement; it does not
+acquire foreign ownership.
 
 Each command prints one JSON report. Exit `0` means the requested state or
 operation succeeded, exit `1` means status differs or a mutation reported a

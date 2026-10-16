@@ -81,6 +81,10 @@ Full revisions detect ordinary concurrent content/metadata changes. They do not
 authenticate receipts or defend against hostile same-user writes between checks
 and syscalls. Unknown preparation data, edited backups and unrecognized revisions
 are retained with diagnostics. There is no age-based cleanup or force-recovery API.
+Recovery also retains a destination that matches a recorded revision but changed
+after the transaction was prepared. It compares modification time on every platform
+and birth time only on macOS; on Linux, a replacement that keeps an older
+modification time and reuses the original's inode is not detected.
 
 The [transaction protocol](../../spec/transaction-protocol.md) handles process
 interruption. It provides no cross-resource atomicity, simultaneous multi-file

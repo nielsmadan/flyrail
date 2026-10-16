@@ -106,6 +106,7 @@ def test_unrecognized_recovery_retains_evidence_until_reconciled(tmp_path: Path)
     target = InstallationTarget(DirectoryStore(tmp_path / "index"))
     assert sync(bundle(), rendered(path), target).observation.is_current
     original = path.read_bytes()
+    times = path.stat()
     run_crash(crash_worker, tmp_path, "prepared")
     path.write_bytes(original + b"Unexpected foreign edit.\n")
     before = snapshot(tmp_path)
@@ -115,6 +116,7 @@ def test_unrecognized_recovery_retains_evidence_until_reconciled(tmp_path: Path)
     assert result.resources[0].recovery_paths
     assert snapshot(tmp_path) == before
     path.write_bytes(original)
+    os.utime(path, ns=(times.st_atime_ns, times.st_mtime_ns))
     assert recover_installation("team", target).status is OperationStatus.APPLIED
     assert remove("team", target).status is OperationStatus.APPLIED
     assert path.read_bytes() == b"# foreign\n"

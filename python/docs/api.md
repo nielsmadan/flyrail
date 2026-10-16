@@ -63,12 +63,20 @@ Three built-ins cover the common cases:
 
 A store decides what flyrail deletes and restores, so keep it private to the
 user running flyrail. `DirectoryStore` and `SQLiteStore` raise `PermissionError`
-for an existing location that is not private to its owner; lifecycle calls report
-it as `IO_ERROR`.
+for an existing location, staging directory included, that is not private to its
+owner; lifecycle calls report it as `IO_ERROR`.
 
 `store.location` names a store's filesystem footprint (a `Path`, or `None` for
-`MemoryStore`); a destination, transaction directory or bundle source that
-overlaps it is refused. A custom store implements `StateStore` directly and must
+`MemoryStore`). `store.staging_directory` names where flyrail stages its writes:
+`<path>/staging` for `DirectoryStore`, `<path>.staging` for `SQLiteStore`, and
+`None` for `MemoryStore` and by default for a custom store. A write stages there
+when the staging directory is on the same mount as the destination (on Linux,
+a bind mount of the same filesystem counts as a different mount), so the
+common setup — store and agent configuration both under the user's home —
+creates nothing beside the user's files. Otherwise it stages in a hidden
+`.flyrail-<hash>-<transaction-id>.txn` directory beside the destination for the
+duration of the write. A destination, transaction directory or bundle source
+that overlaps the location or the staging directory is refused. A custom store implements `StateStore` directly and must
 pass `flyrail.testing.check_store`. The kit checks single-process semantics
 through two handles of one store: compare-and-set writes and deletes, value
 round-trips, key listing and validation, and lock exclusion with bounded waits.

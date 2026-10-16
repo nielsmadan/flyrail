@@ -8,11 +8,13 @@ use crate::editors::{
 use crate::observation::failure;
 use crate::observations::{ErrorCode, TargetError};
 use crate::rendered::{RenderedArtifact, RenderedBundle};
-use crate::resource_io::{ancestors, observe, read, validate_state};
+use crate::resource_io::{observe, resource_ancestors};
 use crate::resource_models::{
     Ancestor, Count, Generation, Index, Node, OwnedClaim, Receipt, ResourceKind, ResourceRef,
     Revision,
 };
+use crate::state::{choose_transaction_directory, read_record, resource_key};
+use crate::stores::StateStore;
 use crate::values::ValueError;
 use sha2::{Digest as _, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -31,7 +33,7 @@ pub struct ResourcePlan {
     previous: Option<Receipt>,
     receipt: Receipt,
     ancestors: Vec<Ancestor>,
-    state_revision: Revision,
+    transaction_directory: PathBuf,
     recovery_paths: Vec<PathBuf>,
     require_existing: bool,
     error: Option<TargetError>,
@@ -46,7 +48,7 @@ impl ResourcePlan {
         previous: Option<Receipt>,
         receipt: Receipt,
         ancestors: Vec<Ancestor>,
-        state_revision: Revision,
+        transaction_directory: PathBuf,
         recovery_paths: Vec<PathBuf>,
         require_existing: bool,
         error: Option<TargetError>,
@@ -58,7 +60,9 @@ impl ResourcePlan {
         {
             return Err(ValueError::new("planned receipts disagree with resource"));
         }
-        if recovery_paths.iter().any(|path| !path.is_absolute()) {
+        if !transaction_directory.is_absolute()
+            || recovery_paths.iter().any(|path| !path.is_absolute())
+        {
             return Err(ValueError::new("expected an absolute concrete path"));
         }
         Ok(Self {
@@ -68,7 +72,7 @@ impl ResourcePlan {
             previous,
             receipt,
             ancestors,
-            state_revision,
+            transaction_directory,
             recovery_paths,
             require_existing,
             error,
@@ -93,8 +97,8 @@ impl ResourcePlan {
     pub fn ancestors(&self) -> &[Ancestor] {
         &self.ancestors
     }
-    pub const fn state_revision(&self) -> &Revision {
-        &self.state_revision
+    pub fn transaction_directory(&self) -> &Path {
+        &self.transaction_directory
     }
     pub fn recovery_paths(&self) -> &[PathBuf] {
         &self.recovery_paths
@@ -106,13 +110,8 @@ impl ResourcePlan {
         self.error.as_ref()
     }
 
-    pub(crate) fn with_observations(
-        &self,
-        state_revision: Revision,
-        ancestors: Vec<Ancestor>,
-    ) -> Self {
+    pub(crate) fn with_ancestors(&self, ancestors: Vec<Ancestor>) -> Self {
         let mut result = self.clone();
-        result.state_revision = state_revision;
         result.ancestors = ancestors;
         result
     }
@@ -172,7 +171,6 @@ impl ClaimObservation {
 #[allow(dead_code, clippy::redundant_pub_crate)]
 pub(crate) struct ResourceObservation {
     destination: PathBuf,
-    state_root: PathBuf,
     claims: Vec<ClaimObservation>,
     content_digest: String,
     recovery_paths: Vec<PathBuf>,
@@ -182,10 +180,6 @@ pub(crate) struct ResourceObservation {
 impl ResourceObservation {
     pub(crate) fn destination(&self) -> &Path {
         &self.destination
-    }
-
-    pub(crate) fn state_root(&self) -> &Path {
-        &self.state_root
     }
 
     pub(crate) fn claims(&self) -> &[ClaimObservation] {
@@ -249,12 +243,8 @@ pub(crate) fn resource(artifact: &RenderedArtifact) -> Result<ResourceRef, Targe
             _ => ResourceKind::Document,
         }
     };
-    ResourceRef::new(
-        authority.destination().to_path_buf(),
-        kind,
-        authority.state_root().to_path_buf(),
-    )
-    .map_err(|error| invalid(error, artifact.destination()))
+    ResourceRef::new(authority.destination().to_path_buf(), kind)
+        .map_err(|error| invalid(error, artifact.destination()))
 }
 
 #[allow(clippy::redundant_pub_crate)]
@@ -481,10 +471,16 @@ pub(crate) fn claim_observations(
         .collect()
 }
 
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn summary(reference: &ResourceRef) -> Result<ResourceObservation, TargetError> {
-    let recovery_paths = validate_state(reference)?;
-    let receipt: Option<Receipt> = read(&reference.state_root().join("receipt.json"), "Receipt")?;
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn stored_receipt(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+) -> Result<Option<Receipt>, TargetError> {
+    let receipt: Option<Receipt> = read_record(
+        store,
+        &resource_key(reference.destination(), "receipt"),
+        "Receipt",
+    )?;
     if receipt
         .as_ref()
         .is_some_and(|receipt| receipt.resource() != reference)
@@ -492,9 +488,19 @@ pub(crate) fn summary(reference: &ResourceRef) -> Result<ResourceObservation, Ta
         return Err(failure(
             ErrorCode::InvalidState,
             "receipt resource disagrees",
-            reference.state_root(),
+            reference.destination(),
         ));
     }
+    Ok(receipt)
+}
+
+#[allow(dead_code, clippy::redundant_pub_crate)]
+pub(crate) fn summary(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+) -> Result<ResourceObservation, TargetError> {
+    let recovery_paths = crate::resource_transaction::pending_recovery(store, reference)?;
+    let receipt = stored_receipt(store, reference)?;
     let current = observe(reference.destination())?;
     let claims = receipt.as_ref().map_or_else(
         || Ok(Vec::new()),
@@ -505,7 +511,6 @@ pub(crate) fn summary(reference: &ResourceRef) -> Result<ResourceObservation, Ta
     )?;
     Ok(ResourceObservation {
         destination: reference.destination().to_path_buf(),
-        state_root: reference.state_root().to_path_buf(),
         claims,
         content_digest: current.content_digest(),
         recovery_paths,
@@ -648,6 +653,7 @@ fn transaction_id() -> String {
     clippy::too_many_lines
 )]
 pub(crate) fn plan_resource(
+    store: &dyn StateStore,
     reference: &ResourceRef,
     identifier: &str,
     bundle: Option<&Bundle>,
@@ -658,20 +664,9 @@ pub(crate) fn plan_resource(
     requirements: &RequirementsByArtifact,
     stable_requirements: &RequirementsByArtifact,
 ) -> Result<ResourcePlan, TargetError> {
-    let recovery_paths = validate_state(reference)?;
-    let previous: Option<Receipt> = read(&reference.state_root().join("receipt.json"), "Receipt")?;
-    if previous
-        .as_ref()
-        .is_some_and(|receipt| receipt.resource() != reference)
-    {
-        return Err(failure(
-            ErrorCode::InvalidState,
-            "receipt resource disagrees",
-            reference.state_root(),
-        ));
-    }
+    let recovery_paths = crate::resource_transaction::pending_recovery(store, reference)?;
+    let previous = stored_receipt(store, reference)?;
     let before = observe(reference.destination())?;
-    let state_revision = observe(reference.state_root())?;
     let claims = previous
         .as_ref()
         .map_or_else(Vec::new, |receipt| receipt.claims().to_vec());
@@ -1057,20 +1052,29 @@ pub(crate) fn plan_resource(
             .map_err(|value| invalid(value, reference.destination()))?,
         )
     };
-    if previous
-        .as_ref()
-        .is_some_and(|old| receipt.equivalent_except_transaction(old))
+    let planned = if error.is_none() {
+        after
+    } else {
+        before.clone()
+    };
+    if planned == before
+        && previous
+            .as_ref()
+            .is_some_and(|old| receipt.equivalent_except_transaction(old))
     {
         receipt = previous.clone().unwrap_or(receipt);
     }
+    let directory =
+        choose_transaction_directory(store, reference.destination(), receipt.transaction_id())?;
+    let ancestors = resource_ancestors(reference.destination(), &[&directory.join("staging")])?;
     ResourcePlan::new(
         reference.clone(),
-        before.clone(),
-        if error.is_none() { after } else { before },
+        before,
+        planned,
         previous,
         receipt,
-        ancestors(&reference.state_root().join("transaction.json"))?,
-        state_revision,
+        ancestors,
+        directory,
         recovery_paths,
         required,
         error,
@@ -1079,10 +1083,10 @@ pub(crate) fn plan_resource(
 }
 
 #[allow(clippy::redundant_pub_crate)]
-pub(crate) fn state_root_order(resources: &mut [ResourceRef]) {
+pub(crate) fn destination_order(resources: &mut [ResourceRef]) {
     resources.sort_by(|left, right| {
-        crate::codec::posix_path(left.state_root())
-            .cmp(&crate::codec::posix_path(right.state_root()))
+        crate::codec::posix_path(left.destination())
+            .cmp(&crate::codec::posix_path(right.destination()))
     });
 }
 
@@ -1125,101 +1129,11 @@ pub(crate) fn requirements_match(
 }
 
 #[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn completes_pending_index(current: Option<&Index>, prepared: Option<&Index>) -> bool {
-    current.is_some_and(|current| {
-        (!current.residual().is_empty()
-            || current.pending().is_some()
-            || current.previous().is_some())
-            && prepared
-                == Index::new(
-                    current.bundle_id().to_owned(),
-                    current.context_digest().to_owned(),
-                    current.pending().cloned(),
-                    None,
-                    None,
-                    Vec::new(),
-                    2,
-                )
-                .ok()
-                .as_ref()
-    })
-}
-
-#[allow(clippy::redundant_pub_crate)]
-pub(crate) fn prepared_index_promotes(
-    current: Option<&Index>,
-    prepared: &Index,
-) -> Result<bool, ValueError> {
-    if Some(prepared) == current || completes_pending_index(current, Some(prepared)) {
-        return Ok(false);
-    }
-    let previous = current.and_then(Index::current);
-    let previous_refs = current
-        .into_iter()
-        .flat_map(Index::resources)
-        .cloned()
-        .collect::<HashSet<_>>();
-    let desired_refs = prepared
-        .pending()
-        .into_iter()
-        .flat_map(Generation::membership)
-        .map(|(reference, _)| reference.clone())
-        .collect::<HashSet<_>>();
-    let residual = prepared.residual().iter().cloned().collect::<HashSet<_>>();
-    if prepared.current() == previous
-        && prepared.previous() == previous
-        && residual == previous_refs.union(&desired_refs).cloned().collect()
-    {
-        return Ok(true);
-    }
-    Err(ValueError::new(
-        "unrecognized installation index preparation retained",
-    ))
-}
-
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn index_with_prepared_resources(
-    current: Option<&Index>,
-    prepared: Option<&Index>,
-    identifier: &str,
-    context_digest: &str,
-) -> Result<Option<Index>, ValueError> {
-    let Some(prepared) = prepared else {
-        return Ok(current.cloned());
-    };
-    let mut resources = current
-        .into_iter()
-        .flat_map(Index::resources)
-        .chain(prepared.resources())
-        .cloned()
-        .collect::<Vec<_>>();
-    state_root_order(&mut resources);
-    resources.dedup();
-    Index::new(
-        identifier.to_owned(),
-        context_digest.to_owned(),
-        current.and_then(Index::current).cloned(),
-        current.and_then(Index::pending).cloned(),
-        current.and_then(Index::previous).cloned(),
-        resources,
-        2,
-    )
-    .map(Some)
-}
-
-#[allow(dead_code, clippy::redundant_pub_crate)]
-pub(crate) fn expects_receipt(
-    index: Option<&Index>,
-    prepared: Option<&Index>,
-    reference: &ResourceRef,
-) -> bool {
-    let expected = index
+pub(crate) fn expects_receipt(index: Option<&Index>, reference: &ResourceRef) -> bool {
+    let mut expected = index
         .into_iter()
         .flat_map(|index| [index.current(), index.previous()].into_iter().flatten());
-    let completed = prepared
-        .filter(|prepared| completes_pending_index(index, Some(prepared)))
-        .and_then(Index::current);
-    expected.chain(completed).any(|generation| {
+    expected.any(|generation| {
         generation
             .membership()
             .iter()
@@ -1275,8 +1189,9 @@ mod tests {
     use crate::artifacts::Family;
     use crate::content::{FileContent, SectionContent};
     use crate::models::BundleEntry;
-    use crate::resource_io::{admit, reserve};
+    use crate::resource_io::admit;
     use crate::resource_transaction::{ResourceLockGuard, cleanup, prepare, publish};
+    use crate::stores::MemoryStore;
     use crate::test_support::checkout_temp_dir;
     use std::time::Duration;
 
@@ -1321,11 +1236,12 @@ mod tests {
         let tmp = checkout_temp_dir("resource-plan-file");
         let (rendered, artifact) = rendered_file(tmp.join("guide"), b"generated\n");
         let reference = resource(&artifact).expect("resource");
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let source = bundle();
         let (requirements, stable_requirements) = requirements(&artifact);
         let missing = plan_resource(
+            &store,
             &reference,
             "team",
             Some(&source),
@@ -1342,6 +1258,7 @@ mod tests {
             "planned artifact requirements are missing"
         );
         let plan = plan_resource(
+            &store,
             &reference,
             "team",
             Some(&source),
@@ -1359,16 +1276,17 @@ mod tests {
             plan.receipt().claims()[0].disposition(),
             Disposition::Created
         );
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&plan, &guard).expect("prepare");
-        publish(&journal).expect("publish");
-        cleanup(&journal).expect("cleanup");
-        let observation = summary(&reference).expect("summary");
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &plan, &guard).expect("prepare");
+        publish(&store, &journal).expect("publish");
+        cleanup(&store, &journal).expect("cleanup");
+        let observation = summary(&store, &reference).expect("summary");
         assert_eq!(observation.claims[0].status, EditStatus::Current);
         assert_eq!(observation.recovery_paths, [] as [PathBuf; 0]);
 
         let empty = RenderedBundle::empty();
         let removal = plan_resource(
+            &store,
             &reference,
             "team",
             None,
@@ -1407,11 +1325,12 @@ mod tests {
         .expect("artifact");
         let rendered = RenderedBundle::new([artifact.clone()], [], []).expect("rendered bundle");
         let reference = resource(&artifact).expect("resource");
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let source = bundle();
         let (requirements, stable_requirements) = requirements(&artifact);
         let first = plan_resource(
+            &store,
             &reference,
             "team",
             Some(&source),
@@ -1424,16 +1343,17 @@ mod tests {
         )
         .expect("plan");
         assert!(first.error().is_none());
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&first, &guard).expect("prepare");
-        publish(&journal).expect("publish");
-        cleanup(&journal).expect("cleanup");
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &first, &guard).expect("prepare");
+        publish(&store, &journal).expect("publish");
+        cleanup(&store, &journal).expect("cleanup");
         std::fs::write(
             reference.destination(),
             b"foreign\n\n<!-- flyrail:guide:start -->\nchanged\n<!-- flyrail:guide:end -->\n",
         )
         .expect("local edit");
         let modified = plan_resource(
+            &store,
             &reference,
             "team",
             Some(&source),
@@ -1481,16 +1401,13 @@ mod tests {
             vec![reference.clone()],
         )
         .expect("pending");
-        assert!(prepared_index_promotes(Some(&current), &pending).expect("transition"));
-        let effective =
-            index_with_prepared_resources(Some(&current), Some(&pending), "team", &"b".repeat(64))
-                .expect("effective")
-                .expect("index");
-        assert_eq!(effective.resources(), vec![&reference]);
-        assert!(expects_receipt(Some(&current), Some(&pending), &reference));
+        assert_eq!(pending.resources(), vec![&reference]);
+        assert!(expects_receipt(Some(&current), &reference));
+        assert!(expects_receipt(Some(&pending), &reference));
         let completed =
-            completed_index("team", &"b".repeat(64), Some(generation)).expect("completed");
-        assert!(completes_pending_index(Some(&pending), Some(&completed)));
+            completed_index("team", &"b".repeat(64), Some(generation.clone())).expect("completed");
+        assert_eq!(completed.current(), Some(&generation));
+        assert!(expects_receipt(Some(&completed), &reference));
     }
 
     #[test]
@@ -1516,10 +1433,11 @@ mod tests {
         .expect("artifact");
         let rendered = RenderedBundle::new([artifact.clone()], [], []).expect("rendered bundle");
         let reference = resource(&artifact).expect("resource");
-        reserve(&reference).expect("reserve");
-        admit(&reference).expect("admit");
+        let store = MemoryStore::new();
+        admit(&store, &reference).expect("admit");
         let (requirements, stable_requirements) = requirements(&artifact);
         let plan = plan_resource(
+            &store,
             &reference,
             "team",
             Some(&bundle()),
@@ -1537,8 +1455,8 @@ mod tests {
                 .iter()
                 .all(|node| node.inode().as_u64() == Some(0))
         );
-        let guard = ResourceLockGuard::acquire(&reference, Duration::ZERO).expect("lock");
-        let journal = prepare(&plan, &guard).expect("prepare");
+        let guard = ResourceLockGuard::acquire(&store, &reference, Duration::ZERO).expect("lock");
+        let journal = prepare(&store, &plan, &guard).expect("prepare");
         assert!(
             journal
                 .receipt()

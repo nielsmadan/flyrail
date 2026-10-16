@@ -1,6 +1,10 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
-use flyrail::{ResourceAuthority, ResourceKind, ResourceRef, admit, decode, reserve};
+mod support;
+
+use flyrail::{
+    DirectoryStore, ResourceAuthority, ResourceKind, ResourceRef, StateStore, admit, decode, encode,
+};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::str::FromStr as _;
@@ -23,9 +27,10 @@ fn main() {
 }
 
 fn run_worker(args: &[String]) -> i32 {
-    let (Some(destination), Some(kind), Some(barrier)) = (args.get(2), args.get(3), args.get(4))
+    let (Some(state), Some(destination), Some(kind), Some(barrier)) =
+        (args.get(2), args.get(3), args.get(4), args.get(5))
     else {
-        eprintln!("worker requires destination, kind and barrier arguments");
+        eprintln!("worker requires state, destination, kind and barrier arguments");
         return 64;
     };
     let kind = match ResourceKind::from_str(kind) {
@@ -42,18 +47,33 @@ fn run_worker(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let reference = match ResourceRef::new(
-        authority.destination().to_path_buf(),
-        kind,
-        authority.state_root().to_path_buf(),
-    ) {
+    let reference = match ResourceRef::new(authority.destination().to_path_buf(), kind) {
         Ok(reference) => reference,
         Err(error) => {
             eprintln!("worker reference: {error}");
             return 1;
         }
     };
-    if let Err(error) = reserve(&reference) {
+    let store = match DirectoryStore::new(state) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("worker store: {error}");
+            return 2;
+        }
+    };
+    let name = format!(
+        "resource/{}",
+        support::destination_key(reference.destination())
+    );
+    let _lock = match store.lock(&name, Duration::from_secs(10)) {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("worker lock: {error}");
+            return 2;
+        }
+    };
+    let key = support::resource_key(reference.destination(), "authority");
+    if let Err(error) = store.write(&key, &encode(&reference), None) {
         eprintln!("worker reserve: {error}");
         return 2;
     }
@@ -67,7 +87,7 @@ fn run_worker(args: &[String]) -> i32 {
         }
         std::thread::sleep(Duration::from_millis(5));
     }
-    match admit(&reference) {
+    match admit(&store, &reference) {
         Ok(()) => println!("admitted"),
         Err(error) => println!("{}", error.code()),
     }
@@ -92,18 +112,25 @@ fn authority_for(destination: &Path) -> ResourceAuthority {
     ResourceAuthority::new(destination).expect("authority")
 }
 
-fn fence_of(destination: &Path) -> PathBuf {
-    authority_for(destination).lock_path()
+fn state_of(root: &Path) -> PathBuf {
+    root.join("state")
 }
 
-fn wait_for_fence(destination: &Path) {
-    let fence = fence_of(destination);
+fn recorded(root: &Path, destination: &Path) -> Option<Vec<u8>> {
+    let canonical = authority_for(destination).destination().to_path_buf();
+    DirectoryStore::new(state_of(root))
+        .expect("store")
+        .read(&support::resource_key(&canonical, "authority"))
+        .expect("authority read")
+}
+
+fn wait_for_fence(root: &Path, destination: &Path) {
     let deadline = Instant::now() + WAIT;
-    while !fence.is_file() {
+    while recorded(root, destination).is_none() {
         assert!(
             Instant::now() <= deadline,
-            "admission fence never appeared at {}",
-            fence.display()
+            "authority record never appeared for {}",
+            destination.display()
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -113,6 +140,7 @@ fn spawn_worker(root: &Path, label: &str, destination: &Path, kind: &str) -> Chi
     let barrier = root.join(format!("barrier-{label}"));
     Command::new(std::env::current_exe().expect("test binary"))
         .arg(WORKER)
+        .arg(state_of(root))
         .arg(destination)
         .arg(kind)
         .arg(&barrier)
@@ -142,11 +170,9 @@ fn outcome_of(child: Child, label: &str) -> String {
     stdout.lines().last().unwrap_or_default().to_owned()
 }
 
-fn recorded_header(destination: &Path) -> ResourceRef {
-    let state_root = authority_for(destination).state_root().to_path_buf();
-    let bytes = std::fs::read(state_root.join("authority.json"))
-        .unwrap_or_else(|error| panic!("authority.json must be readable: {error}"));
-    decode(&bytes).expect("authority.json must decode")
+fn recorded_header(root: &Path, destination: &Path) -> ResourceRef {
+    let bytes = recorded(root, destination).expect("authority record must persist");
+    decode(&bytes).expect("authority record must decode")
 }
 
 fn reference_for(destination: &Path, kind: &str) -> ResourceRef {
@@ -154,21 +180,18 @@ fn reference_for(destination: &Path, kind: &str) -> ResourceRef {
     ResourceRef::new(
         authority.destination().to_path_buf(),
         ResourceKind::from_str(kind).expect("kind"),
-        authority.state_root().to_path_buf(),
     )
     .expect("resource")
 }
 
-fn assert_fences_retained(tree: &Path, child: &Path, kind: &str) {
-    assert!(fence_of(tree).is_file(), "tree fence must persist");
-    assert!(fence_of(child).is_file(), "child fence must persist");
+fn assert_fences_retained(root: &Path, tree: &Path, child: &Path, kind: &str) {
     assert_eq!(
-        recorded_header(tree),
+        recorded_header(root, tree),
         reference_for(tree, kind),
         "tree identity must be recorded"
     );
     assert_eq!(
-        recorded_header(child),
+        recorded_header(root, child),
         reference_for(child, "document"),
         "child identity must be recorded even after its refusal"
     );
@@ -179,15 +202,15 @@ fn tree_first_ordering() {
     let tree = root.join("config");
     std::fs::create_dir(&tree).expect("tree destination");
     let tree_worker = spawn_worker(&root, "tree", &tree, "tree");
-    wait_for_fence(&tree);
+    wait_for_fence(&root, &tree);
     release(&root, "tree");
     assert_eq!(outcome_of(tree_worker, "tree"), "admitted");
     let child = tree.join("child");
     let child_worker = spawn_worker(&root, "child", &child, "document");
-    wait_for_fence(&child);
+    wait_for_fence(&root, &child);
     release(&root, "child");
     assert_eq!(outcome_of(child_worker, "child"), "conflict");
-    assert_fences_retained(&tree, &child, "tree");
+    assert_fences_retained(&root, &tree, &child, "tree");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -197,14 +220,14 @@ fn child_first_ordering() {
     std::fs::create_dir(&tree).expect("tree destination");
     let child = tree.join("child");
     let child_worker = spawn_worker(&root, "child", &child, "document");
-    wait_for_fence(&child);
+    wait_for_fence(&root, &child);
     release(&root, "child");
     assert_eq!(outcome_of(child_worker, "child"), "admitted");
     let tree_worker = spawn_worker(&root, "tree", &tree, "tree");
-    wait_for_fence(&tree);
+    wait_for_fence(&root, &tree);
     release(&root, "tree");
     assert_eq!(outcome_of(tree_worker, "tree"), "conflict");
-    assert_fences_retained(&tree, &child, "tree");
+    assert_fences_retained(&root, &tree, &child, "tree");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -215,13 +238,13 @@ fn simultaneous_ordering() {
     let child = tree.join("child");
     let tree_worker = spawn_worker(&root, "tree", &tree, "tree");
     let child_worker = spawn_worker(&root, "child", &child, "document");
-    wait_for_fence(&tree);
-    wait_for_fence(&child);
+    wait_for_fence(&root, &tree);
+    wait_for_fence(&root, &child);
     release(&root, "tree");
     release(&root, "child");
     assert_eq!(outcome_of(tree_worker, "tree"), "conflict");
     assert_eq!(outcome_of(child_worker, "child"), "conflict");
-    assert_fences_retained(&tree, &child, "tree");
+    assert_fences_retained(&root, &tree, &child, "tree");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -244,25 +267,20 @@ fn case_alias_ordering() {
     let aliased_tree = root.join("CONFIG");
     let child = exact.join("child");
     let child_worker = spawn_worker(&root, "child", &child, "document");
-    wait_for_fence(&child);
+    wait_for_fence(&root, &child);
     release(&root, "child");
     assert_eq!(outcome_of(child_worker, "child"), "admitted");
     let tree_worker = spawn_worker(&root, "tree", &aliased_tree, "tree");
-    wait_for_fence(&exact);
+    wait_for_fence(&root, &exact);
     release(&root, "tree");
     assert_eq!(outcome_of(tree_worker, "tree"), "conflict");
-    assert!(
-        fence_of(&exact).is_file(),
-        "aliased tree fence must persist"
-    );
     assert_eq!(
-        recorded_header(&exact),
+        recorded_header(&root, &exact),
         reference_for(&exact, "tree"),
         "the aliased spelling must record the canonical identity"
     );
-    assert!(fence_of(&child).is_file(), "child fence must persist");
     assert_eq!(
-        recorded_header(&child),
+        recorded_header(&root, &child),
         reference_for(&child, "document"),
         "child identity must be recorded"
     );

@@ -2,9 +2,13 @@ use crate::artifacts::{Audience, Family};
 use crate::configuration::InstallationTarget;
 pub use crate::hooks::{HookRuntime, HookShell};
 use crate::mcp_translation::UnsupportedTranslation;
+use crate::stores::StateStore;
 use crate::targets::{Agent, Platform, Surface, Target, TargetScope, relocated, validate_route};
 use crate::values::ValueError;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+const IDENTITY_KEYS: [&str; 4] = ["agent", "scope", "surface", "root"];
 
 pub const TRANSLATABLE_AGENTS: [Agent; 6] = [
     Agent::Claude,
@@ -273,9 +277,18 @@ impl RenderContext {
 
     pub fn installation(
         &self,
-        index_root: impl AsRef<Path>,
-    ) -> Result<InstallationTarget, crate::authority::AuthorityError> {
-        InstallationTarget::new(index_root, [], self.routing_context())
+        store: Arc<dyn StateStore>,
+        context: Option<Vec<(String, String)>>,
+    ) -> Result<InstallationTarget, ValueError> {
+        let routing = self.routing_context();
+        let context = context.unwrap_or_else(|| {
+            routing
+                .iter()
+                .filter(|(key, _)| IDENTITY_KEYS.contains(&key.as_str()))
+                .cloned()
+                .collect()
+        });
+        InstallationTarget::new(store, context, routing)
     }
 }
 
@@ -518,6 +531,45 @@ mod tests {
             Platform::Linux,
         )
         .expect("context")
+    }
+
+    #[test]
+    fn installations_default_to_the_stable_routing_identity() {
+        let root = checkout_temp_dir("destinations-installation-identity");
+        let store: Arc<dyn StateStore> = Arc::new(crate::stores::MemoryStore::new());
+        let context = project(&root, Agent::Codex)
+            .with_hook_runtime(HookRuntime::new(None, Some(HookShell::Posix)).expect("runtime"));
+        let installation = context
+            .installation(Arc::clone(&store), None)
+            .expect("installation");
+        let root_text = root.display().to_string();
+        assert_eq!(
+            installation.context(),
+            [
+                (String::from("agent"), String::from("codex")),
+                (String::from("root"), root_text),
+                (String::from("scope"), String::from("project")),
+                (String::from("surface"), String::from("cli")),
+            ]
+        );
+        assert_eq!(installation.routing_context(), context.routing_context());
+        assert_eq!(
+            installation.context_digest(),
+            project(&root, Agent::Codex)
+                .installation(Arc::clone(&store), None)
+                .expect("plain installation")
+                .context_digest()
+        );
+        let explicit = context
+            .installation(
+                store,
+                Some(vec![(String::from("app"), String::from("notes"))]),
+            )
+            .expect("explicit installation");
+        assert_eq!(
+            explicit.context(),
+            [(String::from("app"), String::from("notes"))]
+        );
     }
 
     #[test]

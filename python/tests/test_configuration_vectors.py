@@ -19,7 +19,7 @@ from flyrail import (
 from flyrail._codec import decode, encode, record
 from flyrail._observation import ObservationFailure
 from flyrail._resource_io import observe
-from flyrail._resource_models import Generation, Index, Receipt, Revision
+from flyrail._resource_models import Generation, Index, Preparation, Receipt, Revision
 from flyrail._resource_transaction import Journal, recover, transaction_ancestors
 from flyrail._state import (
     destination_key,
@@ -95,6 +95,15 @@ def test_neutral_receipt_vectors_drive_production_source_free_removal(
             assert read_record(store, resource_key(path, "receipt"), Receipt) == value
 
 
+@pytest.mark.parametrize("case", VECTORS["preparations"], ids=lambda case: case["name"])
+def test_neutral_preparation_vectors_round_trip(tmp_path: Path, case: dict[str, Any]) -> None:
+    raw = relocated(case["record"], tmp_path)
+    value = decode(json.dumps(raw).encode())
+    assert isinstance(value, Preparation)
+    assert json.loads(encode(value)) == raw
+    assert value.directory == transaction_path(value.resource.destination, value.transaction_id)
+
+
 @pytest.mark.parametrize("case", VECTORS["transactions"], ids=lambda case: case["name"])
 def test_neutral_transaction_vectors_drive_production_recovery(
     tmp_path: Path, case: dict[str, Any]
@@ -124,6 +133,12 @@ def test_neutral_transaction_vectors_drive_production_recovery(
     directory = transaction_path(ref.destination, journal.receipt.transaction_id)
     with store_lock(store, "resource/" + destination_key(ref.destination), 0):
         write_record(store, resource_key(ref.destination, "authority"), ref, expected=None)
+        write_record(
+            store,
+            resource_key(ref.destination, "preparation"),
+            Preparation(ref, journal.receipt.transaction_id, directory),
+            expected=None,
+        )
         directory.mkdir(mode=0o700)
         for folder in ["staging", "backup"]:
             (directory / folder).mkdir(mode=0o700)
@@ -145,7 +160,7 @@ def test_neutral_transaction_vectors_drive_production_recovery(
             source.write_bytes(observed.data or b"")
             source.chmod(observed.nodes[0].mode)
             source.rename(path)
-        journal = replace(journal, ancestors=transaction_ancestors(directory))
+        journal = replace(journal, ancestors=transaction_ancestors(ref.destination, directory))
         committed = case["observed"]["receipt"] == "new"
         write_record(
             store,
@@ -153,6 +168,7 @@ def test_neutral_transaction_vectors_drive_production_recovery(
             journal.receipt if committed else journal.previous,
             expected=None,
         )
+        os.utime(directory)
         write_record(store, resource_key(ref.destination, "journal"), journal, expected=None)
         if case["expected"]["status"] == "recovered":
             recover(store, ref)
@@ -165,6 +181,8 @@ def test_neutral_transaction_vectors_drive_production_recovery(
                 recover(store, ref)
         retained = store.read(resource_key(ref.destination, "journal")) is not None
         assert retained is case["expected"]["retain_journal"]
+        prepared = store.read(resource_key(ref.destination, "preparation")) is not None
+        assert prepared is case["expected"]["retain_journal"]
         assert directory.exists() is case["expected"]["retain_journal"]
         assert (directory / "backup" / "resource").exists() is case["expected"]["retain_backup"]
         value = read_record(store, resource_key(ref.destination, "receipt"), Receipt)

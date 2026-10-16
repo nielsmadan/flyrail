@@ -12,15 +12,24 @@ from flyrail._resource_io import (
     ancestors,
     failure,
     require,
+    resource_ancestors,
     unsupported,
     validate_kind,
 )
-from flyrail._resource_models import Ancestor, Generation, Index, Receipt, ResourceRef
+from flyrail._resource_models import (
+    Ancestor,
+    Generation,
+    Index,
+    Preparation,
+    Receipt,
+    ResourceRef,
+)
 from flyrail._resource_plan import artifact_claim, plan_resource, resource, summary
 from flyrail._resource_transaction import cleanup, pending_recovery, prepare, publish, recover
 from flyrail._state import (
     destination_key,
     index_key,
+    physical_location,
     read_record,
     resource_key,
     store_lock,
@@ -30,9 +39,7 @@ from flyrail._validation import portable_path_key, validate_identifier
 from flyrail.authority import (
     Claim,
     _management_name,
-    _physical_directory,
     _UnsafeDestination,
-    transaction_path,
 )
 from flyrail.bundle import Bundle
 from flyrail.configuration import (
@@ -124,14 +131,6 @@ def _overlaps_transaction(path: Path, destination: Path) -> bool:
     return selected[: len(parent)] == parent and _management_name(path.parts[len(parent)])
 
 
-def _physical_location(path: Path) -> Path:
-    resolved = path.resolve()
-    existing = resolved
-    while not existing.is_dir():
-        existing = existing.parent
-    return _physical_directory(existing).joinpath(*resolved.parts[len(existing.parts) :])
-
-
 def _references(
     rendered: RenderedBundle,
     index: Index | None,
@@ -139,10 +138,13 @@ def _references(
     bundle: Bundle | None,
     resolved: dict[str, ResourceRef] | None = None,
 ) -> tuple[ResourceRef, ...]:
-    location = target.store.location
-    store = None if location is None else _physical_location(location)
+    stores = tuple(
+        physical_location(path)
+        for path in (target.store.location, target.store.staging_directory)
+        if path is not None
+    )
     for source in () if bundle is None else bundle.source_roots:
-        if store is not None and _overlap(source, store):
+        if any(_overlap(source, store) for store in stores):
             raise ValueError("state store overlaps bundle source")
     if resolved is None:
         resolved = {artifact.id: resource(artifact) for artifact in rendered.artifacts}
@@ -159,8 +161,9 @@ def _references(
     if len({ref.destination for ref in result}) != len(result):
         raise ValueError("resource kinds disagree at the same destination")
     for ref in result:
-        if store is not None and (
+        if any(
             _overlap(ref.destination, store) or _overlaps_transaction(store, ref.destination)
+            for store in stores
         ):
             raise StoreOverlap("state store overlaps a resource or authority")
         for source in () if bundle is None else bundle.source_roots:
@@ -483,15 +486,20 @@ def locks(
     def create_parents(path: Path) -> None:
         for parent in reversed(path.parents):
             if not parent.exists():
-                parent.mkdir(mode=0o700)
+                try:
+                    parent.mkdir(mode=0o700)
+                except FileExistsError:
+                    continue
                 created.append(ancestors(parent / "child")[-1])
 
     ordered = sorted(refs, key=lambda item: str(item.destination))
     for ref in ordered:
         require_private_directories(ref.destination.parent)
-    location = target.store.location
+    location, staging = target.store.location, target.store.staging_directory
     if location is not None:
-        create_parents(_physical_location(location))
+        create_parents(physical_location(location))
+    if staging is not None:
+        create_parents(physical_location(staging) / "transaction")
     with ExitStack() as stack:
         stack.enter_context(
             store_lock(target.store, index_key(identifier, target.context_digest), timeout)
@@ -510,15 +518,17 @@ def _fresh(preview: LifecyclePreview, *, created: tuple[Ancestor, ...] = ()) -> 
     _require_index(preview, preview.index)
     store = preview.target.store
 
-    def checked(path: Path, expected: tuple[Ancestor, ...]) -> tuple[Ancestor, ...]:
-        current = ancestors(path)
-        added = tuple(
-            item for item in created if item.path in path.parents and item not in expected
-        )
-        approved = tuple(sorted((*expected, *added), key=lambda item: len(item.path.parts)))
-        if current != approved:
-            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview ancestor changed", path)
-        return approved
+    def checked(plan: ResourcePlan) -> tuple[Ancestor, ...]:
+        destination, staging = plan.resource.destination, plan.transaction_directory / "staging"
+        current = resource_ancestors(destination, staging)
+        added = {
+            item
+            for item in created
+            if item.path in (*destination.parents, *staging.parents) and item not in plan.ancestors
+        }
+        if set(current) != {*plan.ancestors, *added}:
+            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview ancestor changed", staging)
+        return current
 
     resources = []
     for plan in preview.resources:
@@ -528,13 +538,13 @@ def _fresh(preview: LifecyclePreview, *, created: tuple[Ancestor, ...] = ()) -> 
             None if plan.previous is None else encode(plan.previous)
         ):
             raise failure(ErrorCode.CONCURRENT_CHANGE, "preview receipt changed", destination)
-        if (store.read(resource_key(destination, "journal")) is not None) != bool(
-            plan.recovery_paths
-        ):
-            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview recovery changed", destination)
-        approved = checked(
-            transaction_path(destination, plan.receipt.transaction_id) / "staging", plan.ancestors
+        recorded = any(
+            store.read(resource_key(destination, record)) is not None
+            for record in ("preparation", "journal")
         )
+        if recorded != bool(plan.recovery_paths):
+            raise failure(ErrorCode.CONCURRENT_CHANGE, "preview recovery changed", destination)
+        approved = checked(plan)
         resources.append(replace(plan, ancestors=approved))
     return replace(preview, resources=tuple(resources))
 
@@ -550,14 +560,18 @@ def _require_index(preview: LifecyclePreview, expected: Index | None) -> None:
 
 
 def recovery_paths(
-    store: StateStore, ref: ResourceRef, transaction_id: str | None = None
+    store: StateStore, ref: ResourceRef, directory: Path | None = None
 ) -> tuple[Path, ...]:
     try:
         return pending_recovery(store, ref)
     except (OSError, ObservationFailure):
-        if transaction_id is None:
+        if directory is None:
             return ()
-        return (transaction_path(ref.destination, transaction_id),)
+    try:
+        preparation = read_record(store, resource_key(ref.destination, "preparation"), Preparation)
+    except (OSError, ObservationFailure):
+        return ()
+    return (directory,) if preparation is not None and preparation.directory == directory else ()
 
 
 def _run(preview: LifecyclePreview) -> InstallationResult:
@@ -635,7 +649,7 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
                     failed,
                     message=failed.message + "; recovery: " + error_detail(recovery_error).message,
                 )
-            paths = recovery_paths(target.store, plan.resource, plan.receipt.transaction_id)
+            paths = recovery_paths(target.store, plan.resource, plan.transaction_directory)
             status = (
                 OperationStatus.APPLIED
                 if committed

@@ -29,6 +29,10 @@ def ancestors(path: Path) -> tuple[Ancestor, ...]:
     return tuple(result)
 
 
+def resource_ancestors(destination: Path, *paths: Path) -> tuple[Ancestor, ...]:
+    return tuple(dict.fromkeys(item for path in (destination, *paths) for item in ancestors(path)))
+
+
 def observe(path: Path) -> Revision:
     observer = Observer()
     ancestors(path)
@@ -70,6 +74,30 @@ def observe(path: Path) -> Revision:
 def require(path: Path, revision: Revision) -> None:
     if observe(path) != revision:
         raise failure(ErrorCode.CONCURRENT_CHANGE, "complete resource revision changed", path)
+
+
+def _birth_ns(metadata: os.stat_result) -> int:
+    if sys.platform != "darwin":
+        return 0
+    exact = getattr(metadata, "st_birthtime_ns", None)
+    return int(exact) if exact is not None else int(metadata.st_birthtime * 1_000_000_000)
+
+
+def require_unchanged_since(path: Path, revision: Revision, boundary_ns: int) -> None:
+    for node in revision.nodes:
+        selected = path / node.path if node.path else path
+        try:
+            metadata = selected.lstat()
+        except FileNotFoundError as error:
+            raise failure(
+                ErrorCode.CONCURRENT_CHANGE, "path changed during inspection", selected
+            ) from error
+        if max(metadata.st_mtime_ns, _birth_ns(metadata)) > boundary_ns:
+            raise failure(
+                ErrorCode.RECOVERY_NEEDED,
+                "destination revision changed after preparation",
+                selected,
+            )
 
 
 def validate_kind(ref: ResourceRef) -> None:

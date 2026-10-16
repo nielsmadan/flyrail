@@ -14,8 +14,8 @@ from flyrail import (
     Bundle,
     BundleEntry,
     BundleIdentity,
-    DirectoryStore,
     ErrorCode,
+    MemoryStore,
     OperationStatus,
     SkillArtifact,
     Target,
@@ -55,7 +55,7 @@ def after_security_sample(
 def test_skill_lifecycle_accepts_unrelated_sibling_creation_and_removal_during_inspection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_alias: bool, seam: str
 ) -> None:
-    store = DirectoryStore(tmp_path / "state")
+    store = MemoryStore()
     parent = tmp_path / "Config"
     parent.mkdir()
     alias = tmp_path / "config" if case_alias else parent

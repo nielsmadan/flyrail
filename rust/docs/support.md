@@ -28,9 +28,13 @@ Special mode bits, unsupported flags, ACLs, or extended attributes on managed
 resources refuse mutation. On macOS, opaque `com.apple.provenance` bytes are
 captured and checked; other resource xattrs and extended ACLs refuse.
 
-Ancestor identity, mode, ownership, and security evidence are also bound. Existing
-state, staging, and backup directories must already satisfy private-access
-requirements. Flyrail does not weaken unsafe directories to continue.
+Ancestor identity, mode, ownership, and security evidence are also bound.
+Transaction, staging, and backup directories must pass private-access
+checks; flyrail refuses unsafe directories without changing their
+permissions. An existing `DirectoryStore` root, `records`, `locks`, or
+`staging` directory must pass the same check: every store operation reports
+`ErrorCode::IoError` naming the path otherwise. A custom `StateStore` is
+responsible for keeping its own storage private.
 
 ## Filesystem and recovery
 
@@ -43,7 +47,11 @@ Full revisions detect ordinary concurrent content and metadata changes. They do
 not authenticate receipts or defend against hostile same-user writes between
 checks and syscalls. Unknown preparation data, edited backups, and unrecognized
 revisions are retained for diagnosis. There is no age-based cleanup or
-force-recovery API.
+force-recovery API. Recovery also retains a destination that matches a
+recorded revision but changed after the transaction was prepared. It compares
+modification time on every platform and birth time only on macOS; a
+replacement that keeps an older modification time and reuses the original's
+inode is not detected.
 
 The [transaction protocol](../../spec/transaction-protocol.md) provides
 interruption recovery, not cross-resource atomicity, simultaneous visibility,

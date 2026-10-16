@@ -1,19 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::fs;
 use std::io::{self, Read as _, Write as _};
 use std::path::PathBuf;
 use std::str::FromStr as _;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use flyrail::{
-    Acquisition, Artifact, Bundle, BundleIdentity, Content, Family, FileContent, FileMode, Index,
-    InstallationObservation, InstallationResult, InstallationTarget, InstructionArtifact, Journal,
-    Receipt, RenderedArtifact, RenderedBundle, ResourceAuthority, ResourceKind, ResourceRef,
-    TargetError, admit, decode, encode, inspect_installation, interop_resource_lock,
-    recover_installation, remove, set_interop_test_barrier, set_interop_test_fault, sync,
+    Acquisition, Artifact, Bundle, BundleIdentity, Content, DirectoryStore, Family, FileContent,
+    FileMode, Index, InstallationObservation, InstallationResult, InstallationTarget,
+    InstructionArtifact, Journal, Preparation, Receipt, RenderedArtifact, RenderedBundle,
+    ResourceAuthority, ResourceKind, ResourceRef, SectionContent, StateStore, TargetError, admit,
+    decode, encode, inspect_installation, interop_resource_lock, recover_installation, remove,
+    set_interop_test_barrier, set_interop_test_fault, sync,
 };
 use serde_json::{Value, json};
 
@@ -60,13 +61,14 @@ impl Arguments {
             "encode" => (&["--type"], &[]),
             "write" | "install" | "update" => (
                 &[
-                    "--index",
+                    "--state",
                     "--bundle-id",
                     "--lock-timeout",
                     "--destination",
                     "--version",
                     "--payload",
                     "--large",
+                    "--section",
                     "--mode",
                     "--acquisition",
                     "--barrier-phase",
@@ -76,14 +78,15 @@ impl Arguments {
                 ],
                 &["--replace-modified", "--fail-index-completion"],
             ),
-            "inspect" | "recover" => (&["--index", "--bundle-id", "--lock-timeout"], &[]),
+            "inspect" | "recover" => (&["--state", "--bundle-id", "--lock-timeout"], &[]),
             "remove" => (
-                &["--index", "--bundle-id", "--lock-timeout"],
+                &["--state", "--bundle-id", "--lock-timeout"],
                 &["--replace-modified"],
             ),
-            "records" => (&["--index", "--destination"], &[]),
+            "records" => (&["--state"], &[]),
             "hold" => (
                 &[
+                    "--state",
                     "--destination",
                     "--barrier",
                     "--kind",
@@ -153,9 +156,13 @@ impl Arguments {
     }
 }
 
+fn store(arguments: &mut Arguments) -> Result<DirectoryStore, String> {
+    DirectoryStore::new(arguments.required("--state")?).map_err(|error| error.to_string())
+}
+
 fn target(arguments: &mut Arguments) -> Result<InstallationTarget, String> {
-    let index = absolute(arguments.required("--index")?)?;
-    InstallationTarget::without_context(index).map_err(|error| error.to_string())
+    InstallationTarget::without_context(Arc::new(store(arguments)?))
+        .map_err(|error| error.to_string())
 }
 
 fn absolute(path: String) -> Result<PathBuf, String> {
@@ -206,11 +213,24 @@ fn rendered(arguments: &mut Arguments) -> Result<RenderedBundle, String> {
         "executable" => FileMode::Executable,
         value => return Err(format!("invalid mode: {value}")),
     };
+    let section = arguments.optional("--section");
+    let data = payload(arguments)?;
+    let content = match section {
+        None => Content::File(FileContent::new(data, mode)),
+        Some(marker) => Content::Section(
+            SectionContent::new(
+                marker,
+                String::from_utf8(data).map_err(|error| error.to_string())?,
+                None,
+            )
+            .map_err(|error| error.to_string())?,
+        ),
+    };
     let artifact = RenderedArtifact::new(
         "guide",
         Family::Instructions,
         destination,
-        Content::File(FileContent::new(payload(arguments)?, mode)),
+        content,
         None,
         false,
         Vec::new(),
@@ -345,7 +365,6 @@ fn observation_value(observation: &InstallationObservation) -> Value {
         "error": error_value(observation.error()),
         "resources": observation.resources().iter().map(|resource| json!({
             "destination": resource.destination().display().to_string(),
-            "state_root": resource.state_root().display().to_string(),
             "claims": resource.claims().iter().map(|claim| json!({
                 "artifact_id": claim.artifact_id(),
                 "disposition": claim.status().as_str(),
@@ -393,6 +412,10 @@ fn canonical_record(state_type: &str, input: &[u8]) -> Result<Vec<u8>, String> {
         "Journal" => Ok(encode(
             &decode::<Journal>(input).map_err(|error| format!("decode Journal: {error}"))?,
         )),
+        "Preparation" => Ok(encode(
+            &decode::<Preparation>(input)
+                .map_err(|error| format!("decode Preparation: {error}"))?,
+        )),
         "Receipt" => Ok(encode(
             &decode::<Receipt>(input).map_err(|error| format!("decode Receipt: {error}"))?,
         )),
@@ -405,60 +428,21 @@ fn canonical_record(state_type: &str, input: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn records_command(arguments: &mut Arguments) -> Result<(), String> {
-    let index = absolute(arguments.required("--index")?)?;
-    let destination = arguments
-        .optional("--destination")
-        .map(absolute)
-        .transpose()?;
+    let store = store(arguments)?;
     arguments.finish()?;
-    let mut roots = vec![index];
-    if let Some(destination) = destination {
-        roots.push(
-            ResourceAuthority::new(destination)
-                .map_err(|error| error.to_string())?
-                .state_root()
-                .to_path_buf(),
-        );
-    }
-    let mut paths = roots
-        .into_iter()
-        .filter(|root| root.is_dir())
-        .flat_map(|root| {
-            fs::read_dir(root)
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-        })
-        .filter(|path| {
-            path.is_file()
-                && matches!(
-                    path.file_name().and_then(|name| name.to_str()),
-                    Some(
-                        "authority.json"
-                            | "authority.json.next"
-                            | "index.json"
-                            | "index.json.next"
-                            | "receipt.json"
-                            | "receipt.json.next"
-                            | "transaction.json"
-                            | "transaction.json.next"
-                    )
-                )
-        })
-        .collect::<Vec<_>>();
-    paths.sort();
     let mut records = Vec::new();
-    for path in paths {
-        let raw = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    for key in store.keys("").map_err(|error| error.to_string())? {
+        let Some(raw) = store.read(&key).map_err(|error| error.to_string())? else {
+            continue;
+        };
         let parsed: Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         let state_type = parsed
             .get("type")
             .and_then(Value::as_str)
-            .ok_or_else(|| format!("record type missing: {}", path.display()))?;
+            .ok_or_else(|| format!("record type missing: {key}"))?;
         let canonical = canonical_record(state_type, &raw)?;
         records.push(json!({
-            "path": path.display().to_string(),
+            "key": key,
             "type": state_type,
             "bytes": base64::engine::general_purpose::STANDARD.encode(&raw),
             "canonical": base64::engine::general_purpose::STANDARD.encode(canonical),
@@ -469,6 +453,7 @@ fn records_command(arguments: &mut Arguments) -> Result<(), String> {
 }
 
 fn hold_command(arguments: &mut Arguments) -> Result<(), String> {
+    let store = store(arguments)?;
     let destination = absolute(arguments.required("--destination")?)?;
     let barrier = absolute(arguments.required("--barrier")?)?;
     let kind = ResourceKind::from_str(&arguments.value("--kind", "document"))
@@ -477,14 +462,10 @@ fn hold_command(arguments: &mut Arguments) -> Result<(), String> {
     let lock_timeout = timeout(arguments)?;
     arguments.finish()?;
     let authority = ResourceAuthority::new(&destination).map_err(|error| error.to_string())?;
-    let reference = ResourceRef::new(
-        authority.destination().to_path_buf(),
-        kind,
-        authority.state_root().to_path_buf(),
-    )
-    .map_err(|error| error.to_string())?;
-    let _guard =
-        interop_resource_lock(&reference, lock_timeout).map_err(|error| error.to_string())?;
+    let reference = ResourceRef::new(authority.destination().to_path_buf(), kind)
+        .map_err(|error| error.to_string())?;
+    let _guard = interop_resource_lock(&store, &reference, lock_timeout)
+        .map_err(|error| error.to_string())?;
     println!("{}", json!({"status": "reserved"}));
     io::stdout().flush().map_err(|error| error.to_string())?;
     let deadline = Instant::now()
@@ -496,7 +477,7 @@ fn hold_command(arguments: &mut Arguments) -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(5));
     }
-    match admit(&reference) {
+    match admit(&store, &reference) {
         Ok(()) => println!("{}", json!({"status": "admitted"})),
         Err(error) => println!("{}", json!({"status": error.code().as_str()})),
     }

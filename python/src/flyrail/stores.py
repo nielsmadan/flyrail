@@ -48,6 +48,10 @@ class StateStore(ABC):
     def location(self) -> Path | None:
         return None
 
+    @property
+    def staging_directory(self) -> Path | None:
+        return None
+
     @abstractmethod
     def read(self, key: str) -> bytes | None: ...
 
@@ -205,13 +209,17 @@ class DirectoryStore(StateStore):
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self._root = _absolute(path, "directory store path")
         self._records = self._root / "records"
-        self._trusted = (self._root, self._records, self._root / "locks")
+        self._trusted = (self._root, self._records, self._root / "locks", self._root / "staging")
         self._locks = _FileLocks(self._root / "locks", self._trusted)
         self._mutation = _FileLocks(self._root, self._trusted)
 
     @property
     def location(self) -> Path:
         return self._root
+
+    @property
+    def staging_directory(self) -> Path:
+        return self._root / "staging"
 
     def _path(self, key: str) -> Path:
         validate_key(key)
@@ -285,12 +293,16 @@ class SQLiteStore(StateStore):
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self._path = _absolute(path, "SQLite store path")
         locks = self._path.with_name(self._path.name + ".locks")
-        self._trusted = (self._path, locks)
+        self._trusted = (self._path, locks, self.staging_directory)
         self._locks = _FileLocks(locks, self._trusted)
 
     @property
     def location(self) -> Path:
         return self._path
+
+    @property
+    def staging_directory(self) -> Path:
+        return self._path.with_name(self._path.name + ".staging")
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:

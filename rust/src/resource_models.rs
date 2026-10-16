@@ -1,4 +1,4 @@
-use crate::authority::{AuthorityError, Ownership, ResourceAuthority, state_path};
+use crate::authority::{AuthorityError, Ownership, ResourceAuthority};
 use crate::content::{Content, DocumentSchema};
 use crate::editors::{Disposition, DocumentProvenance, OwnedSelection, content_claim};
 use crate::json::Json;
@@ -345,38 +345,26 @@ impl Revision {
 pub struct ResourceRef {
     destination: PathBuf,
     kind: ResourceKind,
-    state_root: PathBuf,
     schema_version: i64,
 }
 
 impl ResourceRef {
-    pub fn new(
-        destination: PathBuf,
-        kind: ResourceKind,
-        state_root: PathBuf,
-    ) -> Result<Self, ValueError> {
-        Self::with_schema(destination, kind, state_root, 2)
+    pub fn new(destination: PathBuf, kind: ResourceKind) -> Result<Self, ValueError> {
+        Self::with_schema(destination, kind, 2)
     }
 
     pub(crate) fn with_schema(
         destination: PathBuf,
         kind: ResourceKind,
-        state_root: PathBuf,
         schema_version: i64,
     ) -> Result<Self, ValueError> {
         if schema_version != 2 {
             return Err(ValueError::new("authority schema must be 2"));
         }
         absolute(&destination)?;
-        if state_root != state_path(&destination) {
-            return Err(ValueError::new(
-                "resource state path disagrees with destination",
-            ));
-        }
         Ok(Self {
             destination,
             kind,
-            state_root,
             schema_version,
         })
     }
@@ -396,7 +384,7 @@ impl ResourceRef {
     }
 
     pub(crate) fn recorded_authority(&self) -> ResourceAuthority {
-        ResourceAuthority::unchecked(self.destination.clone(), self.state_root.clone())
+        ResourceAuthority::unchecked(self.destination.clone())
     }
 
     pub fn destination(&self) -> &Path {
@@ -407,8 +395,57 @@ impl ResourceRef {
         self.kind
     }
 
-    pub fn state_root(&self) -> &Path {
-        &self.state_root
+    pub const fn schema_version(&self) -> i64 {
+        self.schema_version
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Preparation {
+    resource: ResourceRef,
+    transaction_id: String,
+    directory: PathBuf,
+    schema_version: i64,
+}
+
+impl Preparation {
+    pub fn new(
+        resource: ResourceRef,
+        transaction_id: String,
+        directory: PathBuf,
+    ) -> Result<Self, ValueError> {
+        Self::with_schema(resource, transaction_id, directory, 2)
+    }
+
+    pub(crate) fn with_schema(
+        resource: ResourceRef,
+        transaction_id: String,
+        directory: PathBuf,
+        schema_version: i64,
+    ) -> Result<Self, ValueError> {
+        hexadecimal(&transaction_id, 32)?;
+        absolute(&directory)?;
+        if schema_version != 2 {
+            return Err(ValueError::new("preparation schema must be 2"));
+        }
+        Ok(Self {
+            resource,
+            transaction_id,
+            directory,
+            schema_version,
+        })
+    }
+
+    pub const fn resource(&self) -> &ResourceRef {
+        &self.resource
+    }
+
+    pub fn transaction_id(&self) -> &str {
+        &self.transaction_id
+    }
+
+    pub fn directory(&self) -> &Path {
+        &self.directory
     }
 
     pub const fn schema_version(&self) -> i64 {
@@ -916,8 +953,8 @@ impl Index {
             }
         }
         references.sort_by(|left, right| {
-            crate::codec::posix_path(left.state_root())
-                .cmp(&crate::codec::posix_path(right.state_root()))
+            crate::codec::posix_path(left.destination())
+                .cmp(&crate::codec::posix_path(right.destination()))
         });
         references
     }
@@ -1068,30 +1105,12 @@ mod tests {
     #[test]
     fn resource_ref_validation_messages_match_python() {
         let destination = PathBuf::from("/fixture/project/AGENTS.md");
-        let wrong_state = ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            PathBuf::from("/elsewhere/state"),
-        );
-        assert_eq!(
-            wrong_state.unwrap_err().message(),
-            "resource state path disagrees with destination"
-        );
-        let wrong_schema = ResourceRef::with_schema(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-            1,
-        );
+        let wrong_schema = ResourceRef::with_schema(destination, ResourceKind::Document, 1);
         assert_eq!(
             wrong_schema.unwrap_err().message(),
             "authority schema must be 2"
         );
-        let relative = ResourceRef::new(
-            PathBuf::from("relative"),
-            ResourceKind::Document,
-            PathBuf::from("/state"),
-        );
+        let relative = ResourceRef::new(PathBuf::from("relative"), ResourceKind::Document);
         assert_eq!(
             relative.unwrap_err().message(),
             "expected an absolute concrete path"
@@ -1101,20 +1120,11 @@ mod tests {
     #[test]
     fn resource_authorities_agree_with_the_recorded_destination() {
         let destination = PathBuf::from("/fixture/project/AGENTS.md");
-        let resource = ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-        )
-        .expect("resource");
+        let resource =
+            ResourceRef::new(destination.clone(), ResourceKind::Document).expect("resource");
         let authority = resource.authority().expect("authority");
         assert_eq!(authority.destination(), destination);
-        assert_eq!(authority.state_root(), state_path(&destination));
-        assert_eq!(
-            resource.recorded_authority().state_root(),
-            authority.state_root(),
-            "the recorded authority reuses the receipt's own state root"
-        );
+        assert_eq!(resource.recorded_authority(), authority);
     }
 
     fn whole_claim() -> crate::authority::Claim {
@@ -1259,12 +1269,7 @@ mod tests {
     #[test]
     fn receipt_validation_messages_match_python() {
         let destination = PathBuf::from("/fixture/project/AGENTS.md");
-        let resource = ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-        )
-        .expect("resource");
+        let resource = ResourceRef::new(destination, ResourceKind::Document).expect("resource");
         let ok = Receipt::new(
             resource.clone(),
             "1".repeat(32),
@@ -1303,12 +1308,7 @@ mod tests {
     #[test]
     fn generation_and_index_validation_messages_match_python() {
         let destination = PathBuf::from("/fixture/project/AGENTS.md");
-        let resource = ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-        )
-        .expect("resource");
+        let resource = ResourceRef::new(destination, ResourceKind::Document).expect("resource");
         let generation = Generation::new(
             "1".to_owned(),
             "a".repeat(64),
@@ -1351,12 +1351,7 @@ mod tests {
     #[test]
     fn journal_validation_messages_match_python() {
         let destination = PathBuf::from("/fixture/project/AGENTS.md");
-        let resource = ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-        )
-        .expect("resource");
+        let resource = ResourceRef::new(destination, ResourceKind::Document).expect("resource");
         let receipt = Receipt::new(
             resource.clone(),
             "1".repeat(32),
@@ -1416,19 +1411,10 @@ mod tests {
     #[test]
     fn journal_receipt_resources_must_agree() {
         let destination = PathBuf::from("/fixture/project/AGENTS.md");
-        let resource = ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-        )
-        .expect("resource");
+        let resource = ResourceRef::new(destination, ResourceKind::Document).expect("resource");
         let other_destination = PathBuf::from("/fixture/project/OTHER.md");
-        let other = ResourceRef::new(
-            other_destination.clone(),
-            ResourceKind::Document,
-            state_path(&other_destination),
-        )
-        .expect("other resource");
+        let other =
+            ResourceRef::new(other_destination, ResourceKind::Document).expect("other resource");
         let receipt = Receipt::new(
             other,
             "1".repeat(32),
@@ -1456,15 +1442,10 @@ mod tests {
     }
 
     #[test]
-    fn index_resources_are_deduplicated_and_state_root_sorted() {
+    fn index_resources_are_deduplicated_and_destination_sorted() {
         let resource = |name: &str| {
             let destination = PathBuf::from(format!("/fixture/project/{name}.md"));
-            ResourceRef::new(
-                destination.clone(),
-                ResourceKind::Document,
-                state_path(&destination),
-            )
-            .expect("resource")
+            ResourceRef::new(destination, ResourceKind::Document).expect("resource")
         };
         let a = resource("a");
         let m = resource("m");
@@ -1492,16 +1473,8 @@ mod tests {
         let order: Vec<&Path> = index.resources().iter().map(|r| r.destination()).collect();
         assert_eq!(
             order,
-            vec![m.destination(), z.destination(), a.destination()]
+            vec![a.destination(), m.destination(), z.destination()]
         );
-        let roots: Vec<String> = index
-            .resources()
-            .iter()
-            .map(|r| r.state_root().to_string_lossy().into_owned())
-            .collect();
-        let mut sorted = roots.clone();
-        sorted.sort();
-        assert_eq!(roots, sorted);
     }
 
     #[test]
@@ -1699,12 +1672,7 @@ mod tests {
 
     fn document_resource(path: &str) -> ResourceRef {
         let destination = PathBuf::from(path);
-        ResourceRef::new(
-            destination.clone(),
-            ResourceKind::Document,
-            state_path(&destination),
-        )
-        .expect("resource")
+        ResourceRef::new(destination, ResourceKind::Document).expect("resource")
     }
 
     #[test]
@@ -1841,7 +1809,6 @@ mod tests {
         let skills = ResourceRef::new(
             PathBuf::from("/fixture/project/skills"),
             ResourceKind::SkillContainer,
-            state_path(Path::new("/fixture/project/skills")),
         )
         .expect("skill resource");
         let with_data = Receipt::new(

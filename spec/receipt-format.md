@@ -16,15 +16,24 @@ sibling metadata files for it. Each record and lock uses a fixed key:
 | `index/<bundle-id>/<context-digest>` | `Index` |
 | `resource/<destination-key>/authority` | `ResourceRef` |
 | `resource/<destination-key>/receipt` | `Receipt` |
+| `resource/<destination-key>/preparation` | `Preparation` |
 | `resource/<destination-key>/journal` | `Journal` |
 
 Lock names follow the same scheme: `index/<bundle-id>/<context-digest>` for an
 index, `resource/<destination-key>` for a resource. `destination-key` is
 defined in [the state store contract](state-store.md#keys).
 
-A resource's private transaction directory stays on disk, beside the resource:
+A transaction's private directory lives in the store's staging directory when
+that directory is on the destination's mount, and otherwise beside the
+resource; the [transaction protocol](transaction-protocol.md#transaction-directory)
+defines the choice:
 
 ```text
+<staging-directory>/
+    <destination-key>-<transaction-id>/
+        staging/resource
+        backup/resource
+
 <resource-parent>/
     <resource>
     .flyrail-<portable-basename-sha256>-<transaction-id>.txn/
@@ -32,16 +41,18 @@ A resource's private transaction directory stays on disk, beside the resource:
         backup/resource
 ```
 
-The hash uses the portable basename encoding from the authority specification,
-over the resource's own basename only, not the full destination or the bundle
-ID. `transaction-id` is the transaction ID of the journal's intended receipt.
+The fallback name's hash uses the portable basename encoding from the authority
+specification, over the resource's own basename only, not the full destination
+or the bundle ID. `transaction-id` is the transaction ID of the journal's
+intended receipt.
 Every journaled transaction mints that ID fresh, as the
 [transaction protocol](transaction-protocol.md#immutable-journal) requires, so
-each transaction, in any store, has its own directory. The transaction directory
-is created by `prepare` and removed by `cleanup`. Only a journal record in the
-host's store attributes a transaction directory to that store; a transaction
-directory that no journal in the store names is never reported, removed or
-treated as blocking.
+each transaction, in any store, has its own directory. `prepare` records a
+`Preparation` naming the transaction directory before it creates the directory,
+and `cleanup` removes the directory before it deletes the journal and then the
+preparation. Only a preparation record in the host's store attributes a
+transaction directory to that store; a transaction directory that no record in
+the store names is never reported, removed or treated as blocking.
 Store entries are optional before first use. Uninstall may leave an empty
 receipt; an empty receipt grants no ownership. Unknown entries, unsafe links,
 ambiguous paths and invalid records prevent mutation.
@@ -79,6 +90,7 @@ digests are 64. Every schema field is integer `2`.
 | `DocumentSchema` | `format`, `key`, `value` |
 | `Generation` | `version`, `bundle_digest`, `render_digest`, `membership` |
 | `Index` | `bundle_id`, `context_digest`, `current`, `pending`, `previous`, `residual`, `schema_version` |
+| `Preparation` | `resource`, `transaction_id`, `directory`, `schema_version` |
 | `Journal` | `resource`, `previous`, `receipt`, `before`, `staged`, `published`, `backup`, `ancestors`, `schema_version` |
 | `Revision` | `nodes` |
 | `Node` | `path`, `data`, `mode`, `uid`, `gid`, `device`, `inode`, `security` |

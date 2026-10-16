@@ -1,6 +1,8 @@
 #![allow(clippy::redundant_pub_crate)]
 
+use crate::authority::{management_name, physical_location};
 use crate::bundle::Bundle;
+use crate::codec::encode;
 use crate::configuration::{
     ClaimObservation, InstallationObservation, InstallationResult, InstallationTarget,
     LifecyclePreview, ResourceObservation, ResourcePlan, ResourceResult,
@@ -10,25 +12,36 @@ use crate::models::OperationStatus;
 use crate::observation::failure;
 use crate::observations::{ErrorCode, TargetError};
 use crate::rendered::{DependencyMode, RenderedArtifact, RenderedBundle};
-use crate::resource_io::{ancestors, observe, read, require, validate_state};
-use crate::resource_models::{Ancestor, Generation, Index, Receipt, ResourceRef, Revision};
+use crate::resource_io::{error_detail, require, resource_ancestors};
+use crate::resource_models::{Ancestor, Generation, Index, Preparation, Receipt, ResourceRef};
 use crate::resource_plan::{
-    artifact_claim, completed_index, expects_receipt, index_with_prepared_resources, pending_index,
-    plan_resource, prepared_index_promotes, resource, summary,
+    artifact_claim, completed_index, expects_receipt, pending_index, plan_resource, resource,
+    summary,
 };
 use crate::resource_transaction::{
-    TransactionLocks, execute_transaction, reconcile_prepared_index, recover,
+    TransactionLocks, execute_transaction, pending_recovery, recover,
 };
+use crate::state::{index_key, read_record, require_index, resource_key, store_failure};
+use crate::stores::StateStore;
 use crate::validation::portable_path_key;
 use crate::values::ValueError;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 enum BuildError {
     Invalid(ValueError),
+    StoreOverlap(ValueError),
     Target(TargetError),
+}
+
+impl BuildError {
+    fn into_value_error(self) -> Result<ValueError, TargetError> {
+        match self {
+            Self::Invalid(error) | Self::StoreOverlap(error) => Ok(error),
+            Self::Target(error) => Err(error),
+        }
+    }
 }
 
 impl From<ValueError> for BuildError {
@@ -43,90 +56,98 @@ impl From<TargetError> for BuildError {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
-fn invalid(error: ValueError, path: &Path) -> TargetError {
-    failure(ErrorCode::InvalidState, error.message(), path)
+fn index_failure(target: &InstallationTarget, code: ErrorCode, message: &str) -> TargetError {
+    TargetError::new(
+        code,
+        message,
+        target.store().location().map(Path::to_path_buf),
+        None,
+    )
 }
 
 fn invalid_state(error: &ValueError) -> TargetError {
     TargetError::new(ErrorCode::InvalidState, error.message(), None, None)
 }
 
-fn index_records(
-    identifier: &str,
-    target: &InstallationTarget,
-) -> Result<(Option<Index>, Option<Index>), TargetError> {
-    let revision = observe(target.index_root())?;
-    for node in revision
-        .nodes()
-        .iter()
-        .filter(|node| !node.path().is_empty() && !node.path().contains('/'))
-    {
-        if !matches!(node.path(), "lock" | "index.json" | "index.json.next") {
-            return Err(failure(
-                ErrorCode::InvalidState,
-                "unknown installation index entry",
-                target.index_root().join(node.path()),
-            ));
-        }
-        if node.data().is_none() {
-            return Err(failure(
-                ErrorCode::InvalidState,
-                "expected a regular file",
-                target.index_root().join(node.path()),
-            ));
-        }
-    }
-    require(target.index_root(), &revision)?;
-    let current: Option<Index> = read(&target.index_root().join("index.json"), "Index")?;
-    let prepared: Option<Index> = read(&target.index_root().join("index.json.next"), "Index")?;
-    let digest = target.context_digest();
-    for value in [&current, &prepared].into_iter().flatten() {
-        if value.bundle_id() != identifier || value.context_digest() != digest {
-            return Err(failure(
-                ErrorCode::InvalidState,
-                "installation index context disagrees",
-                target.index_root(),
-            ));
-        }
-    }
-    Ok((current, prepared))
+fn installation_key(identifier: &str, target: &InstallationTarget) -> String {
+    index_key(identifier, &target.context_digest())
 }
 
 fn installation_index(
     identifier: &str,
     target: &InstallationTarget,
-) -> Result<(Option<Index>, Option<Index>), TargetError> {
-    let (current, prepared) = index_records(identifier, target)?;
-    let visible = index_with_prepared_resources(
-        current.as_ref(),
-        prepared.as_ref(),
-        identifier,
-        &target.context_digest(),
-    )
-    .map_err(|error| invalid(error, target.index_root()))?;
-    Ok((visible, prepared))
+) -> Result<Option<Index>, TargetError> {
+    let index: Option<Index> = read_record(
+        target.store().as_ref(),
+        &installation_key(identifier, target),
+        "Index",
+    )?;
+    if index.as_ref().is_some_and(|value| {
+        value.bundle_id() != identifier || value.context_digest() != target.context_digest()
+    }) {
+        return Err(index_failure(
+            target,
+            ErrorCode::InvalidState,
+            "installation index context disagrees",
+        ));
+    }
+    Ok(index)
 }
 
 fn missing_receipt(reference: &ResourceRef) -> TargetError {
     failure(
         ErrorCode::InvalidState,
         "recorded ownership receipt is missing; restore metadata before retrying",
-        reference.state_root().join("receipt.json"),
+        reference.destination(),
     )
 }
 
 fn check_receipt(
+    store: &dyn StateStore,
     index: Option<&Index>,
-    prepared: Option<&Index>,
     reference: &ResourceRef,
 ) -> Result<(), TargetError> {
-    if expects_receipt(index, prepared, reference)
-        && read::<Receipt>(&reference.state_root().join("receipt.json"), "Receipt")?.is_none()
+    if expects_receipt(index, reference)
+        && read_record::<Receipt>(
+            store,
+            &resource_key(reference.destination(), "receipt"),
+            "Receipt",
+        )?
+        .is_none()
     {
         return Err(missing_receipt(reference));
     }
     Ok(())
+}
+
+fn portable_parts(path: &Path) -> Vec<String> {
+    path.components()
+        .map(|part| portable_path_key(&part.as_os_str().to_string_lossy()))
+        .collect()
+}
+
+fn overlaps_management(path: &Path, destination: &Path) -> bool {
+    let parent = portable_parts(destination.parent().unwrap_or(destination));
+    let selected = portable_parts(path);
+    if selected.len() <= parent.len() {
+        return parent.starts_with(&selected);
+    }
+    selected.starts_with(&parent)
+        && path
+            .components()
+            .nth(parent.len())
+            .is_some_and(|part| management_name(&part.as_os_str().to_string_lossy()))
+}
+
+fn store_paths(target: &InstallationTarget) -> Result<Vec<PathBuf>, TargetError> {
+    let store = target.store();
+    store
+        .location()
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(store.staging_directory())
+        .map(|path| physical_location(&path).map_err(error_detail))
+        .collect()
 }
 
 fn path_overlap(left: &Path, right: &Path) -> bool {
@@ -148,9 +169,10 @@ fn references(
     bundle: Option<&Bundle>,
     resolved: Option<&HashMap<String, ResourceRef>>,
 ) -> Result<Vec<ResourceRef>, BuildError> {
+    let stores = store_paths(target)?;
     for source in bundle.into_iter().flat_map(Bundle::source_roots) {
-        if path_overlap(source, target.index_root()) {
-            return Err(ValueError::new("installation index overlaps bundle source").into());
+        if stores.iter().any(|store| path_overlap(source, store)) {
+            return Err(ValueError::new("state store overlaps bundle source").into());
         }
     }
     let owned;
@@ -183,7 +205,7 @@ fn references(
     }
     let mut refs = resolved.values().cloned().collect::<Vec<_>>();
     refs.extend(index.into_iter().flat_map(Index::resources).cloned());
-    crate::resource_plan::state_root_order(&mut refs);
+    crate::resource_plan::destination_order(&mut refs);
     refs.dedup();
     let mut destinations = HashSet::with_capacity(refs.len());
     if !refs
@@ -193,15 +215,16 @@ fn references(
         return Err(ValueError::new("resource kinds disagree at the same destination").into());
     }
     for reference in &refs {
-        if path_overlap(reference.destination(), target.index_root())
-            || path_overlap(reference.state_root(), target.index_root())
-        {
-            return Err(
-                ValueError::new("installation index overlaps a resource or authority").into(),
-            );
+        if stores.iter().any(|store| {
+            path_overlap(reference.destination(), store)
+                || overlaps_management(store, reference.destination())
+        }) {
+            return Err(BuildError::StoreOverlap(ValueError::new(
+                "state store overlaps a resource or authority",
+            )));
         }
         for source in bundle.into_iter().flat_map(Bundle::source_roots) {
-            if path_overlap(source, reference.state_root()) {
+            if overlaps_management(source, reference.destination()) {
                 return Err(ValueError::new("resource authority overlaps bundle source").into());
             }
             if outputs
@@ -313,7 +336,7 @@ fn order_plans(
             })
             .cloned()
             .collect::<Vec<_>>();
-        crate::resource_plan::state_root_order(&mut ready);
+        crate::resource_plan::destination_order(&mut ready);
         if ready.is_empty() {
             return Err(ValueError::new("cyclic resource dependencies"));
         }
@@ -335,7 +358,7 @@ fn build_preview(
     acquisition: Acquisition,
     replace_modified: bool,
 ) -> Result<LifecyclePreview, BuildError> {
-    let (index, prepared) = installation_index(identifier, target)?;
+    let index = installation_index(identifier, target)?;
     let resolved = rendered
         .artifacts()
         .iter()
@@ -453,6 +476,7 @@ fn build_preview(
         .iter()
         .map(|reference| {
             plan_resource(
+                target.store().as_ref(),
                 reference,
                 identifier,
                 bundle,
@@ -464,9 +488,7 @@ fn build_preview(
                 &stable,
             )
             .map(|plan| {
-                if plan.previous().is_none()
-                    && expects_receipt(index.as_ref(), prepared.as_ref(), reference)
-                {
+                if plan.previous().is_none() && expects_receipt(index.as_ref(), reference) {
                     plan.with_error(missing_receipt(reference))
                 } else {
                     plan
@@ -501,7 +523,7 @@ fn build_preview(
     } else {
         None
     };
-    let mut error = (!rendered.supported()).then(|| {
+    let error = (!rendered.supported()).then(|| {
         TargetError::new(
             ErrorCode::Unsupported,
             "rendered target has unsupported requirements",
@@ -509,14 +531,6 @@ fn build_preview(
             None,
         )
     });
-    let prepared_path = target.index_root().join("index.json.next");
-    if fs::symlink_metadata(&prepared_path).is_ok() {
-        error = Some(failure(
-            ErrorCode::RecoveryNeeded,
-            "installation index has prepared metadata",
-            prepared_path,
-        ));
-    }
     Ok(LifecyclePreview::new(
         identifier.to_owned(),
         bundle.cloned(),
@@ -525,8 +539,6 @@ fn build_preview(
         acquisition,
         replace_modified,
         index,
-        Some(observe(target.index_root())?),
-        ancestors(&target.index_root().join("index.json"))?,
         generation,
         plans,
         error,
@@ -550,29 +562,31 @@ pub(crate) fn public_preview(
         replace_modified,
     ) {
         Ok(preview) => Ok(preview),
-        Err(BuildError::Invalid(error)) => Err(error),
-        Err(BuildError::Target(error)) => Ok(LifecyclePreview::new(
-            identifier.to_owned(),
-            bundle.cloned(),
-            rendered.clone(),
-            target.clone(),
-            acquisition,
-            replace_modified,
-            None,
-            None,
-            Vec::new(),
-            None,
-            Vec::new(),
-            Some(error),
-        )),
+        Err(error) => match error.into_value_error() {
+            Ok(error) => Err(error),
+            Err(error) => Ok(LifecyclePreview::new(
+                identifier.to_owned(),
+                bundle.cloned(),
+                rendered.clone(),
+                target.clone(),
+                acquisition,
+                replace_modified,
+                None,
+                None,
+                Vec::new(),
+                Some(error),
+            )),
+        },
     }
 }
 
-fn public_summary(reference: &ResourceRef) -> Result<ResourceObservation, TargetError> {
-    let observed = summary(reference)?;
+fn public_summary(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+) -> Result<ResourceObservation, TargetError> {
+    let observed = summary(store, reference)?;
     Ok(ResourceObservation::observed(
         observed.destination().to_path_buf(),
-        observed.state_root().to_path_buf(),
         observed
             .claims()
             .iter()
@@ -596,24 +610,20 @@ fn public_summary(reference: &ResourceRef) -> Result<ResourceObservation, Target
 pub(crate) fn inspect(bundle_id: &str, target: &InstallationTarget) -> InstallationObservation {
     let mut resources = Vec::new();
     let result = (|| {
-        let (index, prepared) = installation_index(bundle_id, target)?;
+        let index = installation_index(bundle_id, target)?;
         for reference in index.as_ref().into_iter().flat_map(Index::resources) {
-            let item = check_receipt(index.as_ref(), prepared.as_ref(), reference)
-                .and_then(|()| public_summary(reference));
+            let store = target.store().as_ref();
+            let item = check_receipt(store, index.as_ref(), reference)
+                .and_then(|()| public_summary(store, reference));
             resources.push(match item {
                 Ok(item) => item,
                 Err(error) => ResourceObservation::failed(reference, error),
             });
         }
         let current = index.as_ref().and_then(Index::current);
-        let prepared_exists =
-            fs::symlink_metadata(target.index_root().join("index.json.next")).is_ok();
-        let pending = prepared_exists
-            || index.as_ref().is_some_and(|index| {
-                index.pending().is_some()
-                    || index.previous().is_some()
-                    || !index.residual().is_empty()
-            });
+        let pending = index.as_ref().is_some_and(|index| {
+            index.pending().is_some() || index.previous().is_some() || !index.residual().is_empty()
+        });
         let actual = resources
             .iter()
             .flat_map(|resource| {
@@ -682,104 +692,72 @@ pub(crate) fn inspect(bundle_id: &str, target: &InstallationTarget) -> Installat
     })
 }
 
-fn state_matches(path: &Path, expected: &Revision, initial: bool) -> Result<Revision, TargetError> {
-    let current = observe(path)?;
-    if initial {
-        if &current != expected {
-            return Err(failure(
-                ErrorCode::ConcurrentChange,
-                "preview metadata changed",
-                path,
-            ));
-        }
-        return Ok(current);
-    }
-    let expected_nodes = expected
-        .nodes()
-        .iter()
-        .map(|node| (node.path(), node))
-        .collect::<HashMap<_, _>>();
-    let current_nodes = current
-        .nodes()
-        .iter()
-        .map(|node| (node.path(), node))
-        .collect::<HashMap<_, _>>();
-    if expected_nodes
-        .iter()
-        .any(|(key, value)| current_nodes.get(key).copied() != Some(*value))
-        || current_nodes
-            .keys()
-            .filter(|key| !expected_nodes.contains_key(*key))
-            .any(|key| !matches!(*key, "" | "lock" | "authority.json"))
-    {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "preview metadata changed",
-            path,
-        ));
-    }
-    Ok(current)
-}
-
-fn checked_ancestors(
-    path: &Path,
-    expected: &[Ancestor],
-    created: &[Ancestor],
-) -> Result<Vec<Ancestor>, TargetError> {
-    let current = ancestors(path)?;
-    let mut approved = expected.to_vec();
-    let additions = created
-        .iter()
-        .filter(|item| path.ancestors().any(|parent| parent == item.path()))
-        .filter(|item| !approved.contains(item))
-        .cloned()
-        .collect::<Vec<_>>();
-    approved.extend(additions);
-    approved.sort_by_key(|item| item.path().components().count());
-    if current != approved {
-        return Err(failure(
-            ErrorCode::ConcurrentChange,
-            "preview ancestor changed",
-            path,
-        ));
-    }
-    Ok(approved)
-}
-
 fn fresh(
     preview: &LifecyclePreview,
-    initial: bool,
     created: &[Ancestor],
 ) -> Result<LifecyclePreview, TargetError> {
-    let Some(expected_index) = preview.index_revision() else {
-        return Err(failure(
-            ErrorCode::InvalidState,
-            "preview metadata was not observed",
-            preview.target().index_root(),
-        ));
-    };
-    let index_revision = state_matches(preview.target().index_root(), expected_index, initial)?;
-    let index_ancestors = checked_ancestors(
-        &preview.target().index_root().join("index.json"),
-        preview.index_ancestors(),
-        created,
+    let target = preview.target();
+    let store = target.store().as_ref();
+    require_index(
+        store,
+        &installation_key(preview.bundle_id(), target),
+        preview.index(),
     )?;
     let resources = preview
         .resources()
         .iter()
         .map(|plan| {
-            require(plan.resource().destination(), plan.before())?;
-            let state_revision =
-                state_matches(plan.resource().state_root(), plan.state_revision(), initial)?;
-            let ancestors = checked_ancestors(
-                &plan.resource().state_root().join("transaction.json"),
-                plan.ancestors(),
-                created,
-            )?;
-            Ok(plan.with_observations(state_revision, ancestors))
+            let destination = plan.resource().destination();
+            require(destination, plan.before())?;
+            let stored = store
+                .read(&resource_key(destination, "receipt"))
+                .map_err(store_failure)?;
+            if stored != plan.previous().map(encode) {
+                return Err(failure(
+                    ErrorCode::ConcurrentChange,
+                    "preview receipt changed",
+                    destination,
+                ));
+            }
+            let mut recorded = false;
+            for record in ["preparation", "journal"] {
+                recorded |= store
+                    .read(&resource_key(destination, record))
+                    .map_err(store_failure)?
+                    .is_some();
+            }
+            if recorded == plan.recovery_paths().is_empty() {
+                return Err(failure(
+                    ErrorCode::ConcurrentChange,
+                    "preview recovery changed",
+                    destination,
+                ));
+            }
+            let staging = plan.transaction_directory().join("staging");
+            let current = resource_ancestors(destination, &[&staging])?;
+            let mut approved = plan.ancestors().to_vec();
+            approved.extend(
+                created
+                    .iter()
+                    .filter(|item| {
+                        (destination.starts_with(item.path()) || staging.starts_with(item.path()))
+                            && !plan.ancestors().contains(item)
+                    })
+                    .cloned(),
+            );
+            let same = current.iter().all(|item| approved.contains(item))
+                && approved.iter().all(|item| current.contains(item));
+            if !same {
+                return Err(failure(
+                    ErrorCode::ConcurrentChange,
+                    "preview ancestor changed",
+                    &staging,
+                ));
+            }
+            Ok(plan.with_ancestors(current))
         })
         .collect::<Result<Vec<_>, TargetError>>()?;
-    Ok(preview.with_observations(index_revision, index_ancestors, resources))
+    Ok(preview.with_resources(resources))
 }
 
 fn failed_result(
@@ -797,45 +775,47 @@ fn failed_result(
     )
 }
 
-fn recovery_paths(reference: &ResourceRef) -> Vec<PathBuf> {
-    validate_state(reference).unwrap_or_else(|_| vec![reference.state_root().to_path_buf()])
+fn recovery_paths(
+    store: &dyn StateStore,
+    reference: &ResourceRef,
+    directory: Option<&Path>,
+) -> Vec<PathBuf> {
+    match pending_recovery(store, reference) {
+        Ok(paths) => return paths,
+        Err(_) if directory.is_none() => return Vec::new(),
+        Err(_) => {}
+    }
+    let preparation = read_record::<Preparation>(
+        store,
+        &resource_key(reference.destination(), "preparation"),
+        "Preparation",
+    );
+    match (preparation, directory) {
+        (Ok(Some(preparation)), Some(directory)) if preparation.directory() == directory => {
+            vec![directory.to_path_buf()]
+        }
+        _ => Vec::new(),
+    }
 }
 
-fn acquire_transaction_locks(
+fn acquire_transaction_locks<'a>(
     identifier: &str,
-    target: &InstallationTarget,
+    target: &'a InstallationTarget,
     expected_index: Option<&Index>,
-    expected_prepared: Option<&Index>,
     references: &[ResourceRef],
     timeout: Duration,
-) -> Result<TransactionLocks, TargetError> {
+) -> Result<TransactionLocks<'a>, TargetError> {
     TransactionLocks::acquire_after_index_validation(
-        target.index_root(),
+        target.store().as_ref(),
+        &installation_key(identifier, target),
         references,
         timeout,
         || {
-            let (recorded, prepared) = index_records(identifier, target)?;
-            if let Some(prepared) = prepared.as_ref() {
-                prepared_index_promotes(recorded.as_ref(), prepared).map_err(|error| {
-                    failure(
-                        ErrorCode::RecoveryNeeded,
-                        error.message(),
-                        target.index_root().join("index.json.next"),
-                    )
-                })?;
-            }
-            let visible = index_with_prepared_resources(
-                recorded.as_ref(),
-                prepared.as_ref(),
-                identifier,
-                &target.context_digest(),
-            )
-            .map_err(|error| invalid(error, target.index_root()))?;
-            if visible.as_ref() != expected_index || prepared.as_ref() != expected_prepared {
-                return Err(failure(
+            if installation_index(identifier, target)?.as_ref() != expected_index {
+                return Err(index_failure(
+                    target,
                     ErrorCode::ConcurrentChange,
                     "index changed while acquiring locks",
-                    target.index_root(),
                 ));
             }
             Ok(())
@@ -844,7 +824,7 @@ fn acquire_transaction_locks(
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks) -> InstallationResult {
+fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks<'_>) -> InstallationResult {
     let identifier = preview.bundle_id();
     let target = preview.target();
     let initial_error = preview.error().cloned().or_else(|| {
@@ -873,7 +853,7 @@ fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks) -> Installat
             Vec::new(),
         );
     }
-    let refreshed = match fresh(preview, false, locks.created()) {
+    let refreshed = match fresh(preview, locks.created()) {
         Ok(value) => value,
         Err(error) => {
             return failed_result(identifier, target, error, Vec::new());
@@ -923,7 +903,7 @@ fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks) -> Installat
             return failed_result(
                 identifier,
                 target,
-                invalid(error, target.index_root()),
+                index_failure(target, ErrorCode::InvalidState, error.message()),
                 Vec::new(),
             );
         }
@@ -938,30 +918,17 @@ fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks) -> Installat
             return failed_result(
                 identifier,
                 target,
-                invalid(error, target.index_root()),
+                index_failure(target, ErrorCode::InvalidState, error.message()),
                 Vec::new(),
             );
         }
     };
-    let Some(index_revision) = refreshed.index_revision() else {
-        return failed_result(
-            identifier,
-            target,
-            failure(
-                ErrorCode::InvalidState,
-                "preview metadata was not observed",
-                target.index_root(),
-            ),
-            Vec::new(),
-        );
-    };
     let outcome = match execute_transaction(
         locks,
         refreshed.resources(),
+        refreshed.index(),
         &pending,
         &completed,
-        index_revision,
-        refreshed.index_ancestors(),
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -973,7 +940,11 @@ fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks) -> Installat
     let mut results = Vec::new();
     for plan in refreshed.resources() {
         if outcome.failed() == Some(plan.resource()) {
-            let paths = recovery_paths(plan.resource());
+            let paths = recovery_paths(
+                target.store().as_ref(),
+                plan.resource(),
+                Some(plan.transaction_directory()),
+            );
             let committed = completed_refs.contains(plan.resource());
             results.push(ResourceResult::new(
                 plan.resource().clone(),
@@ -1037,7 +1008,7 @@ pub(crate) fn apply(preview: &LifecyclePreview, timeout: Duration) -> Installati
     if !preview.rendered().supported() {
         return unsupported_result(preview.bundle_id(), preview.rendered(), preview.target());
     }
-    if let Err(error) = fresh(preview, true, &[]) {
+    if let Err(error) = fresh(preview, &[]) {
         return failed_result(preview.bundle_id(), preview.target(), error, Vec::new());
     }
     let references = preview
@@ -1049,7 +1020,6 @@ pub(crate) fn apply(preview: &LifecyclePreview, timeout: Duration) -> Installati
         preview.bundle_id(),
         preview.target(),
         preview.index(),
-        None,
         &references,
         timeout,
     ) {
@@ -1076,71 +1046,44 @@ fn unsupported_result(
     )
 }
 
-#[allow(clippy::too_many_lines)]
 fn recover_locked(
     identifier: &str,
     target: &InstallationTarget,
     index: Option<&Index>,
-    prepared: Option<&Index>,
     references: &[ResourceRef],
-    locks: &TransactionLocks,
+    locks: &TransactionLocks<'_>,
 ) -> InstallationResult {
-    let current = match installation_index(identifier, target) {
-        Ok(value) => value,
+    match installation_index(identifier, target) {
+        Ok(current) if current.as_ref() == index => {}
+        Ok(_) => {
+            return failed_result(
+                identifier,
+                target,
+                index_failure(
+                    target,
+                    ErrorCode::ConcurrentChange,
+                    "index changed while acquiring locks",
+                ),
+                Vec::new(),
+            );
+        }
         Err(error) => return failed_result(identifier, target, error, Vec::new()),
-    };
-    if current.0.as_ref() != index || current.1.as_ref() != prepared {
-        return failed_result(
-            identifier,
-            target,
-            failure(
-                ErrorCode::ConcurrentChange,
-                "index changed while acquiring locks",
-                target.index_root(),
-            ),
-            Vec::new(),
-        );
     }
-    let (recorded, prepared_record) = match index_records(identifier, target) {
-        Ok(value) => value,
-        Err(error) => return failed_result(identifier, target, error, Vec::new()),
-    };
-    if let Some(prepared) = prepared_record.as_ref()
-        && let Err(error) = prepared_index_promotes(recorded.as_ref(), prepared)
-    {
-        return failed_result(
-            identifier,
-            target,
-            failure(
-                ErrorCode::RecoveryNeeded,
-                error.message(),
-                target.index_root().join("index.json.next"),
-            ),
-            Vec::new(),
-        );
-    }
+    let store = target.store().as_ref();
     for reference in references {
-        if let Err(error) = check_receipt(index, prepared_record.as_ref(), reference) {
+        if let Err(error) = check_receipt(store, index, reference) {
             return failed_result(identifier, target, error, Vec::new());
         }
     }
-    let revision = match observe(target.index_root()) {
-        Ok(value) => value,
-        Err(error) => return failed_result(identifier, target, error, Vec::new()),
-    };
-    let parents = match ancestors(&target.index_root().join("index.json")) {
-        Ok(value) => value,
-        Err(error) => return failed_result(identifier, target, error, Vec::new()),
-    };
     let mut results = Vec::new();
     for guard in locks.resources() {
-        let outcome = validate_state(guard.reference())
+        let outcome = pending_recovery(store, guard.reference())
             .map(|paths| !paths.is_empty())
-            .and_then(|pending| recover(guard).map(|()| pending));
+            .and_then(|pending| recover(store, guard).map(|()| pending));
         let pending = match outcome {
             Ok(pending) => pending,
             Err(error) => {
-                let paths = recovery_paths(guard.reference());
+                let paths = recovery_paths(store, guard.reference(), None);
                 results.push(ResourceResult::new(
                     guard.reference().clone(),
                     OperationStatus::Incomplete,
@@ -1167,16 +1110,9 @@ fn recover_locked(
             Vec::new(),
         ));
     }
-    if let Some(prepared) = prepared_record.as_ref()
-        && let Err(error) =
-            reconcile_prepared_index(locks, recorded.as_ref(), prepared, &revision, &parents)
-    {
-        return failed_result(identifier, target, error, Vec::new());
-    }
-    let changed = prepared_record.is_some()
-        || results
-            .iter()
-            .any(|result| result.status() == OperationStatus::Applied);
+    let changed = results
+        .iter()
+        .any(|result| result.status() == OperationStatus::Applied);
     InstallationResult::new(
         if changed {
             OperationStatus::Applied
@@ -1195,7 +1131,7 @@ pub(crate) fn recover_installation(
     target: &InstallationTarget,
     timeout: Duration,
 ) -> InstallationResult {
-    let (index, prepared) = match installation_index(identifier, target) {
+    let index = match installation_index(identifier, target) {
         Ok(value) => value,
         Err(error) => return failed_result(identifier, target, error, Vec::new()),
     };
@@ -1216,29 +1152,10 @@ pub(crate) fn recover_installation(
         None,
     ) {
         Ok(value) => value,
-        Err(BuildError::Invalid(error)) => {
-            return failed_result(identifier, target, invalid_state(&error), Vec::new());
-        }
-        Err(BuildError::Target(error)) => {
-            return failed_result(identifier, target, error, Vec::new());
-        }
+        Err(error) => return failed_result(identifier, target, build_failure(error), Vec::new()),
     };
-    match acquire_transaction_locks(
-        identifier,
-        target,
-        index.as_ref(),
-        prepared.as_ref(),
-        &references,
-        timeout,
-    ) {
-        Ok(locks) => recover_locked(
-            identifier,
-            target,
-            index.as_ref(),
-            prepared.as_ref(),
-            &references,
-            &locks,
-        ),
+    match acquire_transaction_locks(identifier, target, index.as_ref(), &references, timeout) {
+        Ok(locks) => recover_locked(identifier, target, index.as_ref(), &references, &locks),
         Err(error) => failed_result(identifier, target, error, Vec::new()),
     }
 }
@@ -1255,38 +1172,20 @@ pub(crate) fn synchronize(
     if !rendered.supported() {
         return unsupported_result(identifier, rendered, target);
     }
-    let (index, prepared) = match installation_index(identifier, target) {
+    let index = match installation_index(identifier, target) {
         Ok(value) => value,
         Err(error) => return failed_result(identifier, target, error, Vec::new()),
     };
     let refs = match references(rendered, index.as_ref(), target, bundle, None) {
         Ok(value) => value,
-        Err(BuildError::Invalid(error)) => {
-            return failed_result(identifier, target, invalid_state(&error), Vec::new());
-        }
-        Err(BuildError::Target(error)) => {
-            return failed_result(identifier, target, error, Vec::new());
-        }
+        Err(error) => return failed_result(identifier, target, build_failure(error), Vec::new()),
     };
-    let locks = match acquire_transaction_locks(
-        identifier,
-        target,
-        index.as_ref(),
-        prepared.as_ref(),
-        &refs,
-        timeout,
-    ) {
+    let locks = match acquire_transaction_locks(identifier, target, index.as_ref(), &refs, timeout)
+    {
         Ok(value) => value,
         Err(error) => return failed_result(identifier, target, error, Vec::new()),
     };
-    let recovered = recover_locked(
-        identifier,
-        target,
-        index.as_ref(),
-        prepared.as_ref(),
-        &refs,
-        &locks,
-    );
+    let recovered = recover_locked(identifier, target, index.as_ref(), &refs, &locks);
     if recovered.error().is_some() {
         return recovered;
     }
@@ -1299,12 +1198,7 @@ pub(crate) fn synchronize(
         replace_modified,
     ) {
         Ok(value) => value,
-        Err(BuildError::Invalid(error)) => {
-            return failed_result(identifier, target, invalid_state(&error), Vec::new());
-        }
-        Err(BuildError::Target(error)) => {
-            return failed_result(identifier, target, error, Vec::new());
-        }
+        Err(error) => return failed_result(identifier, target, build_failure(error), Vec::new()),
     };
     run_locked(&preview, &locks)
 }
@@ -1316,7 +1210,27 @@ pub(crate) fn validate_reference_request(
 ) -> Result<Option<TargetError>, ValueError> {
     match references(rendered, None, target, Some(bundle), None) {
         Ok(_) => Ok(None),
-        Err(BuildError::Invalid(error)) => Err(error),
+        Err(BuildError::Invalid(error) | BuildError::StoreOverlap(error)) => Err(error),
         Err(BuildError::Target(error)) => Ok(Some(error)),
+    }
+}
+
+pub(crate) fn validate_skill_references(
+    rendered: &RenderedBundle,
+    target: &InstallationTarget,
+    bundle: &Bundle,
+) -> Result<Option<TargetError>, ValueError> {
+    match references(rendered, None, target, Some(bundle), None) {
+        Ok(_) => Ok(None),
+        Err(BuildError::Invalid(error)) => Err(error),
+        Err(BuildError::StoreOverlap(error)) => Ok(Some(invalid_state(&error))),
+        Err(BuildError::Target(error)) => Ok(Some(error)),
+    }
+}
+
+fn build_failure(error: BuildError) -> TargetError {
+    match error.into_value_error() {
+        Ok(error) => invalid_state(&error),
+        Err(error) => error,
     }
 }

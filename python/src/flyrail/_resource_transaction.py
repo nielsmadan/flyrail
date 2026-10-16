@@ -1,3 +1,4 @@
+import errno
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -6,7 +7,6 @@ from flyrail._codec import register
 from flyrail._filesystem import rename_exclusive
 from flyrail._observation import ObservationFailure, Observer
 from flyrail._resource_io import (
-    ancestors,
     cleanup_revision,
     destroy,
     failure,
@@ -15,18 +15,27 @@ from flyrail._resource_io import (
     private_revision,
     protect,
     require,
+    require_unchanged_since,
+    resource_ancestors,
     write_revision,
 )
-from flyrail._resource_models import Ancestor, Receipt, ResourceRef, Revision, sequence
+from flyrail._resource_models import (
+    Ancestor,
+    Preparation,
+    Receipt,
+    ResourceRef,
+    Revision,
+    sequence,
+)
 from flyrail._security import ensure_private, principals, replace_file, set_security
 from flyrail._state import (
     delete_record,
     hierarchy_conflicts,
     read_record,
+    recognized_transaction_directory,
     resource_key,
     write_record,
 )
-from flyrail.authority import transaction_path
 from flyrail.configuration import ResourcePlan
 from flyrail.observations import ErrorCode
 from flyrail.stores import StateStore
@@ -71,10 +80,6 @@ class Journal:
 register(Journal)
 
 
-def transaction_directory(journal: Journal) -> Path:
-    return transaction_path(journal.resource.destination, journal.receipt.transaction_id)
-
-
 def paths(directory: Path) -> tuple[Path, Path]:
     return directory / "staging" / "resource", directory / "backup" / "resource"
 
@@ -85,6 +90,78 @@ def _journal_key(ref: ResourceRef) -> str:
 
 def _receipt_key(ref: ResourceRef) -> str:
     return resource_key(ref.destination, "receipt")
+
+
+def _preparation_key(ref: ResourceRef) -> str:
+    return resource_key(ref.destination, "preparation")
+
+
+def _matching(store: StateStore, preparation: Preparation | None, journal: Journal) -> Preparation:
+    if (
+        preparation is None
+        or preparation.resource != journal.resource
+        or preparation.transaction_id != journal.receipt.transaction_id
+    ):
+        raise failure(
+            ErrorCode.INVALID_STATE,
+            "transaction record has no matching preparation",
+            store.location,
+        )
+    return preparation
+
+
+def _known(store: StateStore, preparation: Preparation) -> bool:
+    return recognized_transaction_directory(
+        store,
+        preparation.resource.destination,
+        preparation.transaction_id,
+        preparation.directory,
+    )
+
+
+def _unrecognized(store: StateStore) -> ObservationFailure:
+    return failure(
+        ErrorCode.RECOVERY_NEEDED,
+        "transaction record names an unrecognized directory",
+        store.location,
+    )
+
+
+def _recognized(store: StateStore, preparation: Preparation | None) -> Preparation | None:
+    if preparation is not None and not _known(store, preparation):
+        raise _unrecognized(store)
+    return preparation
+
+
+def _absent(directory: Path) -> bool:
+    try:
+        directory.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _records(store: StateStore, ref: ResourceRef) -> tuple[Preparation | None, Journal | None]:
+    preparation = read_record(store, _preparation_key(ref), Preparation)
+    if preparation is not None and not (
+        _known(store, preparation) or _absent(preparation.directory)
+    ):
+        raise _unrecognized(store)
+    journal = read_record(store, _journal_key(ref), Journal)
+    if journal is not None:
+        _matching(store, _recognized(store, preparation), journal)
+    return preparation, journal
+
+
+def _preparation(store: StateStore, journal: Journal) -> Preparation:
+    preparation = read_record(store, _preparation_key(journal.resource), Preparation)
+    return _matching(store, _recognized(store, preparation), journal)
+
+
+def transaction_directory(store: StateStore, journal: Journal) -> Path:
+    return _preparation(store, journal).directory
 
 
 def _layout(directory: Path) -> None:
@@ -98,19 +175,17 @@ def _layout(directory: Path) -> None:
     observer.finish()
 
 
-def transaction_ancestors(directory: Path) -> tuple[Ancestor, ...]:
-    staged, backup = paths(directory)
-    return tuple(dict.fromkeys((*ancestors(staged), *ancestors(backup))))
+def transaction_ancestors(destination: Path, directory: Path) -> tuple[Ancestor, ...]:
+    return resource_ancestors(destination, *paths(directory))
 
 
 def _transient(path: Path, directory: Path) -> bool:
     return path == directory or directory in path.parents
 
 
-def _ancestors(store: StateStore, journal: Journal) -> None:
+def _ancestors(store: StateStore, journal: Journal, directory: Path) -> None:
     ref = journal.resource
-    directory = transaction_directory(journal)
-    current = transaction_ancestors(directory)
+    current = transaction_ancestors(ref.destination, directory)
     retained = tuple(
         item
         for item in journal.ancestors
@@ -130,13 +205,9 @@ def _receipt(store: StateStore, journal: Journal) -> Receipt | None:
     return read_record(store, _receipt_key(journal.resource), Receipt)
 
 
-def _journal(store: StateStore, journal: Journal) -> None:
+def _journal(store: StateStore, journal: Journal, directory: Path) -> None:
     if read_record(store, _journal_key(journal.resource), Journal) != journal:
-        raise failure(
-            ErrorCode.RECOVERY_NEEDED,
-            "transaction record changed",
-            transaction_directory(journal),
-        )
+        raise failure(ErrorCode.RECOVERY_NEEDED, "transaction record changed", directory)
 
 
 def _remove_directories(
@@ -147,6 +218,14 @@ def _remove_directories(
             path.rmdir()
         except ignored:
             continue
+
+
+def _release(store: StateStore, preparation: Preparation) -> None:
+    try:
+        if store.read(_journal_key(preparation.resource)) is None:
+            delete_record(store, _preparation_key(preparation.resource), expected=preparation)
+    except (OSError, ObservationFailure, ValueError):
+        return
 
 
 def _discard(directory: Path, revisions: tuple[Revision, ...]) -> None:
@@ -161,14 +240,18 @@ def _discard(directory: Path, revisions: tuple[Revision, ...]) -> None:
 
 
 def pending_recovery(store: StateStore, ref: ResourceRef) -> tuple[Path, ...]:
-    journal = read_record(store, _journal_key(ref), Journal)
-    return () if journal is None else (transaction_directory(journal),)
+    preparation, _ = _records(store, ref)
+    return () if preparation is None else (preparation.directory,)
 
 
 def prepare(store: StateStore, plan: ResourcePlan) -> Journal:
     ref = plan.resource
-    directory = transaction_path(ref.destination, plan.receipt.transaction_id)
-    if ancestors(directory / "staging") != plan.ancestors:
+    directory = plan.transaction_directory
+    if not recognized_transaction_directory(
+        store, ref.destination, plan.receipt.transaction_id, directory
+    ):
+        raise ValueError("planned transaction directory is not recognized")
+    if resource_ancestors(ref.destination, directory / "staging") != plan.ancestors:
         raise failure(ErrorCode.CONCURRENT_CHANGE, "resource ancestor changed", ref.destination)
     require(ref.destination, plan.before)
     if plan.require_existing and not plan.before.nodes:
@@ -179,34 +262,36 @@ def prepare(store: StateStore, plan: ResourcePlan) -> Journal:
         raise failure(
             ErrorCode.CONCURRENT_CHANGE, "receipt changed during preparation", ref.destination
         )
-    retained = read_record(store, _journal_key(ref), Journal)
+    retained, _ = _records(store, ref)
     if retained is not None:
-        raise failure(
-            ErrorCode.RECOVERY_NEEDED,
-            "transaction record retained",
-            transaction_directory(retained),
-        )
+        raise failure(ErrorCode.RECOVERY_NEEDED, "transaction record retained", retained.directory)
+    preparation = Preparation(ref, plan.receipt.transaction_id, directory)
+    write_record(store, _preparation_key(ref), preparation, expected=None)
     try:
         directory.mkdir(mode=0o700)
     except FileExistsError as error:
+        _release(store, preparation)
         raise failure(
             ErrorCode.RECOVERY_NEEDED, "unrecognized transaction data retained", directory
         ) from error
-    written: Revision | None = None
+    except Exception:
+        _release(store, preparation)
+        raise
+    staged: tuple[Revision, ...] = ()
     try:
         storage_ancestors = _storage(plan, directory)
         if plan.after != plan.before:
-            written = write_revision(paths(directory)[0], plan.after)
+            staged = (write_revision(paths(directory)[0], plan.after),)
         journal = _journal_for(
-            store, plan, directory, storage_ancestors, plan.before if written is None else written
+            store, plan, directory, storage_ancestors, staged[0] if staged else plan.before
         )
-    except Exception:
-        _discard(directory, () if written is None else (written,))
-        raise
-    try:
+        staged = (journal.staged, journal.published)
+        os.utime(directory)
         write_record(store, _journal_key(ref), journal, expected=None)
     except Exception:
-        _discard(directory, (journal.staged, journal.published))
+        _discard(directory, staged)
+        if not os.path.lexists(directory):
+            _release(store, preparation)
         raise
     return journal
 
@@ -220,7 +305,7 @@ def _storage(plan: ResourcePlan, directory: Path) -> tuple[Ancestor, ...]:
         expected = observe(path)
         ensure_private(path)
         storage.append((path, expected))
-    storage_ancestors = transaction_ancestors(directory)
+    storage_ancestors = transaction_ancestors(plan.resource.destination, directory)
     for path, expected in storage:
         require(path, expected)
     created = (directory, staged_path.parent, backup_path.parent)
@@ -285,16 +370,17 @@ def _journal_for(
         backup,
         storage_ancestors,
     )
-    _ancestors(store, journal)
+    _ancestors(store, journal, directory)
     require(ref.destination, plan.before)
     return journal
 
 
 def publish_receipt(store: StateStore, journal: Journal) -> None:
-    _journal(store, journal)
-    _layout(transaction_directory(journal))
-    _ancestors(store, journal)
-    staged, backup = paths(transaction_directory(journal))
+    directory = transaction_directory(store, journal)
+    _journal(store, journal, directory)
+    _layout(directory)
+    _ancestors(store, journal, directory)
+    staged, backup = paths(directory)
     require(staged, Revision())
     require(journal.resource.destination, journal.published)
     require(backup, journal.backup if journal.before != journal.staged else Revision())
@@ -309,16 +395,17 @@ def publish_receipt(store: StateStore, journal: Journal) -> None:
 
 def publish(store: StateStore, journal: Journal) -> None:
     ref = journal.resource
-    staged, backup = paths(transaction_directory(journal))
-    _journal(store, journal)
-    _ancestors(store, journal)
+    directory = transaction_directory(store, journal)
+    staged, backup = paths(directory)
+    _journal(store, journal, directory)
+    _ancestors(store, journal, directory)
     require(ref.destination, journal.before)
     if journal.before != journal.staged:
         require(staged, journal.staged)
         if journal.backup != journal.before:
             protect(ref.destination, journal.before, journal.backup.nodes[0].security)
             require(ref.destination, journal.backup)
-            _ancestors(store, journal)
+            _ancestors(store, journal, directory)
             require(ref.destination, journal.backup)
         if os.name == "nt" and journal.before.data is not None and journal.staged.data is not None:
             replace_file(ref.destination, staged, backup)
@@ -339,16 +426,17 @@ def publish(store: StateStore, journal: Journal) -> None:
                 require(staged, journal.staged)
                 rename_exclusive(staged, ref.destination)
         require(ref.destination, journal.published)
-    _ancestors(store, journal)
+    _ancestors(store, journal, directory)
     require(ref.destination, journal.published)
     publish_receipt(store, journal)
 
 
 def cleanup(store: StateStore, journal: Journal) -> None:
-    directory = transaction_directory(journal)
-    _journal(store, journal)
+    preparation = _preparation(store, journal)
+    directory = preparation.directory
+    _journal(store, journal, directory)
     _layout(directory)
-    _ancestors(store, journal)
+    _ancestors(store, journal, directory)
     staged, backup = paths(directory)
     for path, revisions in (
         (staged, (journal.staged, journal.published)),
@@ -361,15 +449,23 @@ def cleanup(store: StateStore, journal: Journal) -> None:
             destroy(path, current)
     _remove_directories(directory)
     delete_record(store, _journal_key(journal.resource), expected=journal)
+    delete_record(store, _preparation_key(journal.resource), expected=preparation)
 
 
 def rollback(store: StateStore, journal: Journal) -> None:
     ref = journal.resource
-    directory = transaction_directory(journal)
+    directory = transaction_directory(store, journal)
     stage_path, backup_path = paths(directory)
     _layout(directory)
-    _ancestors(store, journal)
+    _ancestors(store, journal, directory)
     actual, staged, backup = observe(ref.destination), observe(stage_path), observe(backup_path)
+    # Only cleanup, after this check passed, removes the directory or moves its time.
+    if (
+        actual.nodes
+        and actual in (journal.before, journal.staged, journal.published)
+        and os.path.lexists(directory)
+    ):
+        require_unchanged_since(ref.destination, actual, directory.lstat().st_mtime_ns)
     if actual == journal.before and not backup.nodes:
         cleanup(store, journal)
         return
@@ -414,21 +510,50 @@ def rollback(store: StateStore, journal: Journal) -> None:
     cleanup(store, journal)
 
 
-def recover(store: StateStore, ref: ResourceRef) -> None:
-    journal = read_record(store, _journal_key(ref), Journal)
-    if journal is None:
-        return
-    if journal.resource != ref:
-        raise failure(
-            ErrorCode.RECOVERY_NEEDED,
-            "transaction record disagrees",
-            transaction_directory(journal),
+def _abandon(store: StateStore, preparation: Preparation) -> None:
+    directory = preparation.directory
+    staged, backup = paths(directory)
+    if os.path.lexists(directory):
+        if not _known(store, preparation):
+            raise _unrecognized(store)
+        unrecognized = failure(
+            ErrorCode.RECOVERY_NEEDED, "unrecognized transaction data retained", directory
         )
+        try:
+            _layout(directory)
+            for path in (directory, staged.parent, backup.parent):
+                if os.path.lexists(path):
+                    ensure_private(path)
+            retained, current = observe(backup), observe(staged)
+        except ObservationFailure as error:
+            raise unrecognized from error
+        except OSError as error:
+            if error.errno != errno.ENOTSUP:
+                raise
+            raise unrecognized from error
+        if retained.nodes:
+            raise unrecognized
+        destroy(staged, current)
+        _remove_directories(directory)
+    delete_record(store, _preparation_key(preparation.resource), expected=preparation)
+
+
+def recover(store: StateStore, ref: ResourceRef) -> None:
+    preparation, journal = _records(store, ref)
+    if preparation is None:
+        return
+    if preparation.resource != ref:
+        raise failure(
+            ErrorCode.RECOVERY_NEEDED, "transaction record disagrees", preparation.directory
+        )
+    if journal is None:
+        _abandon(store, preparation)
+        return
     if journal.receipt == journal.previous:
         raise failure(
             ErrorCode.RECOVERY_NEEDED,
             "transaction record repeats the previous receipt",
-            transaction_directory(journal),
+            preparation.directory,
         )
     current = _receipt(store, journal)
     if current == journal.receipt:

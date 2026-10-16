@@ -14,13 +14,15 @@ Library operations do not run bundled commands or access the network.
 | Observation and planning | `configuration`, `inspection`, `lifecycle`, `summary` | Resource summaries, immutable previews, and logical index membership. |
 | Agent evidence | `discovery` | Explicit executable and macOS application discovery without target selection. |
 | Persistence | private codec, resource-model, and transaction modules | Closed state records, complete revisions, journals, and receipt commit. |
-| Native I/O | authority, filesystem, resource-I/O, and security modules | Canonical destinations, safe observation, locks, metadata, and exclusive publication. |
+| Native I/O | authority, filesystem, resource-I/O, and security modules | Canonical destinations, safe observation, metadata, and exclusive publication. |
+| State storage | `stores`, `testing` modules | `StateStore` trait, `MemoryStore` and `DirectoryStore`, and the shared conformance kit. |
 
 The skill convenience API adapts named subtrees into the same kernel. Every
-physical document, tree, or skill container has one adjacent authority, lock,
-receipt, and journal across owners. A logical installation index records
-membership; it is not a second ownership authority. Disjoint sections or keys in
-one document can therefore have independent owners.
+physical document, tree, or skill container has one authority, lock, receipt,
+and journal across owners, held in the application's `StateStore` rather than
+beside the resource. A logical installation index, held in the same store, is
+membership bookkeeping; it is not a second ownership authority. Disjoint
+sections or keys in one document can therefore have independent owners.
 
 Contenders register permanent boundaries before ancestor/descendant validation.
 Cooperating writers acquire the index lock first, then resource locks in
@@ -45,7 +47,8 @@ of being silently weakened.
 
 [Resource authority](../../spec/resource-authority.md),
 [state encoding](../../spec/receipt-format.md),
-[index semantics](../../spec/configuration-state.md), and
+[index semantics](../../spec/configuration-state.md),
+[the state store contract](../../spec/state-store.md), and
 [transactions](../../spec/transaction-protocol.md) define the shared durable
 contracts. [Porting guidance](../../spec/porting.md) describes the required
 cross-language behavior.

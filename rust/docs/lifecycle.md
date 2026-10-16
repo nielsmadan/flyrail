@@ -1,9 +1,14 @@
 # Installation, update, and removal
 
 Flyrail synchronizes an immutable `Bundle` and explicit `RenderedBundle` into a
-logical `InstallationTarget`. One receipt owns each physical document, tree, or
-skill container across callers and bundles. A separate private index records the
-resources belonging to one installation.
+logical `InstallationTarget`, backed by the application's `StateStore`. One
+receipt owns each physical document, tree, or skill container across callers
+and bundles, within that store. A separate private index, held in the same
+store, locates the resources belonging to one installation, including
+interrupted or retired claims. Authority records are permanent within a
+store: nothing ever deletes one, so a failed child admission keeps excluding
+an enclosing tree, and a failed tree admission keeps excluding every
+descendant it already reserved.
 
 ## Planning and applying
 
@@ -22,8 +27,9 @@ an owned section. It never refreshes a stale proposal. `sync` and `remove` inste
 recover recognized interrupted work under locks and plan again.
 
 Call `recover_installation` before reading files whose post-recovery state chooses
-new desired content. It recovers recognized resource transactions and prepared
-index metadata without publishing new content or removing healthy ownership.
+new desired content. It recovers recognized interrupted resource transactions
+without publishing new content or removing healthy ownership; pending and
+residual membership in the index stays for the next mutation to reconcile.
 Re-read selection inputs and create a fresh preview afterward.
 
 Known conflicts across the logical target are checked before publication.
@@ -42,11 +48,19 @@ and binds the observed file through publication.
 | `Takeover` | Record the original selected content and position. | Restore the first baseline. |
 | `Adopt` | Require an exact matching selection. | Remove the adopted unit without restoration. |
 
-Acquisition cannot take another owner's claim. A changed or missing owned unit
-blocks its resource by default, including a retiring unit. `replace_modified`
-authorizes replacement of the safely observed same-owner unit and retains the
-first takeover baseline. It cannot repair malformed boundaries, follow unsafe
-links, or override another owner.
+Acquisition cannot take another owner's claim, and this holds within one
+store only: content recorded in a different store is foreign to flyrail,
+which recognizes neither its claims nor its authority records as fences.
+Targets sharing one store share its receipts and fences. Content installed
+through a store the application has since lost or replaced becomes foreign
+the same way, even though flyrail itself wrote it: default `Conflict`
+acquisition refuses it, and explicit `Acquisition::Adopt` re-owns content
+that matches exactly, per the table above.
+
+A changed or missing owned unit blocks its resource by default, including a
+retiring unit. `replace_modified` authorizes replacement of the safely
+observed same-owner unit and retains the first takeover baseline. It cannot
+repair malformed boundaries, follow unsafe links, or override another owner.
 
 Renaming an artifact at the same physical claim retains ownership and baseline.
 Moving it acquires a new claim and retires the old one. Dependencies publish
@@ -72,9 +86,82 @@ agent loaded or activated the configuration.
 | `Failed` | No requested resource commit completed, or recovery failed. |
 | `Incomplete` | Unresolved recovery evidence remains. |
 
+A write stages in the store's staging directory when it is on the same mount
+as the destination, and otherwise in `P/.flyrail-<hash>-<transaction-id>.txn`
+beside destination `P/N`. A nonempty `recovery_paths` names the transaction
+directory recorded by the resource's preparation — in the store's staging
+directory or beside the destination, wherever that write staged — left
+behind when a write was interrupted; the next successful recovery removes
+it, not the caller. A write records its preparation before it creates that
+directory, so an interruption at any point leaves the directory attributed
+to the store. A write that fails before its journal is written removes its
+own staged data, transaction directory, and preparation in the same call. A
+transaction directory that no record in the store names belongs to another
+store, or outlived the store that created it: flyrail never reports,
+removes, or waits on it, and deleting it is the host's decision.
+
 Removal needs only the bundle ID and index. Intact created and adopted claims are
-removed, takeovers are restored, and foreign content survives. Empty receipts and
-permanent authority/lock directories may remain.
+removed, takeovers are restored, and foreign content survives. Empty receipts
+and permanent authority records may remain in the store. Applications must
+keep the store's location ignored independently of their disposable
+configuration files.
+
+Flyrail never deletes an authority record, so a resource keeps fencing its
+ancestors and descendants after removal; see
+[resource authority](../../spec/resource-authority.md). To clear one, delete
+its record from the store directly while no flyrail operation runs against
+it:
+
+```rust
+use caseless::default_case_fold_str;
+use flyrail::{DirectoryStore, ResourceAuthority, StateStore};
+use sha2::{Digest as _, Sha256};
+use std::path::Path;
+use std::sync::Arc;
+use unicode_normalization::UnicodeNormalization as _;
+
+let path = Path::new("project/AGENTS.md");
+let store: Arc<dyn StateStore> = Arc::new(DirectoryStore::new(".cache/project-guide")?);
+
+let destination = ResourceAuthority::new(path)?.destination().to_path_buf();
+let folded: String = default_case_fold_str(&destination.to_string_lossy())
+    .nfc()
+    .collect();
+let key = format!("resource/{:x}/authority", Sha256::digest(folded.as_bytes()));
+if let Some(bytes) = store.read(&key)? {
+    store.delete(&key, &bytes)?;
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Recovery deletes an interrupted preparation whose recorded transaction
+directory no longer exists, as happens when a store is moved and its staging
+directory moves with it. When the recorded directory still exists outside the
+store's current staging location, for example after the store was copied
+rather than moved, recovery reports `RecoveryNeeded` and touches nothing. Clear
+it by hand while holding the resource lock: delete the journal and preparation
+records, then remove the stale directory. A directory whose journal survives
+can hold the only copy of the original content in `backup/resource`; reconcile
+the destination from it first. Continuing the recipe above:
+
+```rust
+use flyrail::{Preparation, decode};
+use std::time::Duration;
+
+let digest = format!("{:x}", Sha256::digest(folded.as_bytes()));
+let _lock = store.lock(&format!("resource/{digest}"), Duration::from_secs(10))?;
+if let Some(preparation) = store.read(&format!("resource/{digest}/preparation"))? {
+    let stale = decode::<Preparation>(&preparation)?.directory().to_path_buf();
+    for record in ["journal", "preparation"] {
+        let key = format!("resource/{digest}/{record}");
+        if let Some(bytes) = store.read(&key)? {
+            store.delete(&key, &bytes)?;
+        }
+    }
+    std::fs::remove_dir_all(stale)?;
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 A receipt referenced by committed current or previous membership is required.
 Missing or malformed ownership metadata blocks update, removal, and recovery
@@ -86,6 +173,17 @@ baselines.
 Publication rechecks complete bytes, identity, supported security metadata, and
 ancestors. Partial document claims preserve current file-wide metadata. Whole
 file/tree claims follow their explicit mode contract.
+
+Recovery also retains a destination that matches a recorded revision but was
+modified — or, on macOS, created — after the transaction was prepared, since a
+replacement can reuse the original's inode. It compares modification time on
+every platform and creation time only on macOS. After the caller reconciles
+the resource to a recognized revision, including its earlier modification
+time when it is restored in place, a source-free retry can recover. A
+destination whose modification time already lies in the future when the
+transaction is prepared, or a clock that steps backwards, makes recovery refuse
+the same way until the destination's modification time is no later than the
+time the transaction was prepared.
 
 Rollback requires a complete recognized public revision. Unexpected edits retain
 journals and backups with an incomplete result; there is no force-recovery API.

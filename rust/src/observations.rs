@@ -436,7 +436,6 @@ impl Observation {
 pub struct TargetInspection<T> {
     target: T,
     root: PathBuf,
-    state_root: PathBuf,
     alias_of: Option<usize>,
     observation: Observation,
 }
@@ -445,14 +444,12 @@ impl<T> TargetInspection<T> {
     pub const fn new(
         target: T,
         root: PathBuf,
-        state_root: PathBuf,
         alias_of: Option<usize>,
         observation: Observation,
     ) -> Self {
         Self {
             target,
             root,
-            state_root,
             alias_of,
             observation,
         }
@@ -464,10 +461,6 @@ impl<T> TargetInspection<T> {
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    pub fn state_root(&self) -> &Path {
-        &self.state_root
     }
 
     pub const fn alias_of(&self) -> Option<usize> {
@@ -493,7 +486,6 @@ impl<T> TargetInspection<T> {
 pub struct TargetResult<T> {
     target: T,
     root: PathBuf,
-    state_root: PathBuf,
     alias_of: Option<usize>,
     status: OperationStatus,
     observation: Observation,
@@ -506,7 +498,6 @@ impl<T> TargetResult<T> {
     pub const fn new(
         target: T,
         root: PathBuf,
-        state_root: PathBuf,
         alias_of: Option<usize>,
         status: OperationStatus,
         observation: Observation,
@@ -516,7 +507,6 @@ impl<T> TargetResult<T> {
         Self {
             target,
             root,
-            state_root,
             alias_of,
             status,
             observation,
@@ -531,10 +521,6 @@ impl<T> TargetResult<T> {
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    pub fn state_root(&self) -> &Path {
-        &self.state_root
     }
 
     pub const fn alias_of(&self) -> Option<usize> {

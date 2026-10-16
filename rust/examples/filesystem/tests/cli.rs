@@ -47,7 +47,7 @@ fn temp_root_cleanup_runs_on_drop() {
 #[test]
 fn value_options_reject_following_options_without_writes() {
     let root = root("missing-values");
-    for option in ["--source", "--bundle-id", "--target"] {
+    for option in ["--source", "--bundle-id", "--target", "--state"] {
         let output = run_os(&[
             OsString::from("ai"),
             OsString::from(if option == "--bundle-id" {
@@ -168,11 +168,14 @@ fn lifecycle_supports_repeat_targets_modifications_and_source_free_removal() {
     copy_tree(Path::new(source()), &copied);
     let first = root.join("first");
     let second = root.join("second");
+    let state = root.join("state");
     let targets = [
         "--target",
         first.to_str().expect("UTF-8"),
         "--target",
         second.to_str().expect("UTF-8"),
+        "--state",
+        state.to_str().expect("UTF-8"),
     ];
     let mut content = vec!["ai", "status", "--source", copied.to_str().expect("UTF-8")];
     content.extend(targets);
@@ -200,6 +203,8 @@ fn lifecycle_supports_repeat_targets_modifications_and_source_free_removal() {
             competing.to_str().expect("UTF-8"),
             "--target",
             first.to_str().expect("UTF-8"),
+            "--state",
+            state.to_str().expect("UTF-8"),
         ],
         1,
     );
@@ -219,6 +224,8 @@ fn lifecycle_supports_repeat_targets_modifications_and_source_free_removal() {
             competing.to_str().expect("UTF-8"),
             "--target",
             first.to_str().expect("UTF-8"),
+            "--state",
+            state.to_str().expect("UTF-8"),
         ],
         1,
     );

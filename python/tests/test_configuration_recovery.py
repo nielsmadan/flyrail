@@ -1,6 +1,7 @@
 import errno
 import multiprocessing as mp
 import os
+import sys
 from collections.abc import Callable
 from dataclasses import replace
 from multiprocessing.connection import Connection
@@ -10,6 +11,7 @@ import pytest
 from skill_helpers import snapshot
 from state_helpers import journal_directory, transaction_directories
 from test_configuration_lifecycle import bundle, receipt, rendered
+from test_state_resources import _crash_at
 
 from flyrail import (
     Acquisition,
@@ -19,6 +21,7 @@ from flyrail import (
     Family,
     FileContent,
     InstallationTarget,
+    MemoryStore,
     OperationStatus,
     RenderedArtifact,
     RenderedBundle,
@@ -31,13 +34,14 @@ from flyrail import (
 )
 from flyrail import _lifecycle as lifecycle
 from flyrail import _resource_transaction as tx
+from flyrail._observation import ObservationFailure
 from flyrail._resource_io import move as native_move
-from flyrail._resource_io import observe
+from flyrail._resource_io import observe, require_unchanged_since
 from flyrail._resource_io import write_revision as native_write_revision
 from flyrail._resource_models import Revision
 from flyrail._resource_plan import plan_resource as native_plan_resource
 from flyrail._security import replace_file as native_replace_file
-from flyrail._state import resource_key
+from flyrail._state import choose_transaction_directory, resource_key
 from flyrail.configuration import ResourcePlan
 from flyrail.stores import StateStore
 
@@ -201,7 +205,7 @@ def test_foreign_edits_at_publication_boundaries_are_never_overwritten(
         if seam == "prepare":
             append_foreign(path)
         elif seam == "staging":
-            stage = tx.paths(tx.transaction_directory(journal))[0]
+            stage = tx.paths(tx.transaction_directory(store, journal))[0]
             append_foreign(stage)
         return journal
 
@@ -403,7 +407,7 @@ def test_failed_repair_staging_does_not_block_the_next_repair(
         patch.setattr(tx, "write_revision", fail)
         failed = sync(bundle(), rendered(path, "one"), target, replace_modified=True)
     assert failed.status is OperationStatus.FAILED
-    assert len(transaction_directories(path)) == 1
+    assert transaction_directories(path, target.store) == []
 
     result = sync(bundle(), rendered(path, "one"), target, replace_modified=True)
 
@@ -437,7 +441,10 @@ def test_journal_repeating_previous_receipt_is_refused_with_evidence_retained(
     def reuse_previous(*args: object, **kwargs: object) -> ResourcePlan:
         plan = native_plan_resource(*args, **kwargs)  # type: ignore[arg-type]
         assert plan.previous is not None and plan.after != plan.before
-        return replace(plan, receipt=plan.previous)
+        directory = choose_transaction_directory(
+            target.store, plan.resource.destination, plan.previous.transaction_id
+        )
+        return replace(plan, receipt=plan.previous, transaction_directory=directory)
 
     with monkeypatch.context() as patch:
         patch.setattr(lifecycle, "plan_resource", reuse_previous)
@@ -459,3 +466,165 @@ def test_journal_repeating_previous_receipt_is_refused_with_evidence_retained(
     assert path.exists() is False
     assert (observe(staged), observe(backup)) == evidence
     assert target.store.read(journal_key) == journal
+
+
+def _replacement_setup(
+    tmp_path: Path, location: str
+) -> tuple[Path, StateStore, InstallationTarget]:
+    project = tmp_path / "project"
+    project.mkdir()
+    destination = project / "AGENTS.md"
+    destination.write_bytes(b"# Foreign\n")
+    store: StateStore = DirectoryStore(tmp_path / "state") if location == "store" else MemoryStore()
+    selected = InstallationTarget(store)
+    assert sync(bundle(), rendered(destination, "one"), selected).status is OperationStatus.APPLIED
+    return destination, store, selected
+
+
+def _crash_before_publication(monkeypatch: pytest.MonkeyPatch) -> None:
+    def interrupted(store: StateStore, journal: tx.Journal) -> None:
+        raise SystemExit("interrupted publication")
+
+    monkeypatch.setattr(lifecycle, "publish", interrupted)
+
+
+@pytest.mark.parametrize("revision", ["published", "previous"])
+@pytest.mark.parametrize("location", ["store", "beside"])
+def test_recovery_refuses_a_destination_replaced_after_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, location: str
+) -> None:
+    destination, store, selected = _replacement_setup(tmp_path, location)
+    original = destination.read_bytes()
+    crash = _crash_at(
+        monkeypatch, "after-publish" if revision == "published" else "after-backup-move"
+    )
+    with pytest.raises(SystemExit):
+        sync(bundle("2"), rendered(destination, "two"), selected)
+    assert crash.fired
+    directory = journal_directory(store, destination)
+    if revision == "previous":
+        backup = directory / "backup" / "resource"
+        destination.write_bytes(backup.read_bytes())
+        destination.chmod(backup.stat().st_mode & 0o777)
+    later = directory.stat().st_mtime_ns + 60_000_000_000
+    os.utime(destination, ns=(later, later))
+    replaced = destination.read_bytes()
+    result = recover_installation(bundle().id, selected)
+    assert result.status is OperationStatus.INCOMPLETE
+    assert result.error is not None and result.error.code is ErrorCode.RECOVERY_NEEDED
+    assert destination.read_bytes() == replaced
+    assert directory.is_dir() and store.read(resource_key(destination, "journal")) is not None
+    if revision == "previous":
+        assert replaced == original
+
+
+@pytest.mark.parametrize("location", ["store", "beside"])
+def test_recovery_refuses_the_previous_revision_rewritten_in_place_after_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    destination, store, selected = _replacement_setup(tmp_path, location)
+    original = destination.read_bytes()
+    inode = destination.stat().st_ino
+    with monkeypatch.context() as patch:
+        _crash_before_publication(patch)
+        with pytest.raises(SystemExit):
+            sync(bundle("2"), rendered(destination, "two"), selected)
+    directory = journal_directory(store, destination)
+    with destination.open("r+b") as stream:
+        stream.truncate(0)
+        stream.write(original)
+    later = directory.stat().st_mtime_ns + 60_000_000_000
+    os.utime(destination, ns=(later, later))
+    assert destination.stat().st_ino == inode
+    result = recover_installation(bundle().id, selected)
+    assert result.status is OperationStatus.INCOMPLETE
+    assert result.error is not None and result.error.code is ErrorCode.RECOVERY_NEEDED
+    assert result.error.message == "destination revision changed after preparation"
+    assert result.error.path == destination
+    assert destination.read_bytes() == original
+    assert directory.is_dir() and store.read(resource_key(destination, "journal")) is not None
+
+
+@pytest.mark.parametrize("point", ["before-publication", "after-backup-move", "after-publish"])
+@pytest.mark.parametrize("location", ["store", "beside"])
+def test_recovery_accepts_its_own_untouched_revisions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, point: str, location: str
+) -> None:
+    destination, store, selected = _replacement_setup(tmp_path, location)
+    original = destination.read_bytes()
+    with monkeypatch.context() as patch:
+        if point == "before-publication":
+            _crash_before_publication(patch)
+        else:
+            _crash_at(patch, point)
+        with pytest.raises(SystemExit):
+            sync(bundle("2"), rendered(destination, "two"), selected)
+    assert store.read(resource_key(destination, "journal")) is not None
+    recovered = recover_installation(bundle().id, selected)
+    assert recovered.status is OperationStatus.APPLIED
+    assert destination.read_bytes() == original
+    assert (
+        sync(bundle("2"), rendered(destination, "two"), selected).status is OperationStatus.APPLIED
+    )
+    assert b"two" in destination.read_bytes()
+    assert transaction_directories(destination, store) == []
+
+
+@pytest.mark.parametrize("removed", ["staging", "directory"])
+@pytest.mark.parametrize("location", ["store", "beside"])
+def test_an_interrupted_rollback_cleanup_still_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, removed: str, location: str
+) -> None:
+    destination, store, selected = _replacement_setup(tmp_path, location)
+    original = destination.read_bytes()
+    with monkeypatch.context() as patch:
+        _crash_at(patch, "after-publish")
+        with pytest.raises(SystemExit):
+            sync(bundle("2"), rendered(destination, "two"), selected)
+    directory = journal_directory(store, destination)
+    interrupted = directory if removed == "directory" else directory / "staging"
+    native_rmdir = Path.rmdir
+
+    def rmdir(path: Path) -> None:
+        native_rmdir(path)
+        if path == interrupted:
+            raise SystemExit("interrupted cleanup")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "rmdir", rmdir)
+        with pytest.raises(SystemExit):
+            recover_installation(bundle().id, selected)
+    assert store.read(resource_key(destination, "journal")) is not None
+    assert recover_installation(bundle().id, selected).status is OperationStatus.APPLIED
+    assert destination.read_bytes() == original
+    assert store.read(resource_key(destination, "journal")) is None
+    assert transaction_directories(destination, store) == []
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_birth_time_is_compared_only_on_macos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    if sys.platform != "darwin":
+        pytest.skip("birth time is readable only on macOS")
+    path = tmp_path / "AGENTS.md"
+    path.write_bytes(b"# mine\n")
+    revision = observe(path)
+    actual = path.lstat()
+    boundary = actual.st_mtime_ns
+    born = boundary + 60_000_000_000
+    replaced = os.stat_result(
+        tuple(actual)[:10],
+        {"st_mtime_ns": boundary, "st_birthtime": born / 1e9, "st_birthtime_ns": born},
+    )
+    native_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path, "lstat", lambda selected: replaced if selected == path else native_lstat(selected)
+    )
+    monkeypatch.setattr(sys, "platform", platform)
+    if platform == "darwin":
+        with pytest.raises(ObservationFailure) as refused:
+            require_unchanged_since(path, revision, boundary)
+        assert refused.value.error.code is ErrorCode.RECOVERY_NEEDED
+    else:
+        require_unchanged_since(path, revision, boundary)

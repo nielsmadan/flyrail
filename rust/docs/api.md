@@ -1,6 +1,6 @@
 # Public Rust API
 
-[Bundles and rendering](#bundles-and-rendering) · [Configuration lifecycle](#configuration-lifecycle) · [Skill convenience API](#skill-convenience-api) · [Errors and results](#errors-and-results)
+[Bundles and rendering](#bundles-and-rendering) · [State stores](#state-stores) · [Configuration lifecycle](#configuration-lifecycle) · [Skill convenience API](#skill-convenience-api) · [Errors and results](#errors-and-results)
 
 Import the supported surface from `flyrail`; the crate root re-exports the
 consumer-facing types and functions. Bundles, renderings, previews, observations,
@@ -26,10 +26,74 @@ those values into a `RenderedBundle` for explicit `RenderContext` values. Check
 `RenderedBundle::supported` and every `Notice`; an unsupported rendering blocks
 lifecycle mutation before lock or recovery admission.
 
-`InstallationTarget` names one private logical index. Keep the same index root and
-identity context for future inspection, updates, recovery, and removal. Its
-routing context records how a particular rendering was selected but is not part
-of the persistent index identity.
+`InstallationTarget::new(store, context, routing_context)` names one
+installation: within `store`, the pair of bundle ID and `context` is its
+identity. Reuse the same store and context for future inspection, updates,
+recovery, and removal. `InstallationTarget::without_context(store)` names a
+single installation per bundle in that store — two such targets sharing a
+store collide. It records resource membership; each physical resource has its
+own shared ownership authority, held in the same store. The separate
+`routing_context` captures additional routing pairs in an immutable preview
+and is not part of the persistent identity.
+
+`RenderContext::installation(store, context)` builds a target from a render
+context. Pass `None` for `context` to use the stable entries of that render
+context's `routing_context` — `agent`, `scope`, `surface`, and `root`, per
+`destinations.rs`'s `IDENTITY_KEYS` — so per-agent or per-scope installations
+sharing one store stay separate, while a changed hook runtime, asset root,
+platform, or environment entry keeps the same installation. Pass an explicit
+`Some(context)` instead when an identity must survive a change to those
+entries, such as a harness relocating a project root or user home.
+
+## State stores
+
+Flyrail keeps no persistent state of its own. Every index, receipt,
+preparation, journal, and lock lives in a `StateStore` the application
+constructs and passes explicitly — there is no default store and no default
+location. The `StateStore` trait exposes `read`, `write`, `delete`, `keys`, and
+`lock`; `write` and `delete` are compare-and-set against an `expected` value.
+`lock` waits up to its timeout to acquire the lock and returns
+`StoreError::Busy` when the wait runs out; the `StoreLock` it returns releases
+the lock on drop. See the shared
+[state store contract](../../spec/state-store.md) for every operation's exact
+guarantees.
+
+Two built-ins cover the common cases:
+
+| Store | Use when |
+| --- | --- |
+| `DirectoryStore::new(path)` | Most applications; one file per record under `path`. |
+| `MemoryStore::new()` | Tests and dry runs; nothing survives the process. |
+
+SQLite-backed storage is Python-only; a Rust host that already keeps its own
+state in SQLite implements `StateStore` itself.
+
+A store decides what flyrail deletes and restores, so keep it private to the
+user running flyrail. `DirectoryStore` refuses an existing location, staging
+directory included, that is not private to its owner; lifecycle calls report
+it as `IoError`.
+
+`StateStore::location` names a store's filesystem footprint (`None` for
+`MemoryStore`). `StateStore::staging_directory` names where flyrail stages its
+writes (`<path>/staging` for `DirectoryStore`, `None` for `MemoryStore` and by
+default for a custom store). A write stages there when the staging directory
+is on the same mount as the destination — Linux compares `/proc/self/mountinfo`
+mount IDs, macOS compares device IDs, and any doubt about the comparison
+falls back — so the common setup, store and agent configuration both under
+the user's home, creates nothing beside the user's files. Otherwise it stages
+in a hidden `.flyrail-<hash>-<transaction-id>.txn` directory beside the
+destination for the duration of the write. A destination, transaction
+directory, or bundle source that overlaps the store's location or staging
+directory is refused.
+
+A custom store implements `StateStore` directly, using `StoreLock::new` to
+build the guard its `lock` method returns, and must pass
+`testing::check_store`. The kit checks single-process semantics through two
+handles of one store: compare-and-set writes and deletes, value round-trips,
+key listing and validation, and lock exclusion with bounded waits. It does
+not verify cross-process lock exclusion or durability, which a store's own
+tests must cover. It needs a store with nothing under the `conformance/` key
+prefix and leaves the keys it writes there.
 
 ## Configuration lifecycle
 
@@ -52,11 +116,11 @@ Lifecycle functions use an explicit `Acquisition`, `replace_modified` flag, and
 
 ```rust
 use flyrail::{
-    Acquisition, Agent, Artifact, Bundle, BundleIdentity, InstructionArtifact,
-    OperationStatus, Platform, RenderContext, Target, apply_preview,
+    Acquisition, Agent, Artifact, Bundle, BundleIdentity, DirectoryStore, InstructionArtifact,
+    OperationStatus, Platform, RenderContext, StateStore, Target, apply_preview,
     inspect_installation, preview, remove, render,
 };
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 let root = PathBuf::from("project").canonicalize()?;
 let bundle = Bundle::from_artifacts(
@@ -70,7 +134,9 @@ let bundle = Bundle::from_artifacts(
 )?;
 let context = RenderContext::new(Target::project(Agent::Codex, &root)?, Platform::Linux)?;
 let rendered = render(&bundle, &context)?;
-let target = context.installation(root.join(".cache/project-guide"))?;
+let store: Arc<dyn StateStore> =
+    Arc::new(DirectoryStore::new(root.join(".cache/project-guide"))?);
+let target = context.installation(Arc::clone(&store), None)?;
 
 let proposal = preview(&bundle, &rendered, &target, Acquisition::Conflict, false)?;
 let result = apply_preview(&proposal, Duration::ZERO);
@@ -94,9 +160,10 @@ It is a pure comparison against the captured observation.
 
 `Target::directory`, `Target::project`, and the `Target::user*` constructors
 select skill containers. `inspect`, `install`, `update`, and `uninstall` adapt
-skill-only bundles to the same resource lifecycle and return ordered vectors.
-Equivalent physical targets are represented once and later entries expose
-`alias_of`.
+skill-only bundles to the same resource lifecycle. Each takes a nonempty target
+iterable and an explicit `store: &Arc<dyn StateStore>` and returns an ordered
+vector, retaining alias attribution. Equivalent physical targets are
+represented once and later entries expose `alias_of`.
 
 `install` refuses a different owned label or digest and requires an explicit
 `update`. `update` also installs an absent bundle. Use `SkillOptions` with
@@ -115,6 +182,13 @@ Construction and validation generally return `ValueError`; source loading return
 `BundleError`; path authority construction returns `AuthorityError`. Expected
 filesystem, conflict, and recovery failures are represented by `TargetError` in
 previews, observations, and results.
+
+A `StateStore` surfaces its own `StoreError`, which lifecycle calls convert
+into a `TargetError`: `StoreError::Busy` becomes `ErrorCode::Busy`,
+`StoreError::InvalidKey` becomes `ErrorCode::InvalidState`, and
+`StoreError::Io` from any store keeps its errno and becomes
+`ErrorCode::IoError`, except that `ENOTSUP`, `ENOSYS`, `EXDEV`, and `EINVAL`
+become `ErrorCode::Unsupported` instead.
 
 An `InstallationResult` contains an aggregate `OperationStatus`, final
 `InstallationObservation`, per-resource results, notices, and an optional error.

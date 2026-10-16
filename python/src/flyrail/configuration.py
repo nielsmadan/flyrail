@@ -181,6 +181,7 @@ class ResourcePlan:
     previous: Receipt | None
     receipt: Receipt
     ancestors: tuple[Ancestor, ...]
+    transaction_directory: Path
     recovery_paths: tuple[Path, ...]
     require_existing: bool = False
     error: TargetError | None = None
@@ -201,7 +202,7 @@ class ResourcePlan:
             raise TypeError("invalid resource plan precondition")
         object.__setattr__(self, "ancestors", sequence(self.ancestors, Ancestor))
         object.__setattr__(self, "recovery_paths", tuple(self.recovery_paths))
-        for path in self.recovery_paths:
+        for path in (self.transaction_directory, *self.recovery_paths):
             absolute(path)
 
 

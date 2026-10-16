@@ -302,7 +302,7 @@ def test_native_windows_shared_file_security_preservation_and_private_backup(
     backups = []
 
     def retain(store: StateStore, journal: Journal) -> None:
-        backup = paths(transaction_directory(journal))[1]
+        backup = paths(transaction_directory(store, journal))[1]
         security.ensure_private(backup)
         backups.append(security.security(backup))
         raise OSError(errno.EIO, "retain backup")

@@ -9,6 +9,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
+#[cfg(target_os = "macos")]
 const PROVENANCE: &[u8] = b"com.apple.provenance";
 
 #[cfg(target_os = "macos")]
@@ -46,6 +47,7 @@ fn refused(errno: i32, message: &str, path: &Path) -> TargetError {
     )
 }
 
+#[cfg(target_os = "macos")]
 fn last_errno() -> i32 {
     io::Error::last_os_error()
         .raw_os_error()
@@ -103,6 +105,7 @@ fn attribute_names(buffer: &[u8]) -> Vec<Vec<u8>> {
     names
 }
 
+#[cfg(target_os = "macos")]
 fn strip_trailing_nuls(buffer: &[u8]) -> &[u8] {
     let end = buffer
         .iter()
@@ -283,15 +286,14 @@ fn list_attribute_names(raw: &CString, path: &Path) -> Result<Vec<Vec<u8>>, Targ
         let mut buffer = vec![0u8; positive_size(size)];
         let filled =
             unsafe { libc::llistxattr(raw.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
-        if filled < 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) {
-                continue;
+        let error = io::Error::last_os_error();
+        match fill_outcome(filled, buffer.len(), error.raw_os_error()) {
+            Fill::Complete(length) => {
+                buffer.truncate(length);
+                return Ok(parse_names(&buffer));
             }
-            return Err(io_failure(&error, path));
-        }
-        if positive_size(filled) == buffer.len() {
-            return Ok(parse_names(&buffer));
+            Fill::Retry => {}
+            Fill::Failed => return Err(io_failure(&error, path)),
         }
     }
 }
@@ -337,16 +339,33 @@ fn attribute_payload(raw: &CString, name: &[u8], path: &Path) -> Result<Vec<u8>,
                 buffer.len(),
             )
         };
-        if filled < 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) {
-                continue;
+        let error = io::Error::last_os_error();
+        match fill_outcome(filled, buffer.len(), error.raw_os_error()) {
+            Fill::Complete(length) => {
+                buffer.truncate(length);
+                return Ok(buffer);
             }
-            return Err(io_failure(&error, path));
+            Fill::Retry => {}
+            Fill::Failed => return Err(io_failure(&error, path)),
         }
-        if positive_size(filled) == buffer.len() {
-            return Ok(buffer);
-        }
+    }
+}
+
+#[cfg(any(test, not(target_os = "macos")))]
+#[derive(Debug, PartialEq, Eq)]
+enum Fill {
+    Complete(usize),
+    Retry,
+    Failed,
+}
+
+#[cfg(any(test, not(target_os = "macos")))]
+fn fill_outcome(filled: libc::ssize_t, capacity: usize, errno: Option<i32>) -> Fill {
+    match usize::try_from(filled) {
+        Ok(length) if length <= capacity => Fill::Complete(length),
+        Ok(_) => Fill::Retry,
+        Err(_) if errno == Some(libc::ERANGE) => Fill::Retry,
+        Err(_) => Fill::Failed,
     }
 }
 
@@ -514,6 +533,25 @@ mod tests {
         let mut out = String::new();
         extend_hex(&mut out, bytes);
         out
+    }
+
+    #[test]
+    fn a_fill_shorter_than_the_probed_size_is_accepted() {
+        assert_eq!(fill_outcome(7, 12, None), Fill::Complete(7));
+        assert_eq!(fill_outcome(12, 12, None), Fill::Complete(12));
+        assert_eq!(fill_outcome(0, 12, None), Fill::Complete(0));
+    }
+
+    #[test]
+    fn a_fill_that_outgrew_the_buffer_is_retried() {
+        assert_eq!(fill_outcome(-1, 12, Some(libc::ERANGE)), Fill::Retry);
+        assert_eq!(fill_outcome(13, 12, None), Fill::Retry);
+    }
+
+    #[test]
+    fn a_failed_fill_reports_the_error() {
+        assert_eq!(fill_outcome(-1, 12, Some(libc::EACCES)), Fill::Failed);
+        assert_eq!(fill_outcome(-1, 12, None), Fill::Failed);
     }
 
     #[test]

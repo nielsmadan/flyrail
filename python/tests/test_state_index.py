@@ -16,6 +16,7 @@ from flyrail import (
     OperationStatus,
     Platform,
     RenderContext,
+    SQLiteStore,
     Target,
     apply_preview,
     inspect,
@@ -72,6 +73,14 @@ def test_an_aliased_store_location_still_overlaps_a_destination(
     with pytest.raises(ValueError, match="state store overlaps a resource"):
         preview(bundle(), rendered(tmp_path / "AGENTS.md"), InstallationTarget(store))
     assert list(store.keys("")) == []
+
+
+def test_a_staging_directory_that_overlaps_a_destination_is_refused(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "state.sqlite3")
+    destination = tmp_path / "state.sqlite3.staging" / "AGENTS.md"
+    with pytest.raises(ValueError, match="state store overlaps a resource"):
+        preview(bundle(), rendered(destination), InstallationTarget(store))
+    assert sorted(path.name for path in tmp_path.iterdir()) == []
 
 
 @pytest.mark.integration

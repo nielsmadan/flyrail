@@ -5,10 +5,10 @@
 
 ```sh
 flyrail-checksum digest ./download.bin
-flyrail-checksum ai status --target /path/to/agent-skills
-flyrail-checksum ai install --target /path/to/agent-skills
-flyrail-checksum ai update --target /path/to/agent-skills
-flyrail-checksum ai uninstall --target /path/to/agent-skills
+flyrail-checksum ai status --target /path/to/agent-skills --state /path/to/app-state/flyrail
+flyrail-checksum ai install --target /path/to/agent-skills --state /path/to/app-state/flyrail
+flyrail-checksum ai update --target /path/to/agent-skills --state /path/to/app-state/flyrail
+flyrail-checksum ai uninstall --target /path/to/agent-skills --state /path/to/app-state/flyrail
 ```
 
 The binary constructs a memory-backed bundle from `include_bytes!` resources.
@@ -74,7 +74,8 @@ exit `2` means invalid usage or a source/request error. Review resource errors t
 Foreign document content survives. Update/uninstall refuse edited owned content;
 `--replace-modified` explicitly permits replacement/removal of bounded same-owner
 edits. Uninstall needs only agent/project and the retained index, even if package
-resources disappear. Keep the project's `.cache`, `.flyrail-assets` (or selected
-asset root), and generated authority metadata ignored as appropriate for your app.
+resources disappear. Keep the project's `.cache` (this command's state store),
+`.flyrail-assets` (or selected asset root), and generated authority metadata ignored
+as appropriate for your app.
 Avoid installing the skill-only and combined bundles into the same skill container:
 they are separate owners and an overlapping skill correctly conflicts.

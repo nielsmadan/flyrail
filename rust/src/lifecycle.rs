@@ -6,8 +6,10 @@ use crate::editors::Acquisition;
 use crate::models::OperationStatus;
 use crate::observations::{ErrorCode, Observation, TargetError, TargetResult};
 use crate::rendered::RenderedBundle;
+use crate::stores::StateStore;
 use crate::values::ValueError;
 use crate::{SkillTarget, inspection};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub fn preview(
@@ -150,25 +152,24 @@ fn skills<T: SkillTarget>(
     bundle: Option<&Bundle>,
     identifier: &str,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
     operation: SkillOperation,
     options: SkillOptions,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
     let mut results: Vec<TargetResult<T>> = Vec::new();
-    for item in inspection::prepare_skills(bundle, identifier, targets)? {
+    for item in inspection::prepare_skills(bundle, identifier, targets, store)? {
         if let Some(alias) = item.alias_of
             && let Some(prior) = results.get(alias)
         {
             results.push(prior.aliased(item.target, alias));
             continue;
         }
-        let state_root = crate::authority::state_path(&item.root);
         let installation = match item.installation {
             Ok(installation) => installation,
             Err(error) => {
                 results.push(TargetResult::new(
                     item.target,
                     item.root,
-                    state_root,
                     None,
                     OperationStatus::Failed,
                     Observation::unknown(error.clone()),
@@ -195,7 +196,6 @@ fn skills<T: SkillTarget>(
             results.push(TargetResult::new(
                 item.target,
                 item.root,
-                state_root,
                 None,
                 OperationStatus::Failed,
                 inspection::skill_observation(&prior, bundle, item.rendered.as_ref())?,
@@ -230,7 +230,6 @@ fn skills<T: SkillTarget>(
         results.push(TargetResult::new(
             item.target,
             item.root,
-            state_root,
             None,
             result.status(),
             observation,
@@ -244,19 +243,22 @@ fn skills<T: SkillTarget>(
 pub fn install<T: SkillTarget>(
     bundle: &Bundle,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
-    install_with_timeout(bundle, targets, Duration::ZERO)
+    install_with_timeout(bundle, targets, store, Duration::ZERO)
 }
 
 pub fn install_with_timeout<T: SkillTarget>(
     bundle: &Bundle,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
     lock_timeout: Duration,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
     skills(
         Some(bundle),
         bundle.id(),
         targets,
+        store,
         SkillOperation::Install,
         SkillOptions::new(false, lock_timeout),
     )
@@ -265,19 +267,22 @@ pub fn install_with_timeout<T: SkillTarget>(
 pub fn update<T: SkillTarget>(
     bundle: &Bundle,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
-    update_with_options(bundle, targets, SkillOptions::default())
+    update_with_options(bundle, targets, store, SkillOptions::default())
 }
 
 pub fn update_with_options<T: SkillTarget>(
     bundle: &Bundle,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
     options: SkillOptions,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
     skills(
         Some(bundle),
         bundle.id(),
         targets,
+        store,
         SkillOperation::Update,
         options,
     )
@@ -286,16 +291,25 @@ pub fn update_with_options<T: SkillTarget>(
 pub fn uninstall<T: SkillTarget>(
     bundle_id: &str,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
-    uninstall_with_options(bundle_id, targets, SkillOptions::default())
+    uninstall_with_options(bundle_id, targets, store, SkillOptions::default())
 }
 
 pub fn uninstall_with_options<T: SkillTarget>(
     bundle_id: &str,
     targets: impl IntoIterator<Item = T>,
+    store: &Arc<dyn StateStore>,
     options: SkillOptions,
 ) -> Result<Vec<TargetResult<T>>, ValueError> {
-    skills(None, bundle_id, targets, SkillOperation::Uninstall, options)
+    skills(
+        None,
+        bundle_id,
+        targets,
+        store,
+        SkillOperation::Uninstall,
+        options,
+    )
 }
 
 fn failed(
@@ -328,6 +342,24 @@ mod tests {
     use crate::test_support::checkout_temp_dir;
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
+
+    fn target(root: &std::path::Path) -> InstallationTarget {
+        InstallationTarget::without_context(Arc::new(
+            crate::stores::DirectoryStore::new(root.join("state")).expect("store"),
+        ))
+        .expect("target")
+    }
+
+    fn put_index(target: &InstallationTarget, data: &[u8]) {
+        let store = target.store();
+        let key = crate::state::index_key("team", &target.context_digest());
+        let current = store.read(&key).expect("index bytes");
+        assert!(
+            store
+                .write(&key, data, current.as_deref())
+                .expect("write index")
+        );
+    }
 
     fn bundle(version: &str) -> Bundle {
         Bundle::from_artifacts(
@@ -400,12 +432,140 @@ mod tests {
         snapshot
     }
 
+    fn names(directory: &std::path::Path) -> Vec<String> {
+        let mut names = fs::read_dir(directory)
+            .expect("listing")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    fn interrupted(seam: &'static str, operation: impl FnOnce()) {
+        crate::resource_transaction::set_crash(Some(seam));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation));
+        crate::resource_transaction::set_crash(None);
+        assert!(outcome.is_err(), "{seam} did not interrupt the operation");
+    }
+
+    fn run(
+        target: &InstallationTarget,
+        destination: &std::path::Path,
+        version: &str,
+    ) -> OperationStatus {
+        sync(
+            &bundle(version),
+            &section(destination, if version == "1" { "one" } else { "two" }),
+            target,
+            Acquisition::Conflict,
+            false,
+            Duration::ZERO,
+        )
+        .expect("sync")
+        .status()
+    }
+
+    #[test]
+    fn a_crash_after_creating_the_transaction_directory_is_cleaned_up_by_the_next_run() {
+        for directory_backed in [true, false] {
+            let root = checkout_temp_dir("lifecycle-crash-after-directory");
+            let target = if directory_backed {
+                target(&root)
+            } else {
+                InstallationTarget::without_context(Arc::new(crate::stores::MemoryStore::new()))
+                    .expect("target")
+            };
+            let destination = root.join("AGENTS.md");
+            fs::write(&destination, b"# Foreign\n").expect("foreign");
+            assert_eq!(run(&target, &destination, "1"), OperationStatus::Applied);
+            interrupted("directory", || {
+                run(&target, &destination, "2");
+            });
+            let store = target.store().as_ref();
+            let preparation: crate::resource_models::Preparation = crate::state::read_record(
+                store,
+                &crate::state::resource_key(&destination, "preparation"),
+                "Preparation",
+            )
+            .expect("preparation read")
+            .expect("preparation");
+            assert_eq!(
+                store
+                    .read(&crate::state::resource_key(&destination, "journal"))
+                    .expect("journal read"),
+                None
+            );
+            assert_eq!(names(preparation.directory()), ["backup", "staging"]);
+            let observed = inspect_installation("team", &target).expect("inspect");
+            assert_eq!(
+                observed.resources()[0].recovery_paths(),
+                [preparation.directory().to_path_buf()]
+            );
+            assert_eq!(run(&target, &destination, "2"), OperationStatus::Applied);
+            assert_eq!(
+                store
+                    .read(&crate::state::resource_key(&destination, "preparation"))
+                    .expect("preparation read"),
+                None
+            );
+            assert!(!preparation.directory().exists());
+            assert_eq!(
+                names(&root),
+                if directory_backed {
+                    vec!["AGENTS.md", "state"]
+                } else {
+                    vec!["AGENTS.md"]
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn a_same_filesystem_store_leaves_nothing_beside_the_destination_at_filesystem_crash_points() {
+        for seam in ["directory", "backup", "publish"] {
+            let root = checkout_temp_dir("lifecycle-never-beside");
+            let project = root.join("project");
+            fs::create_dir(&project).expect("project");
+            let destination = project.join("AGENTS.md");
+            fs::write(&destination, b"# Foreign\n").expect("foreign");
+            let target = target(&root);
+            assert_eq!(run(&target, &destination, "1"), OperationStatus::Applied);
+            interrupted(seam, || {
+                run(&target, &destination, "2");
+            });
+            assert!(
+                names(&project).iter().all(|name| name == "AGENTS.md"),
+                "{seam}: {:?}",
+                names(&project)
+            );
+            assert_eq!(
+                run(&target, &destination, "2"),
+                OperationStatus::Applied,
+                "{seam}"
+            );
+            assert_eq!(names(&project), ["AGENTS.md"], "{seam}");
+            assert_eq!(names(&root.join("state/staging")), Vec::<String>::new());
+            assert!(
+                fs::read_to_string(&destination)
+                    .expect("published")
+                    .contains("two"),
+                "{seam}"
+            );
+        }
+    }
+
     #[test]
     fn lifecycle_creates_updates_and_removes_source_free() {
         let root = checkout_temp_dir("lifecycle-basic");
         let destination = root.join("AGENTS.md");
         fs::write(&destination, b"# foreign\n").expect("foreign");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let first = preview(
             &bundle("1"),
             &section(&destination, "generated"),
@@ -476,7 +636,7 @@ mod tests {
                 },
             )
             .expect("original");
-            let target = InstallationTarget::without_context(root.join("index")).expect("target");
+            let target = target(&root);
             let result = sync(
                 &bundle("1"),
                 &file(&destination, b"desired"),
@@ -510,7 +670,7 @@ mod tests {
         let root = checkout_temp_dir("lifecycle-stale");
         let destination = root.join("AGENTS.md");
         fs::write(&destination, b"# foreign\n").expect("foreign");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let proposal = preview(
             &bundle("1"),
             &section(&destination, "generated"),
@@ -535,8 +695,10 @@ mod tests {
             false,
         )
         .expect("preview");
-        fs::create_dir(target.index_root()).expect("index");
-        fs::write(target.index_root().join("unknown"), b"x").expect("unknown");
+        let concurrent =
+            crate::resource_plan::completed_index("team", &target.context_digest(), None)
+                .expect("concurrent index");
+        put_index(&target, &crate::codec::encode(&concurrent));
         let stale = apply_preview(&fresh, Duration::ZERO);
         assert_eq!(
             stale.error().map(TargetError::code),
@@ -548,7 +710,7 @@ mod tests {
     fn unsupported_notices_block_all_publication() {
         let root = checkout_temp_dir("lifecycle-unsupported");
         let destination = root.join("AGENTS.md");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let rendered = RenderedBundle::with_notices(
             section(&destination, "generated").artifacts().to_vec(),
             [],
@@ -578,7 +740,7 @@ mod tests {
     fn desired_generation_comparison_checks_every_identity() {
         let root = checkout_temp_dir("lifecycle-comparison");
         let destination = root.join("AGENTS.md");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let desired = bundle("1");
         let rendered = section(&destination, "generated");
         let installed = sync(
@@ -613,7 +775,7 @@ mod tests {
         for membership in ["current", "previous"] {
             let root = checkout_temp_dir(&format!("lifecycle-missing-receipt-{membership}"));
             let destination = root.join("AGENTS.md");
-            let target = InstallationTarget::without_context(root.join("index")).expect("target");
+            let target = target(&root);
             sync(
                 &bundle("1"),
                 &section(&destination, "generated"),
@@ -637,13 +799,20 @@ mod tests {
                     2,
                 )
                 .expect("previous index");
-                fs::write(
-                    target.index_root().join("index.json"),
-                    crate::codec::encode(&previous),
-                )
-                .expect("replace index");
+                put_index(&target, &crate::codec::encode(&previous));
             }
-            fs::remove_file(reference.state_root().join("receipt.json")).expect("remove receipt");
+            let key = crate::state::resource_key(reference.destination(), "receipt");
+            let recorded = target
+                .store()
+                .read(&key)
+                .expect("receipt")
+                .expect("receipt");
+            assert!(
+                target
+                    .store()
+                    .delete(&key, &recorded)
+                    .expect("delete receipt")
+            );
             let before = fs::read(&destination).expect("payload");
             let observed = inspect_installation("team", &target).expect("inspect");
             assert_eq!(
@@ -667,93 +836,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_receipt_referenced_only_by_completed_preparation_blocks_all_writes() {
-        let root = checkout_temp_dir("lifecycle-missing-prepared-receipt");
-        let destination = root.join("AGENTS.md");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
-        let desired = bundle("1");
-        let rendered = section(&destination, "generated");
-        sync(
-            &desired,
-            &rendered,
-            &target,
-            Acquisition::Conflict,
-            false,
-            Duration::ZERO,
-        )
-        .expect("install");
-        let proposal = preview_removal("team", &target, false).expect("preview");
-        let generation = proposal
-            .index()
-            .and_then(Index::current)
-            .expect("generation")
-            .clone();
-        let reference = proposal.resources()[0].resource().clone();
-        let pending = crate::resource_plan::pending_index(
-            "team",
-            &target.context_digest(),
-            None,
-            Some(generation.clone()),
-            vec![reference.clone()],
-        )
-        .expect("pending");
-        let completed = crate::resource_plan::completed_index(
-            "team",
-            &target.context_digest(),
-            Some(generation),
-        )
-        .expect("completed");
-        let index_path = target.index_root().join("index.json");
-        let prepared_path = target.index_root().join("index.json.next");
-        fs::write(&index_path, crate::codec::encode(&pending)).expect("pending index");
-        fs::write(&prepared_path, crate::codec::encode(&completed)).expect("completed index");
-        fs::remove_file(reference.state_root().join("receipt.json")).expect("remove receipt");
-        let before = (
-            fs::read(&destination).expect("payload"),
-            fs::read(&index_path).expect("index"),
-            fs::read(&prepared_path).expect("prepared"),
-        );
-
-        let observed = inspect_installation("team", &target).expect("inspect");
-        assert_eq!(
-            observed.resources()[0].error().map(TargetError::code),
-            Some(crate::ErrorCode::InvalidState)
-        );
-        for result in [
-            sync(
-                &desired,
-                &rendered,
-                &target,
-                Acquisition::Conflict,
-                true,
-                Duration::ZERO,
-            )
-            .expect("sync"),
-            remove("team", &target, true, Duration::ZERO).expect("remove"),
-            recover_installation("team", &target, Duration::ZERO).expect("recover"),
-        ] {
-            assert_eq!(result.status(), OperationStatus::Failed);
-            assert_eq!(
-                result.error().map(TargetError::code),
-                Some(crate::ErrorCode::InvalidState)
-            );
-        }
-        assert_eq!(
-            (
-                fs::read(&destination).expect("payload retained"),
-                fs::read(&index_path).expect("index retained"),
-                fs::read(&prepared_path).expect("prepared retained"),
-            ),
-            before
-        );
-        assert!(!reference.state_root().join("transaction.json").exists());
-    }
-
-    #[test]
     fn recovery_is_explicit_and_preserves_pending_membership() {
         let root = checkout_temp_dir("lifecycle-recovery");
         let destination = root.join("AGENTS.md");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         set_fault(Some("cleanup"));
         let interrupted = sync(
             &bundle("1"),
@@ -789,11 +875,13 @@ mod tests {
         let root = checkout_temp_dir("lifecycle-recovery-destination-overlap");
         let destination = root.join("payload");
         let authority = ResourceAuthority::new(&destination).expect("authority");
-        let target = InstallationTarget::without_context(destination.clone()).expect("target");
+        let target = InstallationTarget::without_context(Arc::new(
+            crate::stores::DirectoryStore::new(&destination).expect("store"),
+        ))
+        .expect("target");
         let reference = ResourceRef::new(
-            destination,
+            authority.destination().to_path_buf(),
             ResourceKind::Document,
-            authority.state_root().to_path_buf(),
         )
         .expect("resource");
         let index = Index::new(
@@ -806,14 +894,7 @@ mod tests {
             2,
         )
         .expect("index");
-        fs::create_dir_all(target.index_root()).expect("index root");
-        fs::set_permissions(target.index_root(), fs::Permissions::from_mode(0o700))
-            .expect("private index root");
-        fs::write(
-            target.index_root().join("index.json"),
-            crate::codec::encode(&index),
-        )
-        .expect("index");
+        put_index(&target, &crate::codec::encode(&index));
         let before = filesystem_snapshot(&root);
 
         let results = [
@@ -839,11 +920,20 @@ mod tests {
             );
             assert_eq!(
                 result.error().map(TargetError::message),
-                Some("installation index overlaps a resource or authority")
+                Some("state store overlaps a resource or authority")
             );
             assert_eq!(result.error().and_then(TargetError::path), None);
             assert_eq!(filesystem_snapshot(&root), before);
-            assert!(!reference.state_root().exists());
+            assert_eq!(
+                target
+                    .store()
+                    .read(&crate::state::resource_key(
+                        reference.destination(),
+                        "authority"
+                    ))
+                    .expect("authority read"),
+                None
+            );
         }
     }
 
@@ -853,7 +943,7 @@ mod tests {
         let destination = root.join("project/AGENTS.md");
         fs::create_dir(destination.parent().expect("parent")).expect("project");
         fs::write(&destination, b"# foreign\n").expect("foreign");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         sync(
             &bundle("1"),
             &section(&destination, "generated"),
@@ -872,21 +962,30 @@ mod tests {
             false,
         )
         .expect("receipt preview");
-        let receipt_path = receipt_preview.resources()[0]
-            .resource()
-            .state_root()
-            .join("receipt.json");
-        let bytes = fs::read(&receipt_path).expect("receipt");
-        fs::rename(&receipt_path, receipt_path.with_extension("saved")).expect("move receipt");
-        fs::write(&receipt_path, &bytes).expect("replace receipt");
+        let receipt_key = crate::state::resource_key(
+            receipt_preview.resources()[0].resource().destination(),
+            "receipt",
+        );
+        let store = target.store();
+        let bytes = store.read(&receipt_key).expect("receipt").expect("receipt");
+        let mut changed = bytes.clone();
+        changed.insert(1, b' ');
+        assert!(
+            store
+                .write(&receipt_key, &changed, Some(&bytes))
+                .expect("replace receipt")
+        );
         assert_eq!(
             apply_preview(&receipt_preview, Duration::ZERO)
                 .error()
                 .map(TargetError::code),
             Some(crate::ErrorCode::ConcurrentChange)
         );
-        fs::remove_file(&receipt_path).expect("remove replacement");
-        fs::rename(receipt_path.with_extension("saved"), &receipt_path).expect("restore receipt");
+        assert!(
+            store
+                .write(&receipt_key, &bytes, Some(&changed))
+                .expect("restore receipt")
+        );
 
         let ancestor_preview = preview(
             &bundle("2"),
@@ -912,13 +1011,13 @@ mod tests {
     fn routing_context_is_frozen_but_not_part_of_index_identity() {
         let root = checkout_temp_dir("lifecycle-context");
         let first = InstallationTarget::new(
-            root.join("index"),
+            Arc::clone(target(&root).store()),
             [(String::from("surface"), String::from("application"))],
             [(String::from("agent"), String::from("claude"))],
         )
         .expect("target");
         let second = InstallationTarget::new(
-            root.join("index"),
+            Arc::clone(first.store()),
             [(String::from("surface"), String::from("application"))],
             [(String::from("agent"), String::from("codex"))],
         )
@@ -933,7 +1032,7 @@ mod tests {
         let first = root.join("first");
         let second = root.join("second");
         fs::write(&second, b"foreign").expect("foreign");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let rendered = RenderedBundle::new(
             [
                 RenderedArtifact::new(
@@ -980,7 +1079,7 @@ mod tests {
         let root = checkout_temp_dir("lifecycle-partial");
         let first = root.join("first");
         let second = root.join("second");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let rendered = RenderedBundle::new(
             [
                 RenderedArtifact::new(
@@ -1058,7 +1157,7 @@ mod tests {
     #[test]
     fn later_resource_precondition_failure_is_partial_and_ordered() {
         let root = checkout_temp_dir("lifecycle-later-precondition");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let rendered = RenderedBundle::new(
             [
                 RenderedArtifact::new(
@@ -1118,7 +1217,7 @@ mod tests {
             let root = checkout_temp_dir(&format!("lifecycle-section-order-{run}"));
             let destination = root.join("AGENTS.md");
             fs::write(&destination, b"# Foreign\n").expect("foreign");
-            let target = InstallationTarget::without_context(root.join("index")).expect("target");
+            let target = target(&root);
             let desired = Bundle::from_artifacts(
                 BundleIdentity::new("team", "1").expect("identity"),
                 [
@@ -1193,20 +1292,23 @@ mod tests {
                 "run {run}"
             );
             let authority = ResourceAuthority::new(&destination).expect("authority");
-            let installed: crate::Receipt =
-                crate::resource_io::read(&authority.state_root().join("receipt.json"), "Receipt")
-                    .expect("receipt read")
-                    .expect("receipt");
+            let installed: crate::Receipt = crate::state::read_record(
+                target.store().as_ref(),
+                &crate::state::resource_key(authority.destination(), "receipt"),
+                "Receipt",
+            )
+            .expect("receipt read")
+            .expect("receipt");
             assert_eq!(installed.claims().len(), 2, "run {run}");
         }
     }
 
     #[test]
     fn corrupt_resource_state_never_authorizes_payload_changes() {
-        for damage in ["receipt", "unknown-entry"] {
+        for damage in ["receipt", "receipt-resource"] {
             let root = checkout_temp_dir(&format!("lifecycle-corrupt-resource-{damage}"));
             let destination = root.join("AGENTS.md");
-            let target = InstallationTarget::without_context(root.join("index")).expect("target");
+            let target = target(&root);
             sync(
                 &bundle("1"),
                 &section(&destination, "generated"),
@@ -1217,12 +1319,38 @@ mod tests {
             )
             .expect("install");
             let proposal = preview_removal("team", &target, false).expect("preview");
-            let state_root = proposal.resources()[0].resource().state_root();
-            if damage == "receipt" {
-                fs::write(state_root.join("receipt.json"), b"{}").expect("corrupt receipt");
+            let key = crate::state::resource_key(
+                proposal.resources()[0].resource().destination(),
+                "receipt",
+            );
+            let recorded = target
+                .store()
+                .read(&key)
+                .expect("receipt")
+                .expect("receipt");
+            let corrupt = if damage == "receipt" {
+                b"{}".to_vec()
             } else {
-                fs::write(state_root.join("future"), b"unknown").expect("unknown state");
-            }
+                let other = ResourceRef::new(root.join("OTHER.md"), ResourceKind::Document)
+                    .expect("other resource");
+                crate::codec::encode(
+                    &crate::Receipt::new(
+                        other,
+                        "1".repeat(32),
+                        Vec::new(),
+                        crate::editors::DocumentProvenance::default(),
+                        Vec::new(),
+                        2,
+                    )
+                    .expect("other receipt"),
+                )
+            };
+            assert!(
+                target
+                    .store()
+                    .write(&key, &corrupt, Some(&recorded))
+                    .expect("corrupt receipt")
+            );
             let before = fs::read(&destination).expect("payload");
 
             let observed = inspect_installation("team", &target).expect("inspect");
@@ -1250,70 +1378,11 @@ mod tests {
     }
 
     #[test]
-    fn unrecognized_prepared_index_does_not_admit_resources() {
-        let root = checkout_temp_dir("lifecycle-invalid-prepared");
+    fn malformed_index_record_does_not_admit_resources() {
+        let root = checkout_temp_dir("lifecycle-malformed-index");
         let destination = root.join("AGENTS.md");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
-        let desired = bundle("1");
-        let rendered = section(&destination, "generated");
-        let proposal =
-            preview(&desired, &rendered, &target, Acquisition::Conflict, false).expect("preview");
-        let generation = proposal.generation().expect("generation").clone();
-        let invalid = Index::new(
-            "team".to_owned(),
-            target.context_digest(),
-            Some(generation),
-            None,
-            None,
-            Vec::new(),
-            2,
-        )
-        .expect("index");
-        fs::create_dir(target.index_root()).expect("index root");
-        fs::set_permissions(target.index_root(), fs::Permissions::from_mode(0o700))
-            .expect("private index root");
-        fs::write(
-            target.index_root().join("index.json.next"),
-            crate::codec::encode(&invalid),
-        )
-        .expect("prepared index");
-        let state_root = ResourceAuthority::new(&destination)
-            .expect("authority")
-            .state_root()
-            .to_path_buf();
-
-        let result = sync(
-            &desired,
-            &rendered,
-            &target,
-            Acquisition::Conflict,
-            false,
-            Duration::ZERO,
-        )
-        .expect("sync");
-
-        assert_eq!(result.status(), OperationStatus::Failed);
-        assert_eq!(
-            result.error().map(TargetError::code),
-            Some(crate::ErrorCode::RecoveryNeeded)
-        );
-        assert!(!state_root.exists());
-        assert!(!destination.exists());
-    }
-
-    #[test]
-    fn malformed_prepared_index_does_not_admit_resources() {
-        let root = checkout_temp_dir("lifecycle-malformed-prepared");
-        let destination = root.join("AGENTS.md");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
-        fs::create_dir(target.index_root()).expect("index root");
-        fs::set_permissions(target.index_root(), fs::Permissions::from_mode(0o700))
-            .expect("private index root");
-        fs::write(target.index_root().join("index.json.next"), b"{}").expect("prepared index");
-        let state_root = ResourceAuthority::new(&destination)
-            .expect("authority")
-            .state_root()
-            .to_path_buf();
+        let target = target(&root);
+        put_index(&target, b"{}");
 
         let result = sync(
             &bundle("1"),
@@ -1330,7 +1399,10 @@ mod tests {
             result.error().map(TargetError::code),
             Some(crate::ErrorCode::InvalidState)
         );
-        assert!(!state_root.exists());
+        assert_eq!(
+            target.store().keys("resource/").expect("resource keys"),
+            Vec::<String>::new()
+        );
         assert!(!destination.exists());
     }
 
@@ -1339,7 +1411,7 @@ mod tests {
         let root = checkout_temp_dir("lifecycle-failure-notices");
         let destination = root.join("owned");
         fs::write(&destination, b"foreign").expect("foreign");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
         let rendered = RenderedBundle::with_notices(
             file(&destination, b"desired").artifacts().to_vec(),
             [],
@@ -1376,7 +1448,7 @@ mod tests {
     #[test]
     fn public_lifecycle_entry_points_validate_bundle_ids_before_io() {
         let root = checkout_temp_dir("lifecycle-public-validation");
-        let target = InstallationTarget::without_context(root.join("index")).expect("target");
+        let target = target(&root);
 
         for error in [
             preview_removal("Bad ID", &target, false).expect_err("preview id"),
@@ -1389,14 +1461,14 @@ mod tests {
                 "bundle id must be 1-64 lowercase ASCII letters/digits with internal hyphens"
             );
         }
-        assert!(!target.index_root().exists());
+        assert!(!root.join("state").exists());
     }
 
     #[test]
     fn installation_targets_validate_context_before_io() {
         let root = checkout_temp_dir("lifecycle-target-validation");
         let error = InstallationTarget::new(
-            root.join("index"),
+            Arc::new(crate::stores::DirectoryStore::new(root.join("state")).expect("store")),
             [
                 (String::from("surface"), String::from("application")),
                 (String::from("surface"), String::from("project")),
@@ -1405,6 +1477,6 @@ mod tests {
         )
         .expect_err("duplicate context");
         assert_eq!(error.to_string(), "target context keys must be unique");
-        assert!(!root.join("index").exists());
+        assert!(!root.join("state").exists());
     }
 }

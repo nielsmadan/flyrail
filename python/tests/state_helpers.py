@@ -14,7 +14,7 @@ from flyrail import (
     StateStore,
 )
 from flyrail._codec import decode, encode
-from flyrail._resource_transaction import Journal, transaction_directory
+from flyrail._resource_models import Preparation
 from flyrail._state import index_key, read_record, resource_key
 from flyrail.authority import _management_name
 
@@ -56,11 +56,14 @@ def canonical_json(value: object) -> bytes:
     ).encode()
 
 
-def transaction_directories(destination: Path) -> list[Path]:
-    return sorted(path for path in destination.parent.iterdir() if _management_name(path.name))
+def transaction_directories(destination: Path, store: StateStore | None = None) -> list[Path]:
+    beside = [path for path in destination.parent.iterdir() if _management_name(path.name)]
+    staging = None if store is None else store.staging_directory
+    staged = [] if staging is None or not staging.exists() else list(staging.iterdir())
+    return sorted([*beside, *staged])
 
 
 def journal_directory(store: StateStore, destination: Path) -> Path:
-    journal = read_record(store, resource_key(destination, "journal"), Journal)
-    assert journal is not None
-    return transaction_directory(journal)
+    preparation = read_record(store, resource_key(destination, "preparation"), Preparation)
+    assert preparation is not None
+    return preparation.directory

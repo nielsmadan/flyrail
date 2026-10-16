@@ -18,19 +18,23 @@ collision checks. There is no recursive project, home or volume scan.
 An existing case alias must refer to the same filesystem identity and is replaced
 with actual spelling. Missing suffix components retain requested spelling.
 
-Authority, receipt and journal records for a resource live in the host's
-[state store](state-store.md) under `resource/<destination-key>/*`, not beside
-the resource; `destination-key` is `sha256(portable_path_key(destination))`,
+Authority, receipt, preparation and journal records for a resource live in
+the host's [state store](state-store.md) under `resource/<destination-key>/*`,
+not beside the resource; `destination-key` is `sha256(portable_path_key(destination))`,
 rendered as lowercase hexadecimal, of the canonical destination in slash form.
 Admission writes the `resource/<destination-key>/authority` record with
 compare-and-set under the resource's store lock, validating or initializing its
 exact canonical destination and kind. Ancestor and descendant conflicts are
 checked against authority records **in the same store**, plus `.flyrail-*.txn`
-transaction directories found inside an existing tree; see
-[receipt format](receipt-format.md) for the transaction directory's layout and
-its name, derived from the basename and a transaction ID. Management names are reserved under the same
-portable folding: `.flyrail-*.txn` cannot appear anywhere in requested or
-resulting physical destinations. Tree hierarchy probes recognize these case
+transaction directories found inside an existing tree. A transaction stages in
+the store's staging directory when that directory is on the destination's
+mount (same device id, and on Linux the same mount ID) and otherwise in a
+fallback `.flyrail-*.txn`
+directory beside the destination, whose name is derived from the basename and a
+transaction ID; the choice is made per transaction and recorded in its
+preparation. See [receipt format](receipt-format.md) for both layouts.
+Management names are reserved under the same portable folding: `.flyrail-*.txn`
+cannot appear anywhere in requested or resulting physical destinations. Tree hierarchy probes recognize these case
 aliases as fences too.
 
 Fences apply within one store only. Content recorded in a different store is

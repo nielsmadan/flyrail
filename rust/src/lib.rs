@@ -29,11 +29,15 @@ mod resource_models;
 pub(crate) mod resource_plan;
 pub(crate) mod resource_transaction;
 mod schema;
+mod seam;
 mod security;
 mod sources;
+mod state;
+pub mod stores;
 pub mod summary;
 pub mod targets;
 mod temporal;
+pub mod testing;
 mod toml_document;
 mod toml_layout;
 pub mod translation;
@@ -41,6 +45,8 @@ mod validation;
 pub mod values;
 mod zip;
 
+#[cfg(test)]
+mod lifecycle_seams;
 #[cfg(test)]
 mod test_support;
 
@@ -93,10 +99,10 @@ pub use rendered::{
     dependency_order,
 };
 #[doc(hidden)]
-pub use resource_io::{admit, reserve};
+pub use resource_io::admit;
 pub use resource_models::{
-    Ancestor, Count, Generation, Index, Node, OwnedClaim, Receipt, ResourceKind, ResourceRef,
-    Revision,
+    Ancestor, Count, Generation, Index, Node, OwnedClaim, Preparation, Receipt, ResourceKind,
+    ResourceRef, Revision,
 };
 pub use resource_transaction::Journal;
 #[cfg(feature = "interop-test-seams")]
@@ -107,6 +113,7 @@ pub use resource_transaction::{
 };
 #[doc(hidden)]
 pub use security::security as security_capture;
+pub use stores::{DirectoryStore, MemoryStore, StateStore, StoreError, StoreLock};
 pub use summary::{ChangeAction, PlanSummary, PlannedChange, summarize};
 pub use targets::{Agent, Platform, Surface, Target, TargetScope};
 pub use temporal::{Date, DateTime, Time};

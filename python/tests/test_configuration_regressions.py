@@ -172,9 +172,9 @@ def test_final_receipt_commit_rejects_changed_journal_and_layout(
             put(store, resource_key(destination, "journal"), evidence)
         else:
             selected = {
-                "unknown": tx.transaction_directory(journal) / "unexpected",
-                "stage": tx.paths(tx.transaction_directory(journal))[0],
-                "backup": tx.paths(tx.transaction_directory(journal))[1],
+                "unknown": tx.transaction_directory(store, journal) / "unexpected",
+                "stage": tx.paths(tx.transaction_directory(store, journal))[0],
+                "backup": tx.paths(tx.transaction_directory(store, journal))[1],
             }[damage]
             selected.write_bytes(evidence)
         original(store, journal)
@@ -305,7 +305,7 @@ def test_private_storage_metadata_is_bound_through_publication_and_cleanup(
     destination = ResourceAuthority(path).destination
 
     def changed(store: StateStore, journal: tx.Journal) -> None:
-        (tx.transaction_directory(journal) / "backup").chmod(0o755)
+        (tx.transaction_directory(store, journal) / "backup").chmod(0o755)
         if phase == "before-publish":
             original_publish(store, journal)
         elif phase == "before-receipt":
@@ -395,7 +395,7 @@ def test_preview_does_not_accept_a_store_ancestor_created_by_another_writer_duri
         if armed:
             armed = False
             if project.exists():
-                project.rmdir()
+                project.rename(tmp_path / "replaced")
             project.mkdir()
             project.chmod(0o777)
         return original_lock(name, timeout)
@@ -418,7 +418,7 @@ def test_preparation_rejects_replaced_existing_storage_before_writing_payload(
     before = io.observe(path)
     previous = read_record(target.store, resource_key(destination, "receipt"), Receipt)
     plan = preview(bundle("2"), rendered(path, "second"), target)
-    state = transaction_path(destination, plan.resources[0].receipt.transaction_id)
+    state = plan.resources[0].transaction_directory
     original = io.require
     armed = True
 

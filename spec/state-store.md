@@ -3,18 +3,27 @@
 ## Purpose
 
 Flyrail keeps no persistent state of its own beside the resources it manages.
-The host application supplies a store that holds every index, receipt, journal
-and lock flyrail needs. There is no default store and no default location:
-flyrail never chooses where state lives, and a host that needs persistence
-must construct and pass a store explicitly.
+The host application supplies a store that holds every index, receipt,
+preparation, journal and lock flyrail needs. There is no default store and no
+default location: flyrail never chooses where state lives, and a host that
+needs persistence must construct and pass a store explicitly.
 
 ## Operations
 
-A store exposes a `location` and five operations: `read`, `write`, `delete`,
-`keys` and `lock`.
+A store exposes a `location`, an optional `staging_directory` and five
+operations: `read`, `write`, `delete`, `keys` and `lock`.
 
 `location` names the store's filesystem footprint, or is absent when the store
 has none (for example, an in-memory store).
+
+`staging_directory` names a directory, part of the store's footprint, in which
+flyrail may create its transaction directories, or is absent (the default).
+Flyrail creates it on first use and uses it only for a destination on the same
+mount; see the
+[transaction protocol](transaction-protocol.md#transaction-directory). A
+directory-backed store uses a `staging` directory inside its location; a
+single-file store uses a sibling named after its file with a `.staging`
+suffix; an in-memory store has none.
 
 `read(key)` returns the key's current value, or absence when the key has never
 been written or has been deleted.
@@ -46,6 +55,7 @@ Flyrail uses a fixed key scheme:
 - `index/<bundle-id>/<context-digest>` for an `Index`.
 - `resource/<destination-key>/authority` for a `ResourceRef`.
 - `resource/<destination-key>/receipt` for a `Receipt`.
+- `resource/<destination-key>/preparation` for a `Preparation`.
 - `resource/<destination-key>/journal` for a `Journal`.
 
 Lock names follow the same scheme: `index/<bundle-id>/<context-digest>` for an
@@ -85,10 +95,11 @@ to receive a new entry.
 A store is a trust root. Its records decide what flyrail deletes and restores,
 and where, so anyone able to change them can direct flyrail's writes. The host
 keeps its store private to the user running flyrail and never ships one inside
-a repository or another shared location. The built-in filesystem stores refuse
-any existing storage location that is not private to its owner, before reading
-or writing a record, and report it as `io_error`. A custom store owns the same
-duty.
+a repository or another shared location. The staging directory is part of the
+store and is held to the same rule. The built-in filesystem stores refuse any
+existing storage location, staging directory included, that is not private to
+its owner, before reading or writing a record, and report it as `io_error`. A
+custom store owns the same duty.
 
 ## Errors
 

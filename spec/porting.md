@@ -80,9 +80,13 @@ Bind full preimages, ancestors, receipts and index to immutable previews. Unknow
 foreign edits during recovery are not selectively reconstructed. Retain old asset
 revisions required after a partial reference update.
 
-Before claiming interoperability, test writer/reader and interrupted-writer/
-recoverer pairs across implementations on every supported OS. Include equal-byte
-adoption, takeover restoration, retargeting, index-write failure, process admission
-races, native security transitions and interrupted cleanup/rollback. None of the
+Implementations never share a state store. Before claiming interoperability, run
+the same scenarios through each implementation with its own store on every
+supported OS and compare results, destination bytes and modes, and store records
+with transaction ids, node identities and absolute roots normalized. Include
+equal-byte adoption, takeover restoration, retargeting, index-write failure,
+interrupted-writer recovery, native security transitions and interrupted
+cleanup/rollback, plus two applications in different implementations sharing one
+document through separate stores. None of the
 ports may infer cross-resource atomicity or power-loss durability from shared
 receipt formats.

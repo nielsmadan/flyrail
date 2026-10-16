@@ -82,24 +82,24 @@ custom = Target.directory("./shared-skills")
 ## Read-only configuration inspection
 
 `inspect_installation(bundle_id, installation_target)` reads the index and the
-union of current, pending, previous and residual resource references, including
-references in complete prepared index metadata, from the target's store. It
-does not need the bundle source, create directories, acquire a lock, recover
-transactions or change permissions. Reads may still touch the store — for
+union of current, pending, previous and residual resource references from the
+target's store. It does not need the bundle source, create directories, acquire
+a lock, recover transactions or change permissions. Reads may still touch the store — for
 example updating access times on a `DirectoryStore`.
 
 Its `InstallationObservation` includes recorded version/digests, pending state,
 resource summaries and an error. Each resource summary contains claim attribution,
 claim status, a revision digest, diagnostics and recovery paths. A nonempty
 `recovery_paths` names the transaction directory recorded by the resource's
-journal — `P/.flyrail-<hash>-<transaction-id>.txn` beside destination `P/N` —
-left behind by an interrupted write; a later recovery removes it. A transaction
-directory that no journal in the store names is not reported. The observation
+preparation — in the store's staging directory, or
+`P/.flyrail-<hash>-<transaction-id>.txn` beside destination `P/N` when the
+store is on another mount — left behind by an interrupted write; a later
+recovery removes it. A
+transaction directory that no record in the store names is not reported. The observation
 excludes full foreign content and baseline payloads.
 
-A missing receipt required by a committed current or previous generation, including
-a recognized prepared completion, is a resource `INVALID_STATE` error, with the
-receipt path retained in the diagnostic.
+A missing receipt required by the committed current or previous generation is a
+resource `INVALID_STATE` error, with the receipt path retained in the diagnostic.
 It makes the installation noncurrent and blocks mutation without discarding index
 membership. Pending first-install resources that never committed and valid retained
 empty receipts are distinct from missing committed ownership metadata.
