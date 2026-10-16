@@ -1937,13 +1937,15 @@ mod tests {
                                 .expect("mode change");
                         }
                         "identity-changed-before-commit" => {
-                            fs::remove_file(&destination).expect("replace destination");
+                            // Created before the swap so ext4 cannot hand back the old inode.
+                            let replacement = tmp.join("AGENTS.md.replacement");
                             exclusive_write(
-                                &destination,
+                                &replacement,
                                 &fixture_transaction_revision(case, "observed", "resource")
                                     .expect("replacement fixture bytes"),
                                 0o600,
                             );
+                            fs::rename(&replacement, &destination).expect("replace destination");
                         }
                         _ => {}
                     }
