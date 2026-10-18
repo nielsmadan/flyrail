@@ -150,8 +150,12 @@ Before the first release, add a pending PyPI Trusted Publisher for project
 `release-python.yml`, with no environment. The release workflow requests a
 short-lived OIDC identity and stores no PyPI token.
 
-Run releases from a clean, complete `main` checkout whose origin and local Python
-tags match:
+Releases use [`curtains`](https://github.com/nielsmadan/curtaincall); install it
+first with `brew install nielsmadan/tap/curtaincall`. Run releases from a clean,
+complete `main` checkout. Every historical `python-vX.Y.Z` tag must exist both
+locally and on origin and point to the same commit. Curtains never fetches: the
+fetched `origin/main` must be an ancestor of `HEAD`. The recipes select the nested
+policy in [`scripts/release.json`](../scripts/release.json) explicitly:
 
 ```sh
 just release --dry-run
@@ -160,21 +164,24 @@ just release patch
 just release 0.2.0
 ```
 
-The helper considers commits touching `python/` or `spec/`, proposes a semantic
+Curtains considers commits touching `python/` or `spec/`, proposes a semantic
 version from conventional commit subjects, then runs the complete check,
-dependency audit and workflow validation. After confirmation it updates the
-project and example dependency versions, refreshes `uv.lock` and
-[`CHANGELOG.md`](../CHANGELOG.md), creates one release commit, creates an annotated
-`python-vVERSION` tag and atomically pushes `main` with that tag. Package QA runs
-again against the prepared version before the release commit is created.
+dependency audit and workflow validation. `--dry-run` reads local and origin
+state but skips the tool check and every policy command. After confirmation
+[`prepare_release.py`](../scripts/prepare_release.py) updates the project and
+example dependency versions, and the stage refreshes `uv.lock` and
+[`CHANGELOG.md`](../CHANGELOG.md). Curtains then creates one release commit,
+creates an annotated `python-vVERSION` tag and atomically pushes `main` with that
+tag. Package QA runs again against the prepared version before the release commit
+is created.
 
 CI validates that the immutable tag belongs to `main` and matches the project
 version. A read-only job reruns all release gates, builds and installs the sdist
 and wheel, and saves one verified artifact bundle. A separate OIDC-only job
 publishes the bundle to PyPI. Only after PyPI succeeds does a `contents: write`
-job create the GitHub Release and attach the same artifacts. The local helper
-prints the workflow and release locations; it does not require the GitHub CLI and
-does not wait for publication. Follow the printed workflow link to confirm it.
+job create the GitHub Release and attach the same artifacts. Curtains prints the
+workflow and release locations; it does not require the GitHub CLI and does not
+wait for publication. Follow the printed workflow link to confirm it.
 
 If publication fails after the tag is pushed, fix the workflow on `main` and
 retry the existing tag from the workflow's Actions page with **Run workflow** on

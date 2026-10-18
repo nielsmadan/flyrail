@@ -18,8 +18,9 @@ are available through `python3 scripts/check.py`. Set `UV_PYTHON` to check anoth
 supported interpreter; checks default to Python 3.11. Supported platforms are macOS
 and Linux; the Windows adapter is unsupported and not covered by CI.
 Keep dependencies pinned in pyproject.toml and regenerate uv.lock with `just lock`.
-`just release --dry-run` previews a Python release. Creating a release commit or
-tag, pushing, and publishing require explicit user authorization.
+`just release --dry-run` previews a Python release with the separately installed
+`curtains` CLI. Creating a release commit or tag, pushing, and publishing require
+explicit user authorization.
 
 Keep caches, temporary files, downloaded tools, and test installations inside this
 checkout. The shared check script uses repository-root `.cache` for tools and temporary

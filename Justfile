@@ -38,7 +38,9 @@ check-workflow:
 
 [positional-arguments]
 release *args:
-    {{python}} python/scripts/release.py "$@"
+    @UV_TOOL_DIR="${UV_TOOL_DIR:-{{justfile_directory()}}/.cache/uv/tools}" \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-{{justfile_directory()}}/.cache/uv/cache}" \
+        curtains --config python/scripts/release.json "$@"
 
 changelog:
     uvx git-cliff@2.13.1 --config python/cliff.toml --include-path "python/**" --include-path "spec/**" -o python/CHANGELOG.md

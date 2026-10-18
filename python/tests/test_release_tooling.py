@@ -7,7 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -29,7 +28,6 @@ def load_script(name: str) -> ModuleType:
     return module
 
 
-release = load_script("release.py")
 workflow = load_script("release_workflow.py")
 
 
@@ -147,10 +145,6 @@ def annotated_tag(root: Path, name: str, target: str | None = None) -> str:
     return tag_object
 
 
-def release_config() -> Any:
-    return release.load_config(ROOT / "scripts" / "release.json")
-
-
 @pytest.mark.parametrize(
     ("tag", "expected"),
     [
@@ -164,7 +158,6 @@ def test_python_release_tags_are_component_scoped(
     tag: str, expected: tuple[int, int, int] | None
 ) -> None:
     assert workflow.version(tag) == expected
-    assert release.tag_version(tag, "python-v") == expected
 
 
 def test_previous_tag_ignores_other_language_releases() -> None:
@@ -177,75 +170,8 @@ def test_previous_tag_ignores_other_language_releases() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("latest", "messages", "override", "expected"),
-    [
-        ("python-v0.1.0", ["fix: preserve receipts"], None, "0.1.1"),
-        ("python-v0.1.0", ["feat: add receipts"], None, "0.2.0"),
-        ("python-v0.1.0", ["feat!: replace receipts"], None, "0.2.0"),
-        ("python-v1.2.3", ["fix: compatibility\n\nBREAKING CHANGE: remove API"], None, "2.0.0"),
-        ("python-v1.2.3", ["chore: reorganize repository"], None, None),
-        (None, ["chore: bootstrap"], None, "0.1.0"),
-        ("python-v1.2.3", ["fix: preserve receipts"], "minor", "1.3.0"),
-        ("python-v1.2.3", ["fix: preserve receipts"], "3.2.1", "3.2.1"),
-    ],
-)
-def test_release_proposal_follows_semver(
-    latest: str | None,
-    messages: list[str],
-    override: str | None,
-    expected: str | None,
-) -> None:
-    state: dict[str, Any] = {
-        "head": "a" * 40,
-        "refs": {},
-        "latest": latest,
-        "messages": messages,
-        "ahead": "0",
-    }
-    version, _counts = release.proposal(state, release_config(), override)
-    assert version == expected
-
-
-@pytest.mark.parametrize("override", ["1.2.3", "1.2.2"])
-def test_release_proposal_rejects_non_increasing_versions(override: str) -> None:
-    state: dict[str, Any] = {
-        "head": "a" * 40,
-        "refs": {},
-        "latest": "python-v1.2.3",
-        "messages": ["fix: preserve receipts"],
-        "ahead": "0",
-    }
-    with pytest.raises(release.ReleaseError, match="must be newer"):
-        release.proposal(state, release_config(), override)
-
-
-@pytest.mark.parametrize(
-    "origin",
-    [
-        "git@github.com:nielsmadan/flyrail.git",
-        "ssh://git@github.com/nielsmadan/flyrail.git",
-        "https://github.com/nielsmadan/flyrail.git",
-    ],
-)
-def test_github_repository_accepts_exact_github_origins(origin: str) -> None:
-    assert release.github_repository(origin) == "nielsmadan/flyrail"
-
-
-@pytest.mark.parametrize(
-    "origin",
-    [
-        "https://example.com/github.com/nielsmadan/flyrail.git",
-        "git@github.example:nielsmadan/flyrail.git",
-        "https://github.com/nielsmadan/flyrail/extra",
-    ],
-)
-def test_github_repository_rejects_lookalike_origins(origin: str) -> None:
-    assert release.github_repository(origin) is None
-
-
 def test_release_config_prepares_and_checks_every_version_reference() -> None:
-    config = release.load_config(ROOT / "scripts" / "release.json")
+    config = json.loads((ROOT / "scripts" / "release.json").read_text())
     stage = config["stages"][0]
     assert stage["files"] == [
         "python/pyproject.toml",
@@ -257,18 +183,6 @@ def test_release_config_prepares_and_checks_every_version_reference() -> None:
     assert stage["checks"] == [["just", "check-package"]]
     assert stage["commands"][0][0] == "{python}"
     assert "python3" not in config["tools"]
-
-
-@pytest.mark.parametrize("change", [{"components": 3}, {"branch": None}])
-def test_release_config_rejects_unknown_or_invalid_values(
-    tmp_path: Path, change: dict[str, object]
-) -> None:
-    config = json.loads((ROOT / "scripts" / "release.json").read_text())
-    config.update(change)
-    path = tmp_path / "release.json"
-    path.write_text(json.dumps(config))
-    with pytest.raises(release.ReleaseError):
-        release.load_config(path)
 
 
 def test_project_metadata_requires_pyflyrail_and_matching_version(tmp_path: Path) -> None:
@@ -342,171 +256,6 @@ def test_prepare_release_validates_all_references_before_writing(
     assert result.returncode != 0
     assert (project / "pyproject.toml").read_text() == original_project
     assert all(path.read_text() == content for path, content in originals.items())
-
-
-def test_inspect_accepts_expected_repository_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = repository(tmp_path)
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
-    state = release.inspect(root, release_config())
-    assert state["head"] == git(root, "rev-parse", "HEAD")
-    assert state["latest"] is None
-    assert state["messages"] == ["feat: initial Python release"]
-
-
-def test_inspect_ignores_inherited_git_repository_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = repository(tmp_path)
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
-    caller = tmp_path / "caller"
-    caller.mkdir()
-    git(caller, "init", "--initial-branch=main")
-    add_commit(caller, "refs/heads/main", "test: caller", "caller.txt", "caller\n")
-    git(caller, "reset", "--hard", "HEAD")
-    monkeypatch.setenv("GIT_INDEX_FILE", str(caller / ".git/index"))
-    monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
-    state = release.inspect(root, release_config())
-    assert state["head"] == git(root, "rev-parse", "HEAD")
-    assert state["messages"] == ["feat: initial Python release"]
-
-
-def test_inspect_rejects_wrong_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _remote = repository(tmp_path)
-    git(root, "branch", "other")
-    git(root, "switch", "other")
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
-    with pytest.raises(release.ReleaseError, match="Release from main"):
-        release.inspect(root, release_config())
-
-
-def test_inspect_rejects_wrong_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _remote = repository(tmp_path)
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "other/project")
-    with pytest.raises(release.ReleaseError, match="does not match"):
-        release.inspect(root, release_config())
-
-
-def test_inspect_rejects_local_tag_not_on_origin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = repository(tmp_path)
-    annotated_tag(root, "python-v0.1.0")
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
-    with pytest.raises(release.ReleaseError, match="tags differ"):
-        release.inspect(root, release_config())
-
-
-def test_inspect_rejects_checkout_behind_origin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = repository(tmp_path)
-    original = git(root, "rev-parse", "HEAD")
-    add_commit(root, "refs/heads/main", "fix: remote change", "python/remote.txt", "remote\n")
-    git(root, "push", "origin", "main")
-    git(root, "update-ref", "refs/heads/main", original)
-    git(root, "fetch", "origin")
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
-    with pytest.raises(release.ReleaseError, match="include origin/main"):
-        release.inspect(root, release_config())
-
-
-def test_inspect_rejects_history_without_component_changes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = repository(tmp_path, message="chore: repository setup")
-    base = git(root, "rev-parse", "HEAD")
-    annotated_tag(root, "python-v0.1.0", base)
-    git(root, "push", "origin", "refs/tags/python-v0.1.0")
-    add_commit(root, "refs/heads/main", "chore: root docs", "README.md", "docs\n")
-    git(root, "reset", "--hard", "HEAD")
-    monkeypatch.setattr(release, "github_repository", lambda _origin: "nielsmadan/flyrail")
-    with pytest.raises(release.ReleaseError, match="no component commits"):
-        release.inspect(root, release_config())
-
-
-def test_prepare_commits_only_allowed_changes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = repository(tmp_path)
-    allowed = root / "allowed.txt"
-    add_commit(root, "refs/heads/main", "chore: add fixture", "allowed.txt", "before\n")
-    git(root, "reset", "--hard", "HEAD")
-    original_run = release.run
-
-    def run_with_commit(root_path: Path, *args: str, capture: bool = True) -> str:
-        if args[:2] != ("git", "commit"):
-            result = original_run(root_path, *args, capture=capture)
-            assert isinstance(result, str)
-            return result
-        add_commit(
-            root_path,
-            "refs/heads/main",
-            "chore: release fixture",
-            "allowed.txt",
-            allowed.read_text(),
-        )
-        original_run(root_path, "git", "reset", "--mixed", "HEAD")
-        return ""
-
-    monkeypatch.setattr(release, "run", run_with_commit)
-    config = release_config()
-    config["stages"] = [
-        {
-            "files": ["allowed.txt"],
-            "commands": [
-                [
-                    sys.executable,
-                    "-c",
-                    "from pathlib import Path; Path('allowed.txt').write_text('after\\n')",
-                ]
-            ],
-            "checks": [],
-            "message": "chore: release {version}",
-        }
-    ]
-    release.prepare(root, config, "0.2.0")
-    assert allowed.read_text() == "after\n"
-    assert git(root, "status", "--porcelain") == ""
-
-
-@pytest.mark.parametrize("phase", ["command", "check"])
-def test_prepare_rejects_unexpected_changes(tmp_path: Path, phase: str) -> None:
-    root, _remote = repository(tmp_path)
-    config = release_config()
-    writer = [
-        sys.executable,
-        "-c",
-        "from pathlib import Path; Path('unexpected.txt').write_text('unexpected\\n')",
-    ]
-    config["stages"] = [
-        {
-            "files": ["allowed.txt"],
-            "commands": [writer] if phase == "command" else [],
-            "checks": [writer] if phase == "check" else [],
-            "message": "chore: release {version}",
-        }
-    ]
-    expected = "Preparation changed" if phase == "command" else "Prepared checks changed"
-    with pytest.raises(release.ReleaseError, match=expected):
-        release.prepare(root, config, "0.2.0")
-
-
-def test_dry_run_requires_only_git(monkeypatch: pytest.MonkeyPatch) -> None:
-    state: dict[str, Any] = {
-        "head": "a" * 40,
-        "refs": {},
-        "latest": None,
-        "messages": ["feat: initial Python release"],
-        "ahead": "0",
-    }
-    monkeypatch.setattr(sys, "argv", ["release.py", "--dry-run"])
-    monkeypatch.setattr(release, "inspect", Mock(return_value=state))
-    which = Mock(return_value="/usr/bin/git")
-    monkeypatch.setattr(release.shutil, "which", which)
-    release.main()
-    which.assert_called_once_with("git")
 
 
 def test_validate_tag_accepts_annotated_tag_on_origin_main(
