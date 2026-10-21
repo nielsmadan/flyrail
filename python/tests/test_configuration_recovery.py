@@ -615,7 +615,7 @@ def test_birth_time_is_compared_only_on_macos(
     born = boundary + 60_000_000_000
     replaced = os.stat_result(
         tuple(actual)[:10],
-        {"st_mtime_ns": boundary, "st_birthtime": born / 1e9, "st_birthtime_ns": born},
+        {"st_mtime_ns": boundary, "st_birthtime": born / 1e9},
     )
     native_lstat = Path.lstat
     monkeypatch.setattr(
