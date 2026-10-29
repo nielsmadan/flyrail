@@ -9,12 +9,13 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use flyrail::{
-    Acquisition, Artifact, Bundle, BundleIdentity, Content, DirectoryStore, Family, FileContent,
-    FileMode, Index, InstallationObservation, InstallationResult, InstallationTarget,
-    InstructionArtifact, Journal, Preparation, Receipt, RenderedArtifact, RenderedBundle,
-    ResourceAuthority, ResourceKind, ResourceRef, SectionContent, StateStore, TargetError, admit,
-    decode, encode, inspect_installation, interop_resource_lock, recover_installation, remove,
-    set_interop_test_barrier, set_interop_test_fault, sync,
+    Acquisition, Agent, Artifact, Bundle, BundleIdentity, Content, DirectoryStore, Family,
+    FileContent, FileMode, HookRuntime, Index, InstallationObservation, InstallationResult,
+    InstallationTarget, InstructionArtifact, Journal, Platform, Preparation, Receipt,
+    RenderContext, RenderedArtifact, RenderedBundle, ResourceAuthority, ResourceKind, ResourceRef,
+    SectionContent, StateStore, Target, TargetError, admit, decode, encode, inspect_installation,
+    interop_resource_lock, recover_installation, remove, render, set_interop_test_barrier,
+    set_interop_test_fault, sync,
 };
 use serde_json::{Value, json};
 
@@ -65,11 +66,16 @@ impl Arguments {
                     "--bundle-id",
                     "--lock-timeout",
                     "--destination",
+                    "--source",
+                    "--agent",
+                    "--node",
                     "--version",
                     "--payload",
                     "--large",
                     "--section",
                     "--mode",
+                    "--kind",
+                    "--section",
                     "--acquisition",
                     "--barrier-phase",
                     "--barrier-ready",
@@ -176,9 +182,9 @@ fn absolute(path: String) -> Result<PathBuf, String> {
     }
 }
 
-fn bundle(version: &str) -> Result<Bundle, String> {
+fn bundle(bundle_id: &str, version: &str) -> Result<Bundle, String> {
     Bundle::from_artifacts(
-        BundleIdentity::new("team", version).map_err(|error| error.to_string())?,
+        BundleIdentity::new(bundle_id, version).map_err(|error| error.to_string())?,
         [Artifact::Instruction(
             InstructionArtifact::new("guide", "text").map_err(|error| error.to_string())?,
         )],
@@ -289,18 +295,54 @@ fn configure_interop_seam(arguments: &mut Arguments) -> Result<(), String> {
 }
 
 fn write_command(arguments: &mut Arguments) -> Result<(), String> {
+    if arguments.values.contains_key("--source") {
+        for option in [
+            "--mode",
+            "--large",
+            "--kind",
+            "--section",
+            "--payload",
+            "--version",
+        ] {
+            if arguments.values.contains_key(option) {
+                return Err(format!("{option} cannot be combined with --source"));
+            }
+        }
+    }
     let installation = target(arguments)?;
     let version = arguments.value("--version", "1");
     let acquisition = Acquisition::from_str(&arguments.value("--acquisition", "conflict"))
         .map_err(|error| error.to_string())?;
     let replace_modified = arguments.flag("--replace-modified");
-    let rendered = rendered(arguments)?;
+    let bundle_id = arguments.value("--bundle-id", "team");
+    let (bundle, rendered) = if let Some(source) = arguments.optional("--source") {
+        let bundle =
+            Bundle::from_directory(absolute(source)?).map_err(|error| error.to_string())?;
+        if bundle.id() != bundle_id {
+            return Err(String::from("source bundle id must match --bundle-id"));
+        }
+        let agent = Agent::from_str(&arguments.value("--agent", "codex"))
+            .map_err(|error| error.to_string())?;
+        let destination = absolute(arguments.required("--destination")?)?;
+        let context = RenderContext::new(
+            Target::project(agent, destination).map_err(|error| error.to_string())?,
+            Platform::Macos,
+        )
+        .map_err(|error| error.to_string())?
+        .with_hook_runtime(
+            HookRuntime::new(arguments.optional("--node").map(PathBuf::from), None)
+                .map_err(|error| error.to_string())?,
+        );
+        let rendered = render(&bundle, &context).map_err(|error| error.to_string())?;
+        (bundle, rendered)
+    } else {
+        (bundle(&bundle_id, &version)?, rendered(arguments)?)
+    };
     let lock_timeout = timeout(arguments)?;
-    arguments.optional("--bundle-id");
     configure_interop_seam(arguments)?;
     arguments.finish()?;
     let result = sync(
-        &bundle(&version)?,
+        &bundle,
         &rendered,
         &installation,
         acquisition,

@@ -62,8 +62,8 @@ fn single_key(name: &str, dotted: bool) -> Key {
     Key {
         parts: vec![KeyPart {
             name: name.to_owned(),
-            raw: name.to_owned(),
-            quoted: false,
+            raw: render_toml_key(name),
+            quoted: render_toml_key(name) != name,
         }],
         dotted,
         sep: String::from(" = "),
@@ -391,7 +391,11 @@ fn parse_statement(scanner: &mut Scanner<'_>) -> Result<Option<(Option<Key>, Ite
             _ => break,
         }
     }
-    let (key, item) = parse_key_value(scanner, true, 0)?;
+    let indent = scanner.extract();
+    let (key, mut item) = parse_key_value(scanner, true, 0)?;
+    if let Some(trivia) = item.trivia_mut() {
+        trivia.indent = indent;
+    }
     Ok(Some((Some(key), item)))
 }
 
@@ -427,7 +431,11 @@ impl Scanner<'_> {
                 Some(b' ' | b'\t') => self.step(),
                 Some(b'\r') => {
                     if self.at(1) != Some(b'\n') {
-                        return Err(control_error(0x0d, "comments"));
+                        return Err(ValueError::new(format!(
+                            "{} at line {} col 0",
+                            control_error(0x0d, "comments").message(),
+                            self.line
+                        )));
                     }
                     self.step();
                 }
@@ -486,13 +494,17 @@ fn parse_key_value(
     }
     if !found_equals {
         let current = scanner.cur().map_or_else(
-            || String::from("<eof>"),
+            || String::from("'\\x00'"),
             |byte| format!("{:?}", byte as char),
         );
         return Err(scanner.parse_error(&format!("Unexpected character: {current}")));
     }
     key.sep = scanner.extract();
-    let mut item = parse_value(scanner, depth)?;
+    let combined_depth = depth + key.parts.len().saturating_sub(1);
+    if combined_depth > MAX_VALUE_DEPTH {
+        return Err(scanner.parse_error("TOML value nested more than 100 levels deep"));
+    }
+    let mut item = parse_value(scanner, combined_depth)?;
     if let Some(trivia) = item.trivia_mut() {
         if parse_comment {
             let trail = scanner.comment_trail(true)?;
@@ -540,7 +552,7 @@ fn parse_simple_key(scanner: &mut Scanner<'_>) -> Result<KeyPart, ValueError> {
         let mut name = String::new();
         loop {
             let Some(byte) = scanner.cur() else {
-                return Err(scanner.parse_error("Unexpected end of document"));
+                return Err(scanner.parse_error("Unexpected end of file"));
             };
             match byte {
                 b'\n' => return Err(scanner.parse_error("Unexpected character: '\\n'")),
@@ -597,9 +609,8 @@ fn push_byte(value: &mut String, byte: u8, scanner: &mut Scanner<'_>) {
 
 fn parse_escape(scanner: &mut Scanner<'_>) -> Result<char, ValueError> {
     let Some(byte) = scanner.cur() else {
-        return Err(scanner.parse_error("Unexpected end of document"));
+        return Err(scanner.parse_error("Unexpected end of file"));
     };
-    scanner.step();
     let decoded = match byte {
         b'b' => '\u{8}',
         b't' => '\t',
@@ -608,12 +619,21 @@ fn parse_escape(scanner: &mut Scanner<'_>) -> Result<char, ValueError> {
         b'r' => '\r',
         b'"' => '"',
         b'\\' => '\\',
-        b'u' => parse_unicode_escape(scanner, 4)?,
-        b'U' => parse_unicode_escape(scanner, 8)?,
+        b'u' | b'U' => {
+            let start = scanner.pos;
+            scanner.step();
+            return parse_unicode_escape(scanner, if byte == b'u' { 4 } else { 8 }).map_err(|_| {
+                scanner.pos = start;
+                scanner.parse_error("Invalid unicode value")
+            });
+        }
         other => {
-            return Err(scanner.parse_error(&format!("Unexpected character: {:?}", other as char)));
+            return Err(
+                scanner.parse_error(&format!("Invalid character '{}' in string", other as char))
+            );
         }
     };
+    scanner.step();
     Ok(decoded)
 }
 
@@ -675,7 +695,7 @@ fn parse_value(scanner: &mut Scanner<'_>, depth: usize) -> Result<Item, ValueErr
                 trivia: Trivia::default(),
             })
         }
-        None => Err(scanner.parse_error("Unexpected end of document")),
+        None => Err(scanner.parse_error("Unexpected character: '\\x00'")),
     }
 }
 
@@ -684,7 +704,7 @@ fn parse_basic_string(scanner: &mut Scanner<'_>) -> Result<String, ValueError> {
     let mut value = String::new();
     loop {
         let Some(byte) = scanner.cur() else {
-            return Err(scanner.parse_error("Unexpected end of document"));
+            return Err(scanner.parse_error("Unexpected end of file"));
         };
         match byte {
             b'"' => {
@@ -715,7 +735,7 @@ fn parse_literal_string(scanner: &mut Scanner<'_>) -> Result<String, ValueError>
     let mut value = String::new();
     loop {
         let Some(byte) = scanner.cur() else {
-            return Err(scanner.parse_error("Unexpected end of document"));
+            return Err(scanner.parse_error("Unexpected end of file"));
         };
         match byte {
             b'\'' => {
@@ -744,7 +764,7 @@ fn parse_multiline_string(scanner: &mut Scanner<'_>, quote: u8) -> Result<String
     let mut value = String::new();
     loop {
         let Some(byte) = scanner.cur() else {
-            return Err(scanner.parse_error("Unexpected end of document"));
+            return Err(scanner.parse_error("Unexpected end of file"));
         };
         if byte == quote {
             let mut quotes = 0;
@@ -791,11 +811,34 @@ fn parse_multiline_string(scanner: &mut Scanner<'_>, quote: u8) -> Result<String
 
 fn scan_bare_value(scanner: &mut Scanner<'_>) -> String {
     let start = scanner.pos;
-    while let Some(byte) = scanner.cur() {
-        if byte.is_ascii_whitespace() || matches!(byte, b',' | b']' | b'}' | b'#') {
-            break;
+    for literal in ["true", "false"] {
+        if scanner
+            .src
+            .get(start..)
+            .is_some_and(|text| text.starts_with(literal))
+        {
+            for _ in literal.bytes() {
+                scanner.step();
+            }
+            return literal.to_owned();
         }
+    }
+    while scanner.cur().is_some_and(|byte| {
+        !byte.is_ascii_whitespace() && !matches!(byte, b',' | b']' | b'}' | b'#')
+    }) {
         scanner.step();
+    }
+    if scanner.pos - start == 10
+        && scanner.cur() == Some(b' ')
+        && scanner.at(1).is_some_and(|byte| byte.is_ascii_digit())
+        && scanner.at(3) == Some(b':')
+    {
+        scanner.step();
+        while scanner.cur().is_some_and(|byte| {
+            !byte.is_ascii_whitespace() && !matches!(byte, b',' | b']' | b'}' | b'#')
+        }) {
+            scanner.step();
+        }
     }
     scanner.slice(start, scanner.pos)
 }
@@ -815,10 +858,20 @@ fn parse_bare_value(raw: &str, scanner: &Scanner<'_>) -> Result<Value, ValueErro
     if let Some(scalar) = parse_temporal(raw) {
         return Ok(Value::Scalar(scalar));
     }
-    Err(scanner.parse_error(&format!(
-        "Unexpected character: {:?}",
-        raw.chars().next().unwrap_or(' ')
-    )))
+    let diagnostic = if raw.len() >= 10 && raw.get(4..5) == Some("-") {
+        if raw.len() == 10 {
+            "Invalid date"
+        } else if native_datetime_grammar(raw) {
+            "Invalid datetime"
+        } else {
+            "Invalid number"
+        }
+    } else if raw.contains(':') {
+        "Invalid time"
+    } else {
+        "Invalid number"
+    };
+    Err(scanner.parse_error(diagnostic))
 }
 
 fn strip_underscores(raw: &str) -> Option<String> {
@@ -826,7 +879,15 @@ fn strip_underscores(raw: &str) -> Option<String> {
     let mut out = String::with_capacity(raw.len());
     for (index, byte) in bytes.iter().enumerate() {
         if *byte == b'_' {
-            let digit = |byte: Option<u8>| byte.is_some_and(|byte| byte.is_ascii_alphanumeric());
+            let digit = |byte: Option<u8>| {
+                byte.is_some_and(|byte| {
+                    if raw.starts_with("0x") {
+                        byte.is_ascii_hexdigit()
+                    } else {
+                        byte.is_ascii_digit()
+                    }
+                })
+            };
             if !digit(index.checked_sub(1).and_then(|i| bytes.get(i)).copied())
                 || !digit(bytes.get(index + 1).copied())
             {
@@ -851,16 +912,17 @@ fn parse_number(raw: &str) -> Option<Scalar> {
     if body.is_empty() {
         return None;
     }
-    let (radix, digits) = [("0x", 16_u32), ("0o", 8), ("0b", 2)]
+    let radix = [("0x", 16_u32), ("0o", 8), ("0b", 2)]
         .iter()
-        .find_map(|(prefix, radix)| body.strip_prefix(prefix).map(|rest| (*radix, rest)))
-        .unwrap_or((10, body));
+        .find_map(|(prefix, radix)| body.starts_with(prefix).then_some(*radix))
+        .unwrap_or(10);
     if radix != 10 {
         if sign < 0 {
             return None;
         }
-        let clean = strip_underscores(digits)?;
-        let value = i64::from_str_radix(&clean, radix).ok()?;
+        let clean = strip_underscores(body)?;
+        let clean = clean.get(2..)?;
+        let value = i64::from_str_radix(clean, radix).ok()?;
         return Some(Scalar::integer(value));
     }
     let clean = strip_underscores(body)?;
@@ -948,12 +1010,13 @@ fn parse_time_text(text: &str) -> Option<Time> {
         "" => {}
         fraction => {
             let fraction = fraction.strip_prefix('.')?;
-            if fraction.is_empty() || fraction.len() > 6 {
+            if fraction.is_empty() {
                 return None;
             }
             if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
                 return None;
             }
+            let fraction = fraction.get(..fraction.len().min(6))?;
             let exponent = u32::try_from(fraction.len()).ok()?;
             microsecond = fraction.parse::<u32>().ok()? * 10_u32.pow(6 - exponent);
         }
@@ -971,16 +1034,68 @@ fn split_time_offset(text: &str) -> Option<(&str, Option<&str>)> {
     Some((text, None))
 }
 
+fn native_datetime_grammar(raw: &str) -> bool {
+    let Some(time_text) = raw.get(11..) else {
+        return false;
+    };
+    if !matches!(raw.as_bytes().get(10), Some(b'T' | b't' | b' ')) {
+        return false;
+    }
+    let Some((time, offset)) = split_time_offset(time_text) else {
+        return false;
+    };
+    let base = time.get(..8).unwrap_or("");
+    if base.len() != 8
+        || !base.bytes().enumerate().all(|(index, byte)| {
+            if index == 2 || index == 5 {
+                byte == b':'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+    {
+        return false;
+    }
+    let fraction = time.get(8..).unwrap_or("");
+    if !fraction.is_empty()
+        && !fraction.strip_prefix('.').is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return false;
+    }
+    offset.is_none_or(|offset| {
+        offset.eq_ignore_ascii_case("z")
+            || (offset.len() == 6
+                && offset.bytes().enumerate().all(|(index, byte)| match index {
+                    0 => matches!(byte, b'+' | b'-'),
+                    3 => byte == b':',
+                    _ => byte.is_ascii_digit(),
+                }))
+    })
+}
+
 fn build_datetime(date: Date, time: Time, offset: Option<&str>) -> Option<DateTime> {
     match offset {
         None => Some(DateTime::local(date, time)),
         Some(text) if text.eq_ignore_ascii_case("z") => Some(DateTime::coordinated(date, time)),
         Some(text) => {
+            if text.len() != 6
+                || !matches!(text.as_bytes().first(), Some(b'+' | b'-'))
+                || text.as_bytes().get(3) != Some(&b':')
+                || !text.get(1..3)?.bytes().all(|byte| byte.is_ascii_digit())
+                || !text.get(4..)?.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return None;
+            }
             let sign = if text.starts_with('-') { -1 } else { 1 };
             let body = text.get(1..)?;
             let (hours, minutes) = body.split_once(':')?;
             let hours: i32 = hours.parse().ok()?;
             let minutes: i32 = minutes.parse().ok()?;
+            if hours > 23 || minutes > 59 {
+                return None;
+            }
             DateTime::with_offset(date, time, sign * (hours * 3600 + minutes * 60)).ok()
         }
     }
@@ -1009,12 +1124,8 @@ fn parse_array(scanner: &mut Scanner<'_>, depth: usize) -> Result<Item, ValueErr
                 scanner.step();
                 break;
             }
-            None => return Err(scanner.parse_error("Unexpected end of document")),
-            Some(b',') => {
-                commas.push(scanner.pos - start);
-                scanner.step();
-                continue;
-            }
+            None => return Err(scanner.parse_error("Unexpected end of file")),
+            Some(b',') => return Err(scanner.parse_error("Unexpected character: ','")),
             _ => {}
         }
         let item_start = scanner.pos;
@@ -1022,6 +1133,29 @@ fn parse_array(scanner: &mut Scanner<'_>, depth: usize) -> Result<Item, ValueErr
         values.push(item.unwrap_value()?);
         items.push(item);
         spans.push((item_start - start, scanner.pos - start));
+        loop {
+            scanner.advance_spaces();
+            match scanner.cur() {
+                Some(b'\n' | b'\r') => scanner.step(),
+                Some(b'#') => {
+                    scanner.comment_trail(true)?;
+                }
+                _ => break,
+            }
+        }
+        match scanner.cur() {
+            Some(b',') => {
+                commas.push(scanner.pos - start);
+                scanner.step();
+            }
+            Some(b']') => {}
+            None => return Err(scanner.parse_error("Unexpected end of file")),
+            Some(byte) => {
+                return Err(
+                    scanner.parse_error(&format!("Unexpected character: {:?}", byte as char))
+                );
+            }
+        }
     }
     let raw = scanner.slice(start, scanner.pos);
     Ok(Item::Array {
@@ -1056,7 +1190,7 @@ fn parse_inline_table(scanner: &mut Scanner<'_>, depth: usize) -> Result<Item, V
             return Err(scanner.parse_error("Unexpected character: ','"));
         }
         match scanner.cur() {
-            None => return Err(scanner.parse_error("Unexpected end of document")),
+            None => return Err(scanner.parse_error("Unexpected end of file")),
             Some(b',') => {
                 scanner.step();
                 continue;
@@ -1090,7 +1224,7 @@ fn parse_table(
     let indent = scanner.slice(scanner.line_start, scanner.pos);
     scanner.step();
     if scanner.end() {
-        return Err(scanner.parse_error("Unexpected end of document"));
+        return Err(scanner.parse_error("Unexpected end of file"));
     }
     let is_aot = scanner.cur() == Some(b'[');
     if is_aot {
@@ -1098,11 +1232,11 @@ fn parse_table(
     }
     let mut key = parse_key(scanner)?;
     if scanner.end() {
-        return Err(scanner.parse_error("Unexpected end of document"));
+        return Err(scanner.parse_error("Unexpected end of file"));
     }
     if scanner.cur() != Some(b']') {
         let current = scanner.cur().map_or_else(
-            || String::from("<eof>"),
+            || String::from("'\\x00'"),
             |byte| format!("{:?}", byte as char),
         );
         return Err(scanner.parse_error(&format!("Unexpected character: {current}")));
@@ -1122,11 +1256,11 @@ fn parse_table(
     scanner.step();
     if is_aot {
         if scanner.end() {
-            return Err(scanner.parse_error("Unexpected end of document"));
+            return Err(scanner.parse_error("Unexpected end of file"));
         }
         if scanner.cur() != Some(b']') {
             let current = scanner.cur().map_or_else(
-                || String::from("<eof>"),
+                || String::from("'\\x00'"),
                 |byte| format!("{:?}", byte as char),
             );
             return Err(scanner.parse_error(&format!("Unexpected character: {current}")));
@@ -1377,7 +1511,7 @@ impl Container {
                 implicit: true,
                 display_name: None,
             };
-            let entry_key = single_key(&part.name, true);
+            let entry_key = part_key(part, true);
             current.raw_append(Some(entry_key), Item::Table(nested));
             let Some(entry) = current.body.last_mut() else {
                 return Err(ValueError::new("Can't add a table to a dotted key"));
@@ -1387,10 +1521,10 @@ impl Container {
             };
             current = &mut table.body;
         }
-        let mut leaf_key = single_key(&leaf_part.name, false);
+        let mut leaf_key = part_key(leaf_part, false);
         leaf_key.sep.clone_from(&key.sep);
         current.raw_append(Some(leaf_key), item);
-        let outer_key = single_key(&outer_part.name, true);
+        let outer_key = part_key(outer_part, true);
         self.append(Some(outer_key), Item::Table(chain), parsed)
     }
 
@@ -2049,6 +2183,13 @@ fn render_inline_value(value: &Value) -> Result<String, ValueError> {
             let members = object
                 .items()
                 .iter()
+                .filter(|(_, value)| !is_table_value(value))
+                .chain(
+                    object
+                        .items()
+                        .iter()
+                        .filter(|(_, value)| is_table_value(value)),
+                )
                 .map(|(key, item)| {
                     Ok(format!(
                         "{} = {}",
@@ -2060,6 +2201,39 @@ fn render_inline_value(value: &Value) -> Result<String, ValueError> {
             Ok(format!("{{{}}}", members.join(", ")))
         }
     }
+}
+
+fn is_table_value(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => true,
+        Value::Array(array) => {
+            !array.items().is_empty()
+                && array
+                    .items()
+                    .iter()
+                    .all(|item| matches!(item, Value::Object(_)))
+        }
+        Value::Scalar(_) => false,
+    }
+}
+
+fn validate_selected_floats(node: &Item) -> Result<(), ValueError> {
+    let value = node.unwrap_value()?;
+    let mut pending = vec![&value];
+    while let Some(node) = pending.pop() {
+        match node {
+            Value::Scalar(scalar) => {
+                if let ScalarKind::Float(number) = scalar.kind()
+                    && !number.is_finite()
+                {
+                    return Err(ValueError::new("floats must be finite"));
+                }
+            }
+            Value::Object(object) => pending.extend(object.items().iter().map(|(_, child)| child)),
+            Value::Array(array) => pending.extend(array.items()),
+        }
+    }
+    Ok(())
 }
 
 fn render_toml_scalar(scalar: &Scalar) -> Result<String, ValueError> {
@@ -2198,7 +2372,8 @@ fn generated_table(value: &Value) -> Result<Table, ValueError> {
         .position(|entry| is_table_item(&entry.item))
         && index > 0
         && table.body.body.get(index).is_some_and(|entry| {
-            any_trivia(&entry.item).is_none_or(|trivia| !trivia.indent.contains('\n'))
+            !matches!(entry.item, Item::Aot(_))
+                && any_trivia(&entry.item).is_none_or(|trivia| !trivia.indent.contains('\n'))
         })
         && let Some(entry) = table.body.body.get_mut(index - 1)
     {
@@ -2689,6 +2864,7 @@ fn syntax_fragment(
 ) -> Result<Vec<u8>, ValueError> {
     let located = locate(&document.root, path)?;
     let mut node = copy_located(&located);
+    validate_selected_floats(&node)?;
     if matches!(located, Located::Tables(_)) {
         document.contiguous(path)?;
     }
@@ -2702,11 +2878,21 @@ fn syntax_fragment(
         trivia.comment = String::new();
         trivia.trail.clone_from(&document.newline);
     }
+    if synthetic && let Item::Table(table) = &mut node {
+        table.trivia = Trivia {
+            trail: document.newline.clone(),
+            ..Trivia::default()
+        };
+    }
     if let Located::Tables(_) = located {
         let tables = TomlDocument::tables_of(located);
         let mut body = Container::default();
-        for table in tables {
+        let count = tables.len();
+        for (index, table) in tables.into_iter().enumerate() {
             let mut copy = table.clone();
+            if index + 1 == count {
+                TomlDocument::strip_table_gap(&mut copy);
+            }
             copy.trivia.indent = String::new();
             copy.trivia.comment_ws = String::new();
             copy.trivia.comment = String::new();
@@ -2923,13 +3109,14 @@ impl TomlDocument {
         let Some((PathPart::Key(name), parent)) = path.split_last() else {
             return false;
         };
-        let Ok(located) = locate(&self.root, parent) else {
-            return false;
-        };
-        let bodies: Vec<&Container> = match &located {
-            Located::Table(table) => vec![&table.body],
-            Located::Tables(tables) => tables.iter().map(|t| &t.body).collect(),
-            _ => return false,
+        let bodies: Vec<&Container> = if parent.is_empty() {
+            vec![&self.root]
+        } else {
+            match locate(&self.root, parent) {
+                Ok(Located::Table(table)) => vec![&table.body],
+                Ok(Located::Tables(tables)) => tables.iter().map(|table| &table.body).collect(),
+                _ => return false,
+            }
         };
         bodies.iter().any(|body| {
             body.body.iter().any(|entry| {
@@ -3137,6 +3324,9 @@ fn physical_parent_mut<'a>(
     let Some((last, walk)) = path.split_last() else {
         return Ok(root);
     };
+    if matches!(last, PathPart::Index(_)) {
+        return physical_parent_mut(root, walk);
+    }
     let trace = trace_container(root, walk, last)?.ok_or_else(cross_parents)?;
     replay_trace(root, &trace)
 }
@@ -3212,8 +3402,12 @@ impl DocumentBackend for TomlDocument {
             Located::Tables(_) => {
                 let tables = Self::tables_of(located);
                 let mut body = Container::default();
-                for table in tables {
+                let count = tables.len();
+                for (index, table) in tables.into_iter().enumerate() {
                     let mut copy = table.clone();
+                    if index + 1 == count {
+                        Self::strip_table_gap(&mut copy);
+                    }
                     copy.trivia.indent = String::new();
                     copy.trivia.comment_ws = String::new();
                     copy.trivia.comment = String::new();
@@ -3395,6 +3589,15 @@ impl DocumentBackend for TomlDocument {
         let Some((last, parent)) = path.split_last() else {
             return Err(ValueError::new("TOML selector crosses a scalar"));
         };
+        if let PathPart::Key(name) = last
+            && matches!(
+                locate(&self.root, parent),
+                Ok(Located::Item(Item::InlineTable { .. }))
+            )
+        {
+            self.inline_field_edit(parent, name, None)?;
+            return self.publish();
+        }
         match last {
             PathPart::Index(index) => {
                 let parent_kind = {
@@ -3763,6 +3966,7 @@ fn aot_container_mut<'a>(
     container
         .body
         .iter_mut()
+        .filter(|entry| path.last().is_some_and(|part| matches!(part, PathPart::Key(name) if entry.key.as_ref().is_some_and(|key| key.name() == name))))
         .find_map(|entry| match &mut entry.item {
             Item::Aot(members) => Some(members),
             _ => None,
@@ -3905,6 +4109,75 @@ impl TomlDocument {
             Some(fragment.as_bytes()),
         )?;
         Ok(())
+    }
+
+    fn inline_field_edit(
+        &mut self,
+        path: &[PathPart],
+        name: &str,
+        value: Option<&str>,
+    ) -> Result<(), ValueError> {
+        let Located::Item(Item::InlineTable { raw, .. }) = locate(&self.root, path)? else {
+            return Err(ValueError::new("TOML selector crosses a scalar"));
+        };
+        let mut scanner = Scanner::new(raw);
+        scanner.step();
+        let mut fields = Vec::new();
+        let mut commas = Vec::new();
+        loop {
+            scanner.advance_spaces();
+            if scanner.cur() == Some(b'}') {
+                break;
+            }
+            let start = scanner.pos;
+            let (key, _) = parse_key_value(&mut scanner, false, 0)?;
+            let value_start = start + key.as_string().len() + key.sep.len();
+            fields.push((key.name().to_owned(), start, value_start, scanner.pos));
+            scanner.advance_spaces();
+            if scanner.cur() == Some(b',') {
+                commas.push(scanner.pos);
+                scanner.step();
+            } else {
+                break;
+            }
+        }
+        let index = fields.iter().position(|(key, _, _, _)| key == name);
+        let mut patches = Vec::new();
+        match (index, value) {
+            (Some(index), Some(value)) => {
+                let (_, _, start, end) = fields.get(index).ok_or_else(cross_parents)?;
+                patches.push((*start, *end, value.to_owned()));
+            }
+            (Some(index), None) => {
+                let (_, start, _, end) = fields.get(index).ok_or_else(cross_parents)?;
+                patches.push((*start, *end, String::new()));
+                if let Some(comma) = commas.get(index.min(commas.len().saturating_sub(1))) {
+                    patches.push((*comma, *comma + 1, String::new()));
+                }
+            }
+            (None, Some(value)) => {
+                patches.push((
+                    raw.len() - 1,
+                    raw.len() - 1,
+                    format!("{} = {value}", render_toml_key(name)),
+                ));
+                if let Some((_, _, _, end)) = fields.last() {
+                    patches.push((*end, *end, String::from(",")));
+                }
+            }
+            (None, None) => return Err(ValueError::new("document selector path is missing")),
+        }
+        let mut candidate = raw.clone();
+        patches.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        for (start, end, replacement) in patches {
+            candidate.replace_range(start..end, &replacement);
+        }
+        let syntax = format!("value = {candidate}");
+        self.put_path(
+            path,
+            &Value::Scalar(Scalar::null()),
+            Some(syntax.as_bytes()),
+        )
     }
 
     #[allow(clippy::too_many_lines)]
@@ -4119,9 +4392,13 @@ impl TomlDocument {
                     Ok(None)
                 }
             }
-            Located::Item(Item::InlineTable { .. }) => Err(ValueError::new(
-                "TOML table representation changes cannot preserve foreign layout",
-            )),
+            Located::Item(Item::InlineTable { .. }) => {
+                if is_table_item(&node) {
+                    return Err(ValueError::new("Inline tables cannot contain a table"));
+                }
+                self.inline_field_edit(parent_path, name, Some(&node.as_string()))?;
+                Ok(None)
+            }
             _ => Err(ValueError::new("TOML selector crosses a scalar")),
         }
     }
@@ -4339,7 +4616,13 @@ impl TomlDocument {
         }
         let mut last = current_tables.last().cloned().unwrap_or_default();
         let gap = Self::strip_table_gap(&mut last);
-        Self::append_gap(&mut node, &gap);
+        if fragmented {
+            if let Some(table) = tables.last_mut() {
+                table.body.raw_append(None, Item::Whitespace(gap));
+            }
+        } else {
+            Self::append_gap(&mut node, &gap);
+        }
         let Some(PathPart::Key(name)) = path.last() else {
             return Err(ValueError::new("TOML selector crosses a scalar"));
         };
@@ -4392,6 +4675,10 @@ fn assign_in(container: &mut Container, name: &str, node: Item) -> Result<usize,
     if let Some(index) = position {
         replace_entry_at(container, index, node, None)
     } else {
+        let table_indent = match &node {
+            Item::Table(table) => Some(table.trivia.indent.clone()),
+            _ => None,
+        };
         let first_indent = aot_first_indent(&node);
         let body_length = match &node {
             Item::Table(table) => table.body.body.len(),
@@ -4401,6 +4688,9 @@ fn assign_in(container: &mut Container, name: &str, node: Item) -> Result<usize,
         let landing = container.body.len() - 1;
         if let Some(last) = container.body.get_mut(landing) {
             if let Item::Table(table) = &mut last.item {
+                if let Some(indent) = table_indent {
+                    table.trivia.indent = indent;
+                }
                 while table.body.body.len() > body_length
                     && matches!(
                         table.body.body.last().map(|entry| &entry.item),
@@ -4735,3 +5025,7 @@ fn prefixed(
     }
     Ok(start + raw.len())
 }
+
+#[cfg(test)]
+#[path = "toml_document_regression_tests.rs"]
+mod regression_tests;

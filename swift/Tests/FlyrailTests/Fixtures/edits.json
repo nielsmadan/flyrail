@@ -1,0 +1,1289 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "custom-section-first-baseline",
+      "format": "text",
+      "before": "﻿User\r\n<!-- splashdown:start -->\r\n old \r\n<!-- splashdown:end -->\r\nTail",
+      "steps": [
+        {
+          "action": "set",
+          "selector": {
+            "start": "<!-- splashdown:start -->",
+            "end": "<!-- splashdown:end -->"
+          },
+          "expected": "﻿User\r\n<!-- splashdown:start -->\r\n old \r\n<!-- splashdown:end -->\r\nTail",
+          "status": "conflict",
+          "text": "new\n"
+        },
+        {
+          "action": "set",
+          "selector": {
+            "start": "<!-- splashdown:start -->",
+            "end": "<!-- splashdown:end -->"
+          },
+          "expected": "﻿User\r\n<!-- splashdown:start -->\r\nnew\r\n<!-- splashdown:end -->\r\nTail",
+          "status": "taken-over",
+          "text": "new\n",
+          "acquisition": "takeover"
+        },
+        {
+          "action": "set",
+          "selector": {
+            "start": "<!-- splashdown:start -->",
+            "end": "<!-- splashdown:end -->"
+          },
+          "expected": "﻿User\r\n<!-- splashdown:start -->\r\nnewer\r\n<!-- splashdown:end -->\r\nTail",
+          "status": "updated",
+          "text": "newer\n",
+          "marker": "renamed"
+        },
+        {
+          "action": "retire",
+          "selector": {
+            "start": "<!-- splashdown:start -->",
+            "end": "<!-- splashdown:end -->"
+          },
+          "expected": "﻿User\r\n<!-- splashdown:start -->\r\n old \r\n<!-- splashdown:end -->\r\nTail",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "exact-section-adoption",
+      "format": "text",
+      "before": "Before\nSTART\ngenerated\nEND\nAfter\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "Before\nSTART\ngenerated\nEND\nAfter\n",
+          "status": "adopted",
+          "text": "generated\n",
+          "acquisition": "adopt"
+        },
+        {
+          "action": "retire",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "Before\nAfter\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "mixed-newline-section-adoption",
+      "format": "text",
+      "before": "Before\nSTART\r\ngenerated\r\nEND\r\nAfter\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "Before\nSTART\r\ngenerated\r\nEND\r\nAfter\n",
+          "status": "adopted",
+          "text": "generated\n",
+          "acquisition": "adopt"
+        },
+        {
+          "action": "set",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "Before\nSTART\r\ngenerated\r\nEND\r\nAfter\n",
+          "status": "current",
+          "text": "generated\n"
+        },
+        {
+          "action": "retire",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "Before\nAfter\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "section-adoption-preserves-whitespace",
+      "format": "text",
+      "before": "Before\nSTART\ngenerated \nEND\nAfter\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "Before\nSTART\ngenerated \nEND\nAfter\n",
+          "status": "conflict",
+          "text": "generated\n",
+          "acquisition": "adopt"
+        }
+      ]
+    },
+    {
+      "name": "section-modified-retirement",
+      "format": "text",
+      "before": null,
+      "steps": [
+        {
+          "action": "set",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "START\none\nEND\n",
+          "status": "created",
+          "text": "one"
+        },
+        {
+          "action": "retire",
+          "selector": {
+            "start": "START",
+            "end": "END"
+          },
+          "expected": "START\nuser\nEND\n",
+          "status": "modified",
+          "observed": "START\nuser\nEND\n"
+        }
+      ]
+    },
+    {
+      "name": "jsonc-foreign-trivia",
+      "format": "jsonc",
+      "before": "{\r\n // foreign\r\n \"x\":1,\r\n}\r\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "a"
+          ],
+          "expected": "{\r\n // foreign\r\n \"x\":1,\r\n\"mcp\":{\"a\":true},}\r\n",
+          "status": "created",
+          "value": true
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "a"
+          ],
+          "expected": "{\r\n // foreign\r\n \"x\":1,\r\n}\r\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "jsonc-scoped-baseline",
+      "format": "jsonc",
+      "before": "{\"mcp\":{\"x\": /* key */ {\"old\":true /* owned */}}}",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "x"
+          ],
+          "expected": "{\"mcp\":{\"x\": /* key */ {\"new\":true}}}",
+          "status": "taken-over",
+          "value": {
+            "new": true
+          },
+          "acquisition": "takeover"
+        },
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "x"
+          ],
+          "expected": "{\"mcp\":{\"x\": /* key */ {\"new\":false}}}",
+          "status": "updated",
+          "value": {
+            "new": false
+          }
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "x"
+          ],
+          "expected": "{\"mcp\":{\"x\": /* key */ {\"old\":true /* owned */}}}",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "jsonc-owned-comment-modification",
+      "format": "jsonc",
+      "before": "{\"x\":{\"v\":1}}",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "x"
+          ],
+          "expected": "{\"x\":{\"v\":1}}",
+          "status": "adopted",
+          "value": {
+            "v": 1
+          },
+          "acquisition": "adopt"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "x"
+          ],
+          "expected": "{\"x\":{\"v\":1 /* user */}}",
+          "status": "modified",
+          "observed": "{\"x\":{\"v\":1 /* user */}}"
+        }
+      ]
+    },
+    {
+      "name": "json-multiple-owners-container",
+      "format": "json",
+      "before": null,
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "a"
+          ],
+          "expected": "{\"mcp\":{\"a\":1}}",
+          "status": "created",
+          "value": 1
+        },
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "b"
+          ],
+          "expected": "{\"mcp\":{\"a\":1,\"b\":2}}",
+          "status": "created",
+          "value": 2
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "a"
+          ],
+          "expected": "{\"mcp\":{\"b\":2}}",
+          "status": "removed"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "b"
+          ],
+          "expected": null,
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "jsonc-foreign-container-comment-prevents-pruning",
+      "format": "jsonc",
+      "before": null,
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "a"
+          ],
+          "expected": "{\"mcp\":{\"a\":1}}",
+          "status": "created",
+          "value": 1
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "a"
+          ],
+          "expected": "{\"mcp\":{/* user */}}",
+          "status": "removed",
+          "observed": "{\"mcp\":{/* user */\"a\":1}}"
+        }
+      ]
+    },
+    {
+      "name": "array-stable-identity-baseline",
+      "format": "json",
+      "before": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"x\",\"v\":1},{\"name\":\"b\"}]}",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "key": [
+                "name"
+              ],
+              "identity": "x"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"b\"},{\"name\":\"x\",\"v\":2}]}",
+          "status": "taken-over",
+          "value": {
+            "name": "x",
+            "v": 2
+          },
+          "acquisition": "takeover",
+          "placement": {
+            "position": "last"
+          }
+        },
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "key": [
+                "name"
+              ],
+              "identity": "x"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"b\"},{\"name\":\"x\",\"v\":3}]}",
+          "status": "updated",
+          "value": {
+            "name": "x",
+            "v": 3
+          }
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hooks",
+            {
+              "key": [
+                "name"
+              ],
+              "identity": "x"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"x\",\"v\":1},{\"name\":\"b\"}]}",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "array-foreign-order-blocks-restoration",
+      "format": "json",
+      "before": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"x\",\"v\":1},{\"name\":\"b\"}]}",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "key": [
+                "name"
+              ],
+              "identity": "x"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"b\"},{\"name\":\"x\",\"v\":2}]}",
+          "status": "taken-over",
+          "value": {
+            "name": "x",
+            "v": 2
+          },
+          "acquisition": "takeover",
+          "placement": {
+            "position": "last"
+          }
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hooks",
+            {
+              "key": [
+                "name"
+              ],
+              "identity": "x"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"b\"},{\"name\":\"a\"},{\"name\":\"x\",\"v\":2}]}",
+          "status": "conflict",
+          "observed": "{\"hooks\":[{\"name\":\"b\"},{\"name\":\"a\"},{\"name\":\"x\",\"v\":2}]}"
+        }
+      ]
+    },
+    {
+      "name": "array-exact-typed-identity",
+      "format": "json",
+      "before": "{\"hooks\":[true,1,1.0,-0.0,0.0]}",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "identity": 1
+            }
+          ],
+          "expected": "{\"hooks\":[true,1,1.0,-0.0,0.0]}",
+          "status": "adopted",
+          "value": 1,
+          "acquisition": "adopt"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hooks",
+            {
+              "identity": 1
+            }
+          ],
+          "expected": "{\"hooks\":[true,1.0,-0.0,0.0]}",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-native-scalar-baseline",
+      "format": "toml",
+      "before": "# top\r\nx = 0x10 # foreign\r\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "x"
+          ],
+          "expected": "# top\r\nx = 32 # foreign\r\n",
+          "status": "taken-over",
+          "value": 32,
+          "acquisition": "takeover"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "x"
+          ],
+          "expected": "# top\r\nx = 0x10 # foreign\r\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-array-trivia",
+      "format": "toml",
+      "before": "hooks=[1, # two\n 2,3,] # foreign\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "identity": 4
+            }
+          ],
+          "expected": "hooks=[1,4, # two\n 2,3,] # foreign\n",
+          "status": "created",
+          "value": 4,
+          "placement": {
+            "position": "before",
+            "anchor": {
+              "identity": 2
+            }
+          }
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hooks",
+            {
+              "identity": 4
+            }
+          ],
+          "expected": "hooks=[1, # two\n 2,3,] # foreign\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-time-types",
+      "format": "toml",
+      "before": "foreign = 2026-01-02\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hook_time"
+          ],
+          "expected": "foreign = 2026-01-02\nhook_time = 01:02:03\n",
+          "status": "created",
+          "semantic_value": [
+            "time",
+            "01:02:03.000000"
+          ]
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hook_time"
+          ],
+          "expected": "foreign = 2026-01-02\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-dotted-object-preserves-root-foreign-value",
+      "format": "toml",
+      "before": "mcp.foo.command=\"old\"\nforeign=1\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "foo"
+          ],
+          "value": {
+            "command": "new",
+            "env": {
+              "X": "y"
+            }
+          },
+          "acquisition": "takeover",
+          "expected": "mcp.foo.command = \"new\"\nmcp.foo.env = {X = \"y\"}\nforeign=1\n",
+          "status": "taken-over"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "foo"
+          ],
+          "expected": "mcp.foo.command=\"old\"\nforeign=1\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-nested-mcp-published-snapshot-and-live-trivia",
+      "format": "toml",
+      "before": "[mcp.test] # header\ncommand=\"old\"\n[mcp . test . env] # nested\nX=\"before\"\n# gap\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "test"
+          ],
+          "value": {
+            "command": "cmd",
+            "env": {
+              "X": "y"
+            }
+          },
+          "acquisition": "takeover",
+          "expected": "[mcp.test] # header\ncommand = \"cmd\"\n\n[mcp.test.env]\nX = \"y\"\n# gap\n",
+          "status": "taken-over"
+        },
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "test"
+          ],
+          "value": {
+            "command": "new",
+            "env": {
+              "X": "z"
+            }
+          },
+          "expected": "[mcp.test] # header\ncommand = \"new\"\n\n[mcp.test.env]\nX = \"z\"\n# gap\n",
+          "status": "updated"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "test"
+          ],
+          "observed": "[mcp.test] # live\ncommand = \"new\"\n\n[mcp.test.env]\nX = \"z\"\n# live gap\n",
+          "expected": "[mcp.test] # live\ncommand=\"old\"\n[mcp . test . env] # nested\nX=\"before\"\n# live gap\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-nested-aot-rebinds-and-restores-baseline",
+      "format": "toml",
+      "before": "[[hooks]] # header\nname=\"a\"\n[hooks . env] # nested\nX=\"before\"\n# gap\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "identity": "a",
+              "key": [
+                "name"
+              ]
+            }
+          ],
+          "value": {
+            "name": "a",
+            "env": {
+              "X": "y"
+            }
+          },
+          "acquisition": "takeover",
+          "expected": "[[hooks]] # header\nname = \"a\"\n\n[hooks.env]\nX = \"y\"\n# gap\n",
+          "status": "taken-over"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hooks",
+            {
+              "identity": "a",
+              "key": [
+                "name"
+              ]
+            }
+          ],
+          "expected": "[[hooks]] # header\nname=\"a\"\n[hooks . env] # nested\nX=\"before\"\n# gap\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "toml-adopted-aot-detaches-live-header-and-gap",
+      "format": "toml",
+      "before": "[[hooks]] # header\nname=\"a\"\n# gap\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "hooks",
+            {
+              "identity": "a",
+              "key": [
+                "name"
+              ]
+            }
+          ],
+          "value": {
+            "name": "a"
+          },
+          "acquisition": "adopt",
+          "expected": "[[hooks]] # header\nname=\"a\"\n# gap\n",
+          "status": "adopted"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "hooks",
+            {
+              "identity": "a",
+              "key": [
+                "name"
+              ]
+            }
+          ],
+          "observed": "[[hooks]] # live\nname=\"a\"\n# live gap\n",
+          "expected": " # live\n# live gap\n",
+          "status": "removed"
+        }
+      ]
+    },
+    {
+      "name": "json-batch-restoration-plans-joint-anchors",
+      "format": "json",
+      "before": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"x\"},{\"name\":\"y\"},{\"name\":\"b\"}]}",
+      "steps": [
+        {
+          "requests": [
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "x",
+                "v": 1
+              },
+              "acquisition": "takeover",
+              "placement": {
+                "position": "last"
+              }
+            },
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "y",
+                "v": 1
+              },
+              "acquisition": "takeover"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"y\",\"v\":1},{\"name\":\"b\"},{\"name\":\"x\",\"v\":1}]}",
+          "statuses": [
+            "taken-over",
+            "taken-over"
+          ]
+        },
+        {
+          "requests": [
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            },
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"x\"},{\"name\":\"y\"},{\"name\":\"b\"}]}",
+          "statuses": [
+            "removed",
+            "removed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "json-batch-restoration-rejects-foreign-reorder",
+      "format": "json",
+      "before": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"x\"},{\"name\":\"y\"},{\"name\":\"b\"}]}",
+      "steps": [
+        {
+          "requests": [
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "x",
+                "v": 1
+              },
+              "acquisition": "takeover",
+              "placement": {
+                "position": "last"
+              }
+            },
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "y",
+                "v": 1
+              },
+              "acquisition": "takeover"
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"a\"},{\"name\":\"y\",\"v\":1},{\"name\":\"b\"},{\"name\":\"x\",\"v\":1}]}",
+          "statuses": [
+            "taken-over",
+            "taken-over"
+          ]
+        },
+        {
+          "requests": [
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            },
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            }
+          ],
+          "expected": "{\"hooks\":[{\"name\":\"b\"},{\"name\":\"y\",\"v\":1},{\"name\":\"a\"},{\"name\":\"x\",\"v\":1}]}",
+          "statuses": [
+            "conflict",
+            "conflict"
+          ],
+          "observed": "{\"hooks\":[{\"name\":\"b\"},{\"name\":\"y\",\"v\":1},{\"name\":\"a\"},{\"name\":\"x\",\"v\":1}]}"
+        }
+      ]
+    },
+    {
+      "name": "toml-batch-restoration-plans-joint-anchors",
+      "format": "toml",
+      "before": "[[hooks]]\nname=\"a\"\n[[hooks]]\nname=\"x\"\n[[hooks]]\nname=\"y\"\n[[hooks]]\nname=\"b\"\n",
+      "steps": [
+        {
+          "requests": [
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "x",
+                "v": 1
+              },
+              "acquisition": "takeover",
+              "placement": {
+                "position": "last"
+              }
+            },
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "y",
+                "v": 1
+              },
+              "acquisition": "takeover"
+            }
+          ],
+          "expected": "[[hooks]]\nname=\"a\"\n[[hooks]]\nname = \"y\"\nv = 1\n[[hooks]]\nname=\"b\"\n[[hooks]]\nname = \"x\"\nv = 1\n",
+          "statuses": [
+            "taken-over",
+            "taken-over"
+          ]
+        },
+        {
+          "requests": [
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            },
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            }
+          ],
+          "expected": "[[hooks]]\nname=\"a\"\n[[hooks]]\nname=\"x\"\n[[hooks]]\nname=\"y\"\n[[hooks]]\nname=\"b\"\n",
+          "statuses": [
+            "removed",
+            "removed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "toml-batch-restoration-rejects-foreign-reorder",
+      "format": "toml",
+      "before": "[[hooks]]\nname=\"a\"\n[[hooks]]\nname=\"x\"\n[[hooks]]\nname=\"y\"\n[[hooks]]\nname=\"b\"\n",
+      "steps": [
+        {
+          "requests": [
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "x",
+                "v": 1
+              },
+              "acquisition": "takeover",
+              "placement": {
+                "position": "last"
+              }
+            },
+            {
+              "action": "set",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ],
+              "value": {
+                "name": "y",
+                "v": 1
+              },
+              "acquisition": "takeover"
+            }
+          ],
+          "expected": "[[hooks]]\nname=\"a\"\n[[hooks]]\nname = \"y\"\nv = 1\n[[hooks]]\nname=\"b\"\n[[hooks]]\nname = \"x\"\nv = 1\n",
+          "statuses": [
+            "taken-over",
+            "taken-over"
+          ]
+        },
+        {
+          "requests": [
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "y",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            },
+            {
+              "action": "retire",
+              "selector": [
+                "hooks",
+                {
+                  "identity": "x",
+                  "key": [
+                    "name"
+                  ]
+                }
+              ]
+            }
+          ],
+          "expected": "[[hooks]]\nname=\"b\"\n[[hooks]]\nname = \"y\"\nv = 1\n[[hooks]]\nname=\"a\"\n[[hooks]]\nname = \"x\"\nv = 1\n",
+          "statuses": [
+            "conflict",
+            "conflict"
+          ],
+          "observed": "[[hooks]]\nname=\"b\"\n[[hooks]]\nname = \"y\"\nv = 1\n[[hooks]]\nname=\"a\"\n[[hooks]]\nname = \"x\"\nv = 1\n"
+        }
+      ]
+    },
+    {
+      "name": "toml-child-before-parent-baseline-order",
+      "format": "toml",
+      "before": "[mcp.foo.env]\nX=\"old\"\n[mcp.foo]\ncommand=\"old\"\n",
+      "steps": [
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "foo"
+          ],
+          "value": {
+            "command": "new",
+            "env": {
+              "X": "new"
+            }
+          },
+          "acquisition": "takeover",
+          "status": "taken-over",
+          "expected": "[mcp.foo]\ncommand = \"new\"\n\n[mcp.foo.env]\nX = \"new\"\n"
+        },
+        {
+          "action": "set",
+          "selector": [
+            "mcp",
+            "foo"
+          ],
+          "value": {
+            "command": "updated",
+            "env": {
+              "Y": "changed"
+            }
+          },
+          "status": "updated",
+          "expected": "[mcp.foo]\ncommand = \"updated\"\n\n[mcp.foo.env]\nY = \"changed\"\n"
+        },
+        {
+          "action": "retire",
+          "selector": [
+            "mcp",
+            "foo"
+          ],
+          "status": "removed",
+          "expected": "[mcp.foo.env]\nX=\"old\"\n[mcp.foo]\ncommand=\"old\"\n"
+        }
+      ]
+    },
+    {
+      "name": "adjacent-section-retirement-joint",
+      "format": "text",
+      "before": "Header\n",
+      "steps": [
+        {
+          "requests": [
+            {
+              "action": "set",
+              "selector": {
+                "start": "<!-- flyrail:a:start -->",
+                "end": "<!-- flyrail:a:end -->"
+              },
+              "text": "a"
+            },
+            {
+              "action": "set",
+              "selector": {
+                "start": "<!-- flyrail:b:start -->",
+                "end": "<!-- flyrail:b:end -->"
+              },
+              "text": "b"
+            }
+          ],
+          "expected": "Header\n\n<!-- flyrail:a:start -->\na\n<!-- flyrail:a:end -->\n\n<!-- flyrail:b:start -->\nb\n<!-- flyrail:b:end -->\n",
+          "statuses": [
+            "created",
+            "created"
+          ]
+        },
+        {
+          "observed": "Header\n\n<!-- flyrail:a:start -->\na\n<!-- flyrail:a:end -->\n<!-- flyrail:b:start -->\nb\n<!-- flyrail:b:end -->\nÜser suffix\n",
+          "requests": [
+            {
+              "action": "retire",
+              "selector": {
+                "start": "<!-- flyrail:a:start -->",
+                "end": "<!-- flyrail:a:end -->"
+              }
+            },
+            {
+              "action": "retire",
+              "selector": {
+                "start": "<!-- flyrail:b:start -->",
+                "end": "<!-- flyrail:b:end -->"
+              }
+            }
+          ],
+          "expected": "Header\nÜser suffix\n",
+          "statuses": [
+            "removed",
+            "removed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "adjacent-section-retirement-neighbor",
+      "format": "text",
+      "before": "Header\n",
+      "steps": [
+        {
+          "requests": [
+            {
+              "action": "set",
+              "selector": {
+                "start": "<!-- flyrail:a:start -->",
+                "end": "<!-- flyrail:a:end -->"
+              },
+              "text": "a"
+            },
+            {
+              "action": "set",
+              "selector": {
+                "start": "<!-- flyrail:b:start -->",
+                "end": "<!-- flyrail:b:end -->"
+              },
+              "text": "b"
+            }
+          ],
+          "expected": "Header\n\n<!-- flyrail:a:start -->\na\n<!-- flyrail:a:end -->\n\n<!-- flyrail:b:start -->\nb\n<!-- flyrail:b:end -->\n",
+          "statuses": [
+            "created",
+            "created"
+          ]
+        },
+        {
+          "observed": "Header\n\n<!-- flyrail:a:start -->\na\n<!-- flyrail:a:end -->\n<!-- flyrail:b:start -->\nb\n<!-- flyrail:b:end -->\nÜser suffix\n",
+          "requests": [
+            {
+              "action": "retire",
+              "selector": {
+                "start": "<!-- flyrail:b:start -->",
+                "end": "<!-- flyrail:b:end -->"
+              }
+            }
+          ],
+          "expected": "Header\n\n<!-- flyrail:a:start -->\na\n<!-- flyrail:a:end -->\nÜser suffix\n",
+          "statuses": [
+            "removed"
+          ]
+        }
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "name": "duplicate-json-key",
+      "format": "json",
+      "document": "{\"x\":1,\"x\":1}",
+      "selectors": [
+        [
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate-jsonc-key",
+      "format": "jsonc",
+      "document": "{\"x\":1,/* comment */\"x\":2}",
+      "selectors": [
+        [
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate-toml-key",
+      "format": "toml",
+      "document": "x=1\nx=2\n",
+      "selectors": [
+        [
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate-array-identity",
+      "format": "json",
+      "document": "{\"hooks\":[{\"name\":\"x\"},{\"name\":\"x\"}]}",
+      "selectors": [
+        [
+          "hooks",
+          {
+            "key": [
+              "name"
+            ],
+            "identity": "x"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "overlapping-paths",
+      "format": "json",
+      "document": "{}",
+      "selectors": [
+        [
+          "mcp"
+        ],
+        [
+          "mcp",
+          "x"
+        ]
+      ]
+    },
+    {
+      "name": "nested-custom-sections",
+      "format": "text",
+      "document": "START\nOTHER\nSTOP\nEND\n",
+      "selectors": [
+        {
+          "start": "START",
+          "end": "END"
+        },
+        {
+          "start": "OTHER",
+          "end": "STOP"
+        }
+      ]
+    }
+  ]
+}

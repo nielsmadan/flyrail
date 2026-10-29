@@ -17,19 +17,24 @@ from flyrail import (
     Family,
     FileContent,
     FileMode,
+    HookRuntime,
     InstallationObservation,
     InstallationResult,
     InstallationTarget,
     InstructionArtifact,
+    Platform,
+    RenderContext,
     RenderedArtifact,
     RenderedBundle,
     ResourceAuthority,
     ResourceKind,
     ResourceRef,
     SectionContent,
+    Target,
     inspect_installation,
     recover_installation,
     remove,
+    render,
     sync,
 )
 from flyrail import _lifecycle as lifecycle
@@ -47,9 +52,9 @@ def compact(value: object) -> None:
     sys.stdout.flush()
 
 
-def bundle(version: str) -> Bundle:
+def bundle(bundle_id: str, version: str) -> Bundle:
     return Bundle.from_artifacts(
-        BundleIdentity("team", version), [InstructionArtifact("guide", "text")]
+        BundleIdentity(bundle_id, version), [InstructionArtifact("guide", "text")]
     )
 
 
@@ -150,12 +155,29 @@ def result_value(result: InstallationResult) -> dict[str, object]:
     }
 
 
+def source_installation(arguments: argparse.Namespace) -> tuple[Bundle, RenderedBundle]:
+    source_bundle = Bundle.from_directory(Path(arguments.source))
+    if source_bundle.id != arguments.bundle_id:
+        raise ValueError("source bundle id must match --bundle-id")
+    context = RenderContext(
+        Target.project(arguments.agent, Path(arguments.destination).resolve()),
+        Platform.MACOS,
+        hook_runtime=HookRuntime(Path(arguments.node) if arguments.node is not None else None),
+    )
+    return source_bundle, render(source_bundle, context)
+
+
 def write_command(arguments: argparse.Namespace) -> None:
     configure_interop_seam(arguments)
     acquisition = Acquisition(arguments.acquisition)
+    source_bundle, source_rendered = (
+        source_installation(arguments)
+        if arguments.source is not None
+        else (bundle(arguments.bundle_id, arguments.version), rendered(arguments))
+    )
     result = sync(
-        bundle(arguments.version),
-        rendered(arguments),
+        source_bundle,
+        source_rendered,
         installation(arguments),
         acquisition=acquisition,
         replace_modified=arguments.replace_modified,
@@ -312,6 +334,9 @@ def parser() -> argparse.ArgumentParser:
         write_parser = commands.add_parser(name)
         add_target_arguments(write_parser)
         write_parser.add_argument("--destination", required=True)
+        write_parser.add_argument("--source")
+        write_parser.add_argument("--node")
+        write_parser.add_argument("--agent", default="codex")
         write_parser.add_argument("--version", default="1")
         write_parser.add_argument("--payload", default="generated\n")
         write_parser.add_argument("--large", type=int)
@@ -357,6 +382,24 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     options = [argument for argument in sys.argv[2:] if argument.startswith("--")]
+    if "--source" in options:
+        incompatible = next(
+            (
+                option
+                for option in ("--mode", "--large", "--kind", "--section", "--payload", "--version")
+                if option in options
+            ),
+            None,
+        )
+        if incompatible is not None:
+            compact(
+                {
+                    "error": error_value(
+                        ValueError(f"{incompatible} cannot be combined with --source")
+                    )
+                }
+            )
+            return 1
     duplicate = next(
         (option for index, option in enumerate(options) if option in options[:index]), None
     )

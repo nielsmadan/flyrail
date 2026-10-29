@@ -1,0 +1,63 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+root := justfile_directory() + "/.."
+scratch := root + "/.cache/swift"
+cache := root + "/.cache/swiftpm/cache"
+configuration := root + "/.cache/swiftpm/configuration"
+security := root + "/.cache/swiftpm/security"
+sandbox := if env_var_or_default("FLYRAIL_SWIFT_DISABLE_SANDBOX", "0") == "1" { "--disable-sandbox" } else { "" }
+
+default:
+    @just --list
+
+format:
+    @cd "{{root}}" && swiftformat --config swift/.swiftformat swift/Sources swift/Tests
+
+format-check:
+    @cd "{{root}}" && swiftformat --lint --config swift/.swiftformat swift/Sources swift/Tests
+
+lint:
+    @cd "{{root}}" && swiftlint lint --strict --config swift/.swiftlint.yml swift/Sources swift/Tests
+
+build:
+    @cd "{{root}}" && swift build {{sandbox}} --scratch-path "{{scratch}}" \
+        --cache-path "{{cache}}" --config-path "{{configuration}}" --security-path "{{security}}" \
+        -Xswiftc -warnings-as-errors
+
+test:
+    @cd "{{root}}" && swift test {{sandbox}} --scratch-path "{{scratch}}" \
+        --cache-path "{{cache}}" --config-path "{{configuration}}" --security-path "{{security}}" \
+        -Xswiftc -warnings-as-errors
+
+differential:
+    @cd "{{root}}" && swift test {{sandbox}} --scratch-path "{{scratch}}" \
+        --cache-path "{{cache}}" --config-path "{{configuration}}" --security-path "{{security}}" \
+        -Xswiftc -warnings-as-errors --filter valueDifferentialMatchesPythonReference
+
+case-folding:
+    @cd "{{root}}" && python3 -B swift/scripts/check_case_folding.py
+
+generate-case-folding:
+    @cd "{{root}}" && python3 -B swift/scripts/generate_case_folding.py \
+        swift/scripts/unicode/CaseFolding-16.0.0.txt \
+        swift/Sources/Flyrail/UnicodeCaseFolding.generated.swift
+
+check:
+    @just case-folding
+    @just format-check
+    @just lint
+    @just build
+    @just test
+
+check-integration:
+    @just build
+    @cd "{{root}}" && python/.venv/bin/python -B swift/scripts/check_differential.py
+    @cd "{{root}}" && python/.venv/bin/python -B swift/scripts/check_native_interop.py
+    @cd "{{root}}" && python/.venv/bin/python -B swift/scripts/check_transaction_interop.py
+    @cd "{{root}}" && FLYRAIL_SWIFT_INTEGRATION=1 swift test {{sandbox}} --scratch-path "{{scratch}}" \
+        --cache-path "{{cache}}" --config-path "{{configuration}}" --security-path "{{security}}" \
+        -Xswiftc -warnings-as-errors --filter packagedHookRuntimeExecutesSharedHarnesses
+    @echo "Swift integration gates passed."
+
+check-package:
+    @cd "{{root}}" && python/.venv/bin/python -B swift/scripts/package_qa.py

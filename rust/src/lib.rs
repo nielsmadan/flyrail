@@ -46,6 +46,8 @@ pub mod values;
 mod zip;
 
 #[cfg(test)]
+mod editing_differential;
+#[cfg(test)]
 mod lifecycle_seams;
 #[cfg(test)]
 mod test_support;

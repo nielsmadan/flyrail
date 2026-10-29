@@ -1,0 +1,1611 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "claude-session-start-continue",
+      "host": "claude",
+      "event": "session-start",
+      "native_event": "SessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "claude-session-start-context",
+      "host": "claude",
+      "event": "session-start",
+      "native_event": "SessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "SessionStart",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "claude-before-tool-continue",
+      "host": "claude",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-before-tool-block",
+      "host": "claude",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "deny",
+          "permissionDecisionReason": "review required"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-before-tool-modify-input",
+      "host": "claude",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "modify-input",
+        "input": {
+          "command": "changed"
+        }
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "updatedInput": {
+            "command": "changed"
+          }
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-before-tool-ask",
+      "host": "claude",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "ask",
+        "reason": "review required"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "ask",
+          "permissionDecisionReason": "review required"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-before-tool-context",
+      "host": "claude",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-after-tool-continue",
+      "host": "claude",
+      "event": "after-tool",
+      "native_event": "PostToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        },
+        "tool_response": {
+          "ok": true
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-after-tool-context",
+      "host": "claude",
+      "event": "after-tool",
+      "native_event": "PostToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        },
+        "tool_response": {
+          "ok": true
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PostToolUse",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-prompt-continue",
+      "host": "claude",
+      "event": "prompt",
+      "native_event": "UserPromptSubmit",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-prompt-block",
+      "host": "claude",
+      "event": "prompt",
+      "native_event": "UserPromptSubmit",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {
+        "decision": "block",
+        "reason": "review required"
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-prompt-context",
+      "host": "claude",
+      "event": "prompt",
+      "native_event": "UserPromptSubmit",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "UserPromptSubmit",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "claude-stop-continue",
+      "host": "claude",
+      "event": "stop",
+      "native_event": "Stop",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "codex-session-start-continue",
+      "host": "codex",
+      "event": "session-start",
+      "native_event": "SessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "codex-session-start-context",
+      "host": "codex",
+      "event": "session-start",
+      "native_event": "SessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "SessionStart",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "codex-before-tool-continue",
+      "host": "codex",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-before-tool-block",
+      "host": "codex",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "deny",
+          "permissionDecisionReason": "review required"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-before-tool-context",
+      "host": "codex",
+      "event": "before-tool",
+      "native_event": "PreToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-after-tool-continue",
+      "host": "codex",
+      "event": "after-tool",
+      "native_event": "PostToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        },
+        "tool_response": {
+          "ok": true
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-after-tool-context",
+      "host": "codex",
+      "event": "after-tool",
+      "native_event": "PostToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        },
+        "tool_response": {
+          "ok": true
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "PostToolUse",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-prompt-continue",
+      "host": "codex",
+      "event": "prompt",
+      "native_event": "UserPromptSubmit",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-prompt-block",
+      "host": "codex",
+      "event": "prompt",
+      "native_event": "UserPromptSubmit",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {
+        "decision": "block",
+        "reason": "review required"
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-prompt-context",
+      "host": "codex",
+      "event": "prompt",
+      "native_event": "UserPromptSubmit",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {
+        "hookSpecificOutput": {
+          "hookEventName": "UserPromptSubmit",
+          "additionalContext": "extra context"
+        }
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "codex-stop-continue",
+      "host": "codex",
+      "event": "stop",
+      "native_event": "Stop",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "cursor-session-start-continue",
+      "host": "cursor",
+      "event": "session-start",
+      "native_event": "sessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "cursor-session-start-context",
+      "host": "cursor",
+      "event": "session-start",
+      "native_event": "sessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {
+        "additional_context": "extra context"
+      },
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "cursor-before-tool-continue",
+      "host": "cursor",
+      "event": "before-tool",
+      "native_event": "preToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "cursor-before-tool-block",
+      "host": "cursor",
+      "event": "before-tool",
+      "native_event": "preToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "permission": "deny",
+        "user_message": "review required"
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "cursor-after-tool-continue",
+      "host": "cursor",
+      "event": "after-tool",
+      "native_event": "postToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        },
+        "tool_output": "{\"ok\": true}"
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "cursor-after-tool-context",
+      "host": "cursor",
+      "event": "after-tool",
+      "native_event": "postToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "old"
+        },
+        "tool_output": "{\"ok\": true}"
+      },
+      "native_output": {},
+      "expected": {
+        "additional_context": "extra context"
+      },
+      "canonical": {
+        "tool": "Bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "ok": true
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "cursor-prompt-continue",
+      "host": "cursor",
+      "event": "prompt",
+      "native_event": "beforeSubmitPrompt",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "cursor-prompt-block",
+      "host": "cursor",
+      "event": "prompt",
+      "native_event": "beforeSubmitPrompt",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {
+        "continue": false,
+        "user_message": "review required"
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "cursor-stop-continue",
+      "host": "cursor",
+      "event": "stop",
+      "native_event": "stop",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "status": "completed"
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "copilot-session-start-continue",
+      "host": "copilot",
+      "event": "session-start",
+      "native_event": "sessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "copilot-session-start-context",
+      "host": "copilot",
+      "event": "session-start",
+      "native_event": "sessionStart",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {
+        "additionalContext": "extra context"
+      },
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "copilot-before-tool-continue",
+      "host": "copilot",
+      "event": "before-tool",
+      "native_event": "preToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "toolArgs": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-before-tool-block",
+      "host": "copilot",
+      "event": "before-tool",
+      "native_event": "preToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "toolArgs": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "review required"
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-before-tool-modify-input",
+      "host": "copilot",
+      "event": "before-tool",
+      "native_event": "preToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "modify-input",
+        "input": {
+          "command": "changed"
+        }
+      },
+      "native_input": {
+        "toolName": "bash",
+        "toolArgs": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "modifiedArgs": {
+          "command": "changed"
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-before-tool-ask",
+      "host": "copilot",
+      "event": "before-tool",
+      "native_event": "preToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "ask",
+        "reason": "review required"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "toolArgs": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "review required"
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-after-tool-continue",
+      "host": "copilot",
+      "event": "after-tool",
+      "native_event": "postToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "toolArgs": {
+          "command": "old"
+        },
+        "toolResult": {
+          "resultType": "success",
+          "textResultForLlm": "done"
+        }
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "resultType": "success",
+          "textResultForLlm": "done"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-after-tool-context",
+      "host": "copilot",
+      "event": "after-tool",
+      "native_event": "postToolUse",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "toolArgs": {
+          "command": "old"
+        },
+        "toolResult": {
+          "resultType": "success",
+          "textResultForLlm": "done"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "additionalContext": "extra context"
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "resultType": "success",
+          "textResultForLlm": "done"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-prompt-continue",
+      "host": "copilot",
+      "event": "prompt",
+      "native_event": "userPromptSubmitted",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "prompt": "hello"
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {}
+    },
+    {
+      "name": "copilot-stop-continue",
+      "host": "copilot",
+      "event": "stop",
+      "native_event": "agentStop",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "stopReason": "end_turn",
+        "stop_hook_active": false
+      },
+      "native_output": {},
+      "expected": {},
+      "canonical": {},
+      "context": {
+        "stop_reason": "end_turn",
+        "stop_hook_active": false
+      }
+    },
+    {
+      "name": "pi-session-start-continue",
+      "host": "pi",
+      "event": "session-start",
+      "native_event": "session_start",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {
+        "result": null,
+        "sameInput": true
+      },
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "pi-before-tool-continue",
+      "host": "pi",
+      "event": "before-tool",
+      "native_event": "tool_call",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "result": null,
+        "sameInput": true
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "pi-before-tool-block",
+      "host": "pi",
+      "event": "before-tool",
+      "native_event": "tool_call",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "result": {
+          "block": true,
+          "reason": "review required"
+        },
+        "sameInput": true
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "pi-before-tool-modify-input",
+      "host": "pi",
+      "event": "before-tool",
+      "native_event": "tool_call",
+      "response": {
+        "version": 1,
+        "outcome": "modify-input",
+        "input": {
+          "command": "changed"
+        }
+      },
+      "native_input": {
+        "toolName": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "result": null,
+        "sameInput": true,
+        "input": {
+          "toolName": "bash",
+          "input": {
+            "command": "changed"
+          }
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "pi-after-tool-continue",
+      "host": "pi",
+      "event": "after-tool",
+      "native_event": "tool_result",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "input": {
+          "command": "old"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "done"
+          }
+        ],
+        "isError": false
+      },
+      "native_output": {},
+      "expected": {
+        "result": null,
+        "sameInput": true
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "done"
+            }
+          ],
+          "is_error": false
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "pi-after-tool-context",
+      "host": "pi",
+      "event": "after-tool",
+      "native_event": "tool_result",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "toolName": "bash",
+        "input": {
+          "command": "old"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "done"
+          }
+        ],
+        "isError": false
+      },
+      "native_output": {},
+      "expected": {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "done"
+            },
+            {
+              "type": "text",
+              "text": "extra context"
+            }
+          ]
+        },
+        "sameInput": true
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "done"
+            }
+          ],
+          "is_error": false
+        }
+      },
+      "context": {}
+    },
+    {
+      "name": "pi-prompt-continue",
+      "host": "pi",
+      "event": "prompt",
+      "native_event": "input",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "text": "hello",
+        "source": "interactive"
+      },
+      "native_output": {},
+      "expected": {
+        "result": null,
+        "sameInput": true
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {
+        "source": "interactive"
+      }
+    },
+    {
+      "name": "pi-prompt-modify-input",
+      "host": "pi",
+      "event": "prompt",
+      "native_event": "input",
+      "response": {
+        "version": 1,
+        "outcome": "modify-input",
+        "input": "changed"
+      },
+      "native_input": {
+        "text": "hello",
+        "source": "interactive"
+      },
+      "native_output": {},
+      "expected": {
+        "result": {
+          "action": "transform",
+          "text": "changed"
+        },
+        "sameInput": true
+      },
+      "canonical": {
+        "input": "hello"
+      },
+      "context": {
+        "source": "interactive"
+      }
+    },
+    {
+      "name": "pi-stop-continue",
+      "host": "pi",
+      "event": "stop",
+      "native_event": "agent_settled",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {},
+      "native_output": {},
+      "expected": {
+        "result": null,
+        "sameInput": true
+      },
+      "canonical": {},
+      "context": {}
+    },
+    {
+      "name": "opencode-session-start-continue",
+      "host": "opencode",
+      "event": "session-start",
+      "native_event": "event",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "event": {
+          "type": "session.created",
+          "properties": {
+            "info": {
+              "id": "s"
+            }
+          }
+        }
+      },
+      "native_output": {},
+      "expected": {
+        "blocked": null,
+        "output": {}
+      },
+      "canonical": {},
+      "context": {
+        "session_id": "s"
+      }
+    },
+    {
+      "name": "opencode-before-tool-continue",
+      "host": "opencode",
+      "event": "before-tool",
+      "native_event": "tool.execute.before",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool": "bash",
+        "sessionID": "s",
+        "callID": "c"
+      },
+      "native_output": {
+        "args": {
+          "command": "old"
+        }
+      },
+      "expected": {
+        "blocked": null,
+        "output": {
+          "args": {
+            "command": "old"
+          }
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {
+        "session_id": "s",
+        "tool_call_id": "c"
+      }
+    },
+    {
+      "name": "opencode-before-tool-block",
+      "host": "opencode",
+      "event": "before-tool",
+      "native_event": "tool.execute.before",
+      "response": {
+        "version": 1,
+        "outcome": "block",
+        "reason": "review required"
+      },
+      "native_input": {
+        "tool": "bash",
+        "sessionID": "s",
+        "callID": "c"
+      },
+      "native_output": {
+        "args": {
+          "command": "old"
+        }
+      },
+      "expected": {
+        "blocked": "review required",
+        "output": {
+          "args": {
+            "command": "old"
+          }
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {
+        "session_id": "s",
+        "tool_call_id": "c"
+      }
+    },
+    {
+      "name": "opencode-before-tool-modify-input",
+      "host": "opencode",
+      "event": "before-tool",
+      "native_event": "tool.execute.before",
+      "response": {
+        "version": 1,
+        "outcome": "modify-input",
+        "input": {
+          "command": "changed"
+        }
+      },
+      "native_input": {
+        "tool": "bash",
+        "sessionID": "s",
+        "callID": "c"
+      },
+      "native_output": {
+        "args": {
+          "command": "old"
+        }
+      },
+      "expected": {
+        "blocked": null,
+        "output": {
+          "args": {
+            "command": "changed"
+          }
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        }
+      },
+      "context": {
+        "session_id": "s",
+        "tool_call_id": "c"
+      }
+    },
+    {
+      "name": "opencode-after-tool-continue",
+      "host": "opencode",
+      "event": "after-tool",
+      "native_event": "tool.execute.after",
+      "response": {
+        "version": 1,
+        "outcome": "continue"
+      },
+      "native_input": {
+        "tool": "bash",
+        "sessionID": "s",
+        "callID": "c",
+        "args": {
+          "command": "old"
+        }
+      },
+      "native_output": {
+        "title": "tool",
+        "output": "done",
+        "metadata": {}
+      },
+      "expected": {
+        "blocked": null,
+        "output": {
+          "title": "tool",
+          "output": "done",
+          "metadata": {}
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "title": "tool",
+          "output": "done",
+          "metadata": {}
+        }
+      },
+      "context": {
+        "session_id": "s",
+        "tool_call_id": "c"
+      }
+    },
+    {
+      "name": "opencode-after-tool-context",
+      "host": "opencode",
+      "event": "after-tool",
+      "native_event": "tool.execute.after",
+      "response": {
+        "version": 1,
+        "outcome": "context",
+        "text": "extra context"
+      },
+      "native_input": {
+        "tool": "bash",
+        "sessionID": "s",
+        "callID": "c",
+        "args": {
+          "command": "old"
+        }
+      },
+      "native_output": {
+        "title": "tool",
+        "output": "done",
+        "metadata": {}
+      },
+      "expected": {
+        "blocked": null,
+        "output": {
+          "title": "tool",
+          "output": "done\nextra context",
+          "metadata": {}
+        }
+      },
+      "canonical": {
+        "tool": "bash",
+        "input": {
+          "command": "old"
+        },
+        "result": {
+          "title": "tool",
+          "output": "done",
+          "metadata": {}
+        }
+      },
+      "context": {
+        "session_id": "s",
+        "tool_call_id": "c"
+      }
+    }
+  ]
+}

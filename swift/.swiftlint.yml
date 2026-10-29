@@ -1,0 +1,36 @@
+disabled_rules:
+  - trailing_whitespace
+  - trailing_comma
+  - opening_brace
+  - line_length
+  - type_body_length
+  - file_length
+  - large_tuple
+  - non_optional_string_data_conversion
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - first_where
+
+excluded:
+  - ../.cache
+
+identifier_name:
+  min_length: 1
+  max_length: 50
+
+type_name:
+  min_length: 2
+  max_length: 50
+
+cyclomatic_complexity:
+  warning: 20
+  error: 35
+
+function_body_length:
+  warning: 100
+  error: 180
+
+nesting:
+  type_level: 3

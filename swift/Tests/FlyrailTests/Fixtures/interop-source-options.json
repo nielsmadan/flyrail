@@ -1,0 +1,13 @@
+{
+  "cases": [
+    ["--mode", "unknown"],
+    ["--mode", "private"],
+    ["--large", "1048577"],
+    ["--large", "0"],
+    ["--kind", "tree"],
+    ["--kind", "unknown"],
+    ["--section", "guide"],
+    ["--payload", "ignored"],
+    ["--version", "2"]
+  ]
+}
