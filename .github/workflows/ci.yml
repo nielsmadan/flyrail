@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: '17 4 * * *'
@@ -10,9 +11,73 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Affected checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      python: ${{ steps.select.outputs.python }}
+      rust: ${{ steps.select.outputs.rust }}
+      swift: ${{ steps.select.outputs.swift }}
+      workflow: ${{ steps.select.outputs.workflow }}
+    steps:
+      # Rust tests compare against Python, and Swift tests against Python and Rust.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            shared: &shared
+              - 'spec/**'
+              - '.github/workflows/**'
+              - 'Justfile'
+              - 'lefthook.yml'
+            python: &python
+              - *shared
+              - 'python/**'
+            rust: &rust
+              - *python
+              - 'rust/**'
+              - 'rust-toolchain.toml'
+            swift:
+              - *rust
+              - 'swift/**'
+              - 'Package.swift'
+              - 'Package.resolved'
+            workflow:
+              - '.github/**'
+      - name: Select affected checks
+        id: select
+        env:
+          # The pull request files API lists at most 3000 files.
+          RUN_ALL: ${{ github.event_name != 'pull_request' || github.event.pull_request.changed_files >= 3000 }}
+          PYTHON: ${{ steps.filter.outputs.python }}
+          RUST: ${{ steps.filter.outputs.rust }}
+          SWIFT: ${{ steps.filter.outputs.swift }}
+          WORKFLOW: ${{ steps.filter.outputs.workflow }}
+        run: |
+          if [ "$RUN_ALL" = true ]; then
+            PYTHON=true RUST=true SWIFT=true WORKFLOW=true
+          fi
+          {
+            echo "python=$PYTHON"
+            echo "rust=$RUST"
+            echo "swift=$SWIFT"
+            echo "workflow=$WORKFLOW"
+          } >> "$GITHUB_OUTPUT"
+
   check:
     name: Python (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -55,6 +120,8 @@ jobs:
 
   rust-check:
     name: Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -112,6 +179,71 @@ jobs:
         env:
           FLYRAIL_DIFFERENTIAL_PYTHON: ../python/.venv/bin/python
         run: cargo test --workspace
+
+  swift-check:
+    name: Swift (macos-26)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.12.13'
+          enable-cache: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+      - name: Install pinned SwiftFormat and SwiftLint
+        run: |
+          tools="$RUNNER_TEMP/swift-tools"
+          mkdir -p "$tools"
+          curl --fail --silent --show-error --location \
+            https://github.com/nicklockwood/SwiftFormat/releases/download/0.64.0/swiftformat.zip \
+            --output "$tools/swiftformat.zip"
+          curl --fail --silent --show-error --location \
+            https://github.com/realm/SwiftLint/releases/download/0.65.1/portable_swiftlint.zip \
+            --output "$tools/swiftlint.zip"
+          printf '%s  %s\n' \
+            95ea62625d0b898a7af870293311ae6f09e4a3147ecd900593687e4b9ab2fd98 \
+            "$tools/swiftformat.zip" \
+            c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0 \
+            "$tools/swiftlint.zip" | shasum -a 256 --check --strict
+          unzip -o -q "$tools/swiftformat.zip" swiftformat -d "$tools"
+          unzip -o -q "$tools/swiftlint.zip" swiftlint -d "$tools"
+          echo "$tools" >> "$GITHUB_PATH"
+      - name: Require pinned Swift prerequisites
+        run: |
+          swift --version
+          python -c "import sys; assert sys.version_info[:2] == (3, 14)"
+          test "$(swiftformat --version)" = "0.64.0"
+          test "$(swiftlint version)" = "0.65.1"
+      - name: Provision pinned Python differential environment
+        run: python python/scripts/check.py sync
+      # Swift reference tests run cargo offline against this checkout-local CARGO_HOME.
+      - name: Fetch Rust reference dependencies
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.cache/cargo-home
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - name: Swift case folding
+        run: python -B swift/scripts/check_case_folding.py
+      - name: Swift formatting
+        run: swiftformat --lint --config swift/.swiftformat swift/Sources swift/Tests
+      - name: Swift lint
+        run: swiftlint lint --strict --config swift/.swiftlint.yml swift/Sources swift/Tests
+      - name: Swift build
+        run: swift build -Xswiftc -warnings-as-errors
+      - name: Swift tests
+        run: swift test -Xswiftc -warnings-as-errors
 
   rust-integration:
     name: Rust integration (${{ matrix.os }})
@@ -215,6 +347,8 @@ jobs:
 
   audit-dependencies:
     name: Dependency audit
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -233,6 +367,8 @@ jobs:
 
   check-workflow:
     name: Workflow validation
+    needs: changes
+    if: needs.changes.outputs.workflow == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -255,3 +391,23 @@ jobs:
           tar -xzf .cache/tools/actionlint/archive.tar.gz -C .cache/tools/actionlint actionlint
       - name: Validate workflows
         run: python python/scripts/check.py check-workflow
+
+  result:
+    name: CI result
+    if: always()
+    # swift-check stays non-blocking until Swift adopts the app-supplied state store.
+    needs:
+      - changes
+      - check
+      - rust-check
+      - rust-integration
+      - integration
+      - audit-dependencies
+      - check-workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected check to pass
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: test "$FAILED" = false

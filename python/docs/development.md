@@ -127,17 +127,38 @@ and verifies its base against `uv python find --system --managed-python`.
 All four jobs must pass before a release claims those platforms. Windows 2025 is
 not in the matrix: the suite has never passed there, so Windows is unsupported.
 
-Every push and pull request runs the fast tier. The integration matrix runs on the
-nightly schedule and on workflow dispatch, and the release workflow runs both tiers
-on every supported platform, so no release publishes without integration results.
+Pushes to `main`, the nightly schedule and workflow dispatch run every fast-tier
+job. Pull requests run only the jobs their changed paths affect, and a newer push
+to the same pull request cancels the older run. Rust tests compare against Python
+and Swift tests against Python and Rust, so a change runs its own language and
+every language that depends on it. The path filters in the workflow's `changes`
+job are the source of truth:
 
-Workflows use pinned action commits, pinned uv, a
-checksum-pinned actionlint archive and read-only repository permissions.
+| Changed paths | Jobs |
+| --- | --- |
+| `python/**`, `spec/**`, `Justfile`, `lefthook.yml` | Python, dependency audit, Rust, Swift |
+| `rust/**`, `rust-toolchain.toml` | Rust, Swift |
+| `swift/**`, `Package.swift`, `Package.resolved` | Swift |
+| `.github/workflows/**` | all, including workflow validation |
+| other `.github/**` | workflow validation |
 
-[Dependabot](../../.github/dependabot.yml) groups weekly Python dependency updates
-under `/python` and GitHub Actions updates separately. Keep Hatchling's build and
-dev pins consistent. Update uv/actionlint versions and checksums explicitly; they
-are embedded tool versions, separate from action versions.
+Pull requests listing 3000 or more files run every job, because the pull request
+files API stops there. The `CI result` job passes when every selected job passed
+or was skipped; make it the single required status check. The Swift job runs on
+macOS 26 with pinned SwiftFormat and SwiftLint, and stays outside `CI result`
+until Swift adopts the app-supplied state store. The integration matrix runs on
+the nightly schedule and on workflow dispatch, and the release workflow runs both
+tiers on every supported platform, so no release publishes without integration
+results.
+
+Workflows use pinned action commits, pinned uv, checksum-pinned actionlint,
+SwiftFormat and SwiftLint archives, and read-only repository permissions.
+
+[Dependabot](../../.github/dependabot.yml) groups weekly updates per ecosystem:
+Python under `/python`, Cargo under `/rust`, Swift packages at the root, and
+GitHub Actions. Keep Hatchling's build and dev pins consistent. Update the uv,
+actionlint, SwiftFormat and SwiftLint versions and checksums explicitly; they are
+embedded tool versions, separate from action versions.
 
 ## Releasing Python
 

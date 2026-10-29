@@ -57,17 +57,19 @@ prerequisite or shared fixture is unavailable.
 
 ## CI and maintenance
 
-[CI](../../.github/workflows/ci.yml) runs Rust checks on Ubuntu 24.04 and macOS 15.
+[CI](../../.github/workflows/ci.yml) runs Rust checks on Ubuntu 24.04 and macOS 15
+for changes under `rust/`, `python/` and shared paths; see the
+[path selection table](../../python/docs/development.md#ci-and-maintenance).
 Acceptance jobs provision the pinned Python, Node/npm, and Bun prerequisites.
 Integration coverage runs the shared fixtures, Python/Rust differential and
 operational interop pairs, packaged hook runtime, examples, and native security
 tests on both supported operating systems.
 
 Workflow actions are commit-pinned. [Dependabot](../../.github/dependabot.yml)
-groups weekly Cargo updates under `/rust`, Python updates under `/python`, and
-GitHub Actions updates separately. The root [lefthook](../../lefthook.yml) runs
-the shared fast gate and Rustfmt/Clippy checks without installing or activating
-anything itself.
+groups weekly Cargo updates under `/rust`, Python updates under `/python`, Swift
+package updates at the root, and GitHub Actions updates separately. The root
+[lefthook](../../lefthook.yml) runs the shared fast gate and Rustfmt/Clippy checks
+without installing or activating anything itself.
 
 The package QA script creates archives and vendored consumers below ignored cache
 directories. It does not publish a crate. This repository has no Rust publishing

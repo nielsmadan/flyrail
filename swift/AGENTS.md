@@ -8,7 +8,9 @@ agent selection.
 Use `just check` for formatting, lint, warnings-as-errors build, unit tests, and
 the value differential. SwiftPM commands run through the root package and keep
 build outputs under the repository `.cache`. Set
-`FLYRAIL_SWIFT_DISABLE_SANDBOX=1` under nono.
+`FLYRAIL_SWIFT_DISABLE_SANDBOX=1` under nono. CI pins SwiftFormat 0.64.0 and
+SwiftLint 0.65.1; use the same versions locally. CI path selection is described
+in `../python/docs/development.md` under "CI and maintenance".
 
 Tests use checkout-local fixtures and temporary roots. Do not read or write real
 agent configuration. Shared conformance fixtures live in `../spec/fixtures`.
