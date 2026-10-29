@@ -22,23 +22,27 @@ func nativeSameGenerationRepairRollbackRetainsModifiedPreimage() throws {
     let plan = try NativeResourcePlanner.plan(
         ref, observation: NativeAdmission.observe(ref, lock: lock), bundleID: "team",
         bundle: bundle, rendered: rendered, artifacts: rendered.artifacts,
-        acquisition: .conflict, replaceModified: true, transactionID: previous.transactionID
+        acquisition: .conflict, replaceModified: true, transactionID: previous.transactionID,
     )
     #expect(plan.receipt.transactionID != previous.transactionID)
     let journal = try NativeTransaction.prepare(plan, lock: lock)
     let interrupted = NativeTransactionSeam {
-        if $0 == "backup" { throw TargetError(code: .ioError, message: "backup interrupted") }
+        if $0 == "backup" {
+            throw TargetError(code: .ioError, message: "backup interrupted")
+        }
     }
     expectNativeError(.ioError) { try NativeTransaction.publish(journal, lock: lock, seam: interrupted) }
     #expect(try NativeObservation.snapshot(path).revision.nodes.isEmpty)
     #expect(try NativeObservation.snapshot(NativeTransaction.path(ref, "backup/resource")).revision == original)
     #expect(try NativeObservation.snapshot(NativeTransaction.path(ref, "staging/resource")).revision == journal.staged)
     #expect(try NativeObservation.read(
-        NativeTransaction.path(ref, "transaction.json"), as: Journal.self, tag: "Journal"
+        NativeTransaction.path(ref, "transaction.json"), as: Journal.self, tag: "Journal",
     ) == journal)
     expectNativeError(.ioError) {
         try NativeTransaction.recover(ref, lock: lock, seam: NativeTransactionSeam {
-            if $0 == "rollback-backup" { throw TargetError(code: .ioError, message: "rollback interrupted") }
+            if $0 == "rollback-backup" {
+                throw TargetError(code: .ioError, message: "rollback interrupted")
+            }
         })
     }
     #expect(try NativeObservation.snapshot(path).revision == original)
@@ -65,8 +69,10 @@ func nativeSameGenerationRepairFaultIsNotReportedAsCommitted() throws {
     let before = try NativeObservation.snapshot(path).revision
     let result = try transactionWrite(
         bundle, rendered: rendered, target: target, replaceModified: true, seam: NativeTransactionSeam {
-            if $0 == "backup" { throw TargetError(code: .ioError, message: "backup interrupted") }
-        }
+            if $0 == "backup" {
+                throw TargetError(code: .ioError, message: "backup interrupted")
+            }
+        },
     )
     #expect(result.status == .failed)
     #expect(result.resources.map(\.status) == [.failed])
@@ -139,7 +145,7 @@ func nativeOversizedRepairPreservesExistingIndexAndCanBeRemoved() throws {
     #expect(try NativeObservation.snapshot(root.path) == before)
     #expect(try NativeTransactionDriver.write(
         bundle: nil, bundleID: "team", rendered: .empty, target: target, acquisition: .conflict,
-        replaceModified: true, timeout: .zero
+        replaceModified: true, timeout: .zero,
     ).status == .applied)
     #expect(try NativeObservation.snapshot(path).revision.nodes.isEmpty)
 }
@@ -214,7 +220,7 @@ func nativeIntactStructuredMemberDoesNotRequireItsBaselineAnchorsForObservation(
         format: .json, selector: Selector(parts: [
             .key(Key("items")), .member(Member(identity: .scalar(.text("x")), key: ["id"])),
         ]),
-        value: .object([("id", .scalar(.text("x"))), ("v", .scalar(.integer(2)))])
+        value: .object([("id", .scalar(.text("x"))), ("v", .scalar(.integer(2)))]),
     )
     let rendered = try RenderedBundle(artifacts: [
         RenderedArtifact(id: "guide", family: .instructions, destination: path, content: .structured(content)),

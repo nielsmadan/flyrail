@@ -58,25 +58,25 @@ func strictJSONEnforcesEveryLimit() {
     #expect(throws: FlyrailValueError.self) {
         try JSONParser.parse(
             Data("null".utf8),
-            limits: JSONLimits(maximumInputBytes: 3, maximumDepth: 2, maximumTokens: 2, maximumStringBytes: 2)
+            limits: JSONLimits(maximumInputBytes: 3, maximumDepth: 2, maximumTokens: 2, maximumStringBytes: 2),
         )
     }
     #expect(throws: FlyrailValueError.self) {
         try JSONParser.parse(
             Data("[[null]]".utf8),
-            limits: JSONLimits(maximumInputBytes: 20, maximumDepth: 1, maximumTokens: 10, maximumStringBytes: 10)
+            limits: JSONLimits(maximumInputBytes: 20, maximumDepth: 1, maximumTokens: 10, maximumStringBytes: 10),
         )
     }
     #expect(throws: FlyrailValueError.self) {
         try JSONParser.parse(
             Data("[null,null]".utf8),
-            limits: JSONLimits(maximumInputBytes: 20, maximumDepth: 2, maximumTokens: 2, maximumStringBytes: 10)
+            limits: JSONLimits(maximumInputBytes: 20, maximumDepth: 2, maximumTokens: 2, maximumStringBytes: 10),
         )
     }
     #expect(throws: FlyrailValueError.self) {
         try JSONParser.parse(
             Data(#""abc""#.utf8),
-            limits: JSONLimits(maximumInputBytes: 20, maximumDepth: 2, maximumTokens: 2, maximumStringBytes: 2)
+            limits: JSONLimits(maximumInputBytes: 20, maximumDepth: 2, maximumTokens: 2, maximumStringBytes: 2),
         )
     }
 }

@@ -94,7 +94,9 @@ package extension InteropDifferential {
                 guard row.count >= 2 else { throw FlyrailValueError("invalid differential row") }
                 try validateIdentifier(row[1], label: "differential case")
             }
-            func category(_ name: String) -> [[String]] { rows.filter { $0[0] == name } }
+            func category(_ name: String) -> [[String]] {
+                rows.filter { $0[0] == name }
+            }
             values = try category("value").map(Self.value)
             bundles = try category("bundle").map(Self.bundle)
             renders = try category("render").map(Self.render)
@@ -134,7 +136,9 @@ package extension InteropDifferential {
                 format = .section
             } else if let structured = DocumentFormat(rawValue: row[2]) {
                 format = .structured(structured)
-            } else { throw FlyrailValueError("invalid differential document format") }
+            } else {
+                throw FlyrailValueError("invalid differential document format")
+            }
             let operations = try stride(from: 5, to: row.count, by: 3).map { index -> EditOperation in
                 if row[index] == "set", let acquisition = Acquisition(rawValue: row[index + 2]) {
                     return .set(text: row[index + 1], acquisition: acquisition)

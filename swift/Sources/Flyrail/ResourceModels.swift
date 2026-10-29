@@ -21,8 +21,13 @@ public struct Count: Sendable, Hashable, Comparable, ExpressibleByIntegerLiteral
         self.decimal = decimal
     }
 
-    public var uint64: UInt64? { UInt64(decimal) }
-    public var uint32: UInt32? { UInt32(decimal) }
+    public var uint64: UInt64? {
+        UInt64(decimal)
+    }
+
+    public var uint32: UInt32? {
+        UInt32(decimal)
+    }
 
     public static func < (left: Self, right: Self) -> Bool {
         left.decimal.utf8.count == right.decimal.utf8.count
@@ -48,7 +53,7 @@ public struct Ancestor: Sendable, Hashable {
 
     public init(
         path: ResourcePath, device: Count, inode: Count, mode: Count,
-        uid: Count, gid: Count, security: Data = Data()
+        uid: Count, gid: Count, security: Data = Data(),
     ) throws {
         _ = try statePathText(path)
         guard mode <= 0o7777 else { throw FlyrailValueError("invalid ancestor metadata") }
@@ -74,9 +79,11 @@ public struct Node: Sendable, Hashable {
 
     public init(
         path: String, data: Data?, mode: Count, uid: Count, gid: Count,
-        device: Count, inode: Count, security: Data = Data()
+        device: Count, inode: Count, security: Data = Data(),
     ) throws {
-        if !path.isEmpty { try validateRelativePath(path, label: "revision path") }
+        if !path.isEmpty {
+            try validateRelativePath(path, label: "revision path")
+        }
         guard mode <= 0o777 else { throw FlyrailValueError("invalid revision metadata") }
         self.path = path
         self.data = data
@@ -128,7 +135,9 @@ public struct Revision: Sendable, Hashable {
         self.nodes = nodes
     }
 
-    public var data: Data? { nodes.first?.data }
+    public var data: Data? {
+        nodes.first?.data
+    }
 
     public var contentDigest: String {
         get throws {
@@ -147,7 +156,7 @@ public struct ResourceRef: Sendable, Hashable {
 
     public init(
         destination: ResourcePath, kind: ResourceKind, stateRoot: ResourcePath,
-        schemaVersion: Int = 2
+        schemaVersion: Int = 2,
     ) throws {
         guard schemaVersion == 2 else { throw FlyrailValueError("authority schema must be 2") }
         try requireResourcePath(destination)
@@ -198,7 +207,7 @@ public struct OwnedClaim: Sendable, Hashable {
         bundleDigest: String, renderDigest: String, selection: OwnedSelection? = nil,
         installed: Revision? = nil, disposition: Disposition = .created, baseline: Revision? = nil,
         requirements: [ClaimRequirement] = [], stableRequirements: [ClaimRequirement] = [],
-        schemaRequirements: [DocumentSchema] = []
+        schemaRequirements: [DocumentSchema] = [],
     ) throws {
         try hexadecimalIdentity(claimID)
         try validateIdentifier(bundleID, label: "owner")
@@ -227,7 +236,7 @@ public struct OwnedClaim: Sendable, Hashable {
 
 private func validateRequirements(
     _ requirements: [ClaimRequirement], _ stable: [ClaimRequirement],
-    _ schemas: [DocumentSchema], _ selection: OwnedSelection?
+    _ schemas: [DocumentSchema], _ selection: OwnedSelection?,
 ) throws {
     guard Set(requirements).count == requirements.count else {
         throw FlyrailValueError("duplicate claim requirement")
@@ -245,7 +254,7 @@ private func validateRequirements(
 
 private func validateOwnership(
     _ claim: Claim, _ selection: OwnedSelection?, _ installed: Revision?,
-    _ disposition: Disposition, _ baseline: Revision?
+    _ disposition: Disposition, _ baseline: Revision?,
 ) throws {
     if claim.kind == .section || claim.kind == .structured {
         guard selection?.claim == claim else {
@@ -280,7 +289,7 @@ public struct Receipt: Sendable, Hashable {
     public init(
         resource: ResourceRef, transactionID: String, claims: [OwnedClaim] = [],
         provenance: DocumentProvenance = DocumentProvenance(), createdDirectories: [Node] = [],
-        schemaVersion: Int = 2
+        schemaVersion: Int = 2,
     ) throws {
         guard schemaVersion == 2 else { throw FlyrailValueError("receipt schema must be 2") }
         try hexadecimalIdentity(transactionID, length: 32)
@@ -352,7 +361,7 @@ public struct Generation: Sendable, Hashable {
     public let membership: [GenerationMember]
 
     public init(
-        version: String, bundleDigest: String, renderDigest: String, membership: [GenerationMember]
+        version: String, bundleDigest: String, renderDigest: String, membership: [GenerationMember],
     ) throws {
         try validateVersion(version)
         try hexadecimalIdentity(bundleDigest)
@@ -378,7 +387,7 @@ public struct Index: Sendable, Hashable {
 
     public init(
         bundleID: String, contextDigest: String, current: Generation? = nil, pending: Generation? = nil,
-        previous: Generation? = nil, residual: [ResourceRef] = [], schemaVersion: Int = 2
+        previous: Generation? = nil, residual: [ResourceRef] = [], schemaVersion: Int = 2,
     ) throws {
         try validateIdentifier(bundleID, label: "index owner")
         try hexadecimalIdentity(contextDigest)
@@ -416,7 +425,7 @@ public struct Journal: Sendable, Hashable {
 
     public init(
         resource: ResourceRef, previous: Receipt?, receipt: Receipt, before: Revision, staged: Revision,
-        published: Revision, backup: Revision, ancestors: [Ancestor], schemaVersion: Int = 2
+        published: Revision, backup: Revision, ancestors: [Ancestor], schemaVersion: Int = 2,
     ) throws {
         guard receipt.resource == resource, previous == nil || previous?.resource == resource else {
             throw FlyrailValueError("journal receipt resources disagree")

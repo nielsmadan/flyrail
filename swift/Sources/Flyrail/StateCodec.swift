@@ -11,7 +11,7 @@ package enum StateCodec {
     }
 
     package static func decode<T: StateCodable>(
-        _ data: Data, as _: T.Type = T.self, limits: JSONLimits = .default
+        _ data: Data, as _: T.Type = T.self, limits: JSONLimits = .default,
     ) throws -> T {
         let raw = try parse(data, limits: limits)
         let result = try T.fromState(raw)
@@ -31,7 +31,7 @@ package enum StateCodec {
     }
 
     package static func decodeMetadata<T: StateCodable>(
-        _ data: Data, as _: T.Type, tag: String, limits: JSONLimits = .default
+        _ data: Data, as _: T.Type, tag: String, limits: JSONLimits = .default,
     ) throws -> T {
         let raw = try parse(data, limits: limits)
         let canonical = try canonicalRecord(raw)
@@ -262,7 +262,7 @@ package enum StateCodec {
         return try decode(value)
     }
 
-    private static func decoder<T: StateCodable>(_ type: T.Type) -> @Sendable (JSONValue) throws -> JSONValue {
+    private static func decoder<T: StateCodable>(_: T.Type) -> @Sendable (JSONValue) throws -> JSONValue {
         { try T.fromState($0).stateRecord() }
     }
 
@@ -344,9 +344,9 @@ package struct StateFields {
 
     package init(_ value: JSONValue, tag: String, names: [String]) throws {
         guard case let .object(items) = value, items.count == 2,
-              items.contains(where: { $0.0 == "type" && $0.1 == .string(tag) })
-        else { throw FlyrailValueError("invalid state record") }
-        guard let raw = items.first(where: { $0.0 == "fields" })?.1, case let .object(fields) = raw else {
+              items.contains(where: { $0.0 == "type" && $0.1 == .string(tag) }),
+              let raw = items.first(where: { $0.0 == "fields" })?.1, case let .object(fields) = raw
+        else {
             throw FlyrailValueError("invalid state record")
         }
         guard fields.count == names.count,
@@ -382,14 +382,19 @@ package struct StateFields {
         return 2
     }
 
-    package func bytes(_ name: String) throws -> Data { try StateCodec.decodeBytes(raw(name)) }
+    package func bytes(_ name: String) throws -> Data {
+        try StateCodec.decodeBytes(raw(name))
+    }
+
     package func path(_ name: String, message: String = "invalid state record") throws -> ResourcePath {
         let value = try raw(name)
         guard case .object = value else { throw FlyrailValueError(message) }
         return try StateCodec.decodePath(value)
     }
 
-    package func semantic(_ name: String) throws -> SemanticValue { try StateCodec.decodeSemantic(raw(name)) }
+    package func semantic(_ name: String) throws -> SemanticValue {
+        try StateCodec.decodeSemantic(raw(name))
+    }
 
     package func decode<T: StateCodable>(_ name: String, as _: T.Type = T.self) throws -> T {
         try T.fromState(raw(name))

@@ -98,8 +98,14 @@ private func summaryRouting<T: RawRepresentable>(_ value: String?, as type: T.Ty
 }
 
 private func changeAction(_ plan: ResourcePlan) -> ChangeAction {
-    if plan.error != nil || !plan.recoveryPaths.isEmpty { return .conflict }
-    if plan.previous == plan.receipt, plan.before == plan.after { return .unchanged }
-    if plan.after.nodes.isEmpty { return .delete }
+    if plan.error != nil || !plan.recoveryPaths.isEmpty {
+        return .conflict
+    }
+    if plan.previous == plan.receipt, plan.before == plan.after {
+        return .unchanged
+    }
+    if plan.after.nodes.isEmpty {
+        return .delete
+    }
     return plan.before.nodes.isEmpty ? .create : .update
 }

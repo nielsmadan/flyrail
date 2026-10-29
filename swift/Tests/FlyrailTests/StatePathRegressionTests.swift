@@ -17,7 +17,7 @@ func statePathSeparatorsAreExactScalarsInFullRecords() throws {
         #expect(throws: FlyrailValueError("state paths must be absolute without traversal")) {
             try ResourceRef(
                 destination: ResourcePath("/fixture/../\(mark)name"), kind: .document,
-                stateRoot: ResourcePath("/fixture/.flyrail-\(digest).state")
+                stateRoot: ResourcePath("/fixture/.flyrail-\(digest).state"),
             )
         }
         #expect(throws: FlyrailValueError("revision path must be an unambiguous relative path")) {
@@ -38,7 +38,7 @@ func stateExtendingPathRecords() throws -> [JSONValue] {
     try stateExtendingBasenames.flatMap { mark, digest in
         let resources = try ["/fixture", "/\(mark)parent", "//\(mark)parent"].map { parent in
             try ResourceRef.fromState(stateExtendingResource(
-                "\(parent)/\(mark)name", "\(parent)/.flyrail-\(digest).state"
+                "\(parent)/\(mark)name", "\(parent)/.flyrail-\(digest).state",
             ))
         }
         let revision = try Revision(nodes: [
@@ -49,12 +49,12 @@ func stateExtendingPathRecords() throws -> [JSONValue] {
             stateTestNode("\(mark)dir/\(mark)name", Data("x".utf8)),
         ])
         let ancestor = try Ancestor(
-            path: ResourcePath("/\(mark)parent/\(mark)name"), device: 0, inode: 0, mode: 0, uid: 0, gid: 0
+            path: ResourcePath("/\(mark)parent/\(mark)name"), device: 0, inode: 0, mode: 0, uid: 0, gid: 0,
         )
         return try resources.flatMap { resource in
             try [resource.stateRecord(), Receipt(
                 resource: resource, transactionID: String(repeating: "1", count: 32),
-                claims: [stateTestOwned(resource)]
+                claims: [stateTestOwned(resource)],
             ).stateRecord()]
         } + [
             revision.stateRecord(), markedRevision.stateRecord(), ancestor.stateRecord(),
@@ -69,7 +69,7 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
         var vectors: [StateCompatibilityVector] = []
         func append(_ tag: String, _ record: JSONValue, _ message: String) throws {
             try vectors.append(StateCompatibilityVector(
-                tag: tag, input: StateCodec.encodeRecord(record), message: message
+                tag: tag, input: StateCodec.encodeRecord(record), message: message,
             ))
         }
         for (destination, message) in [
@@ -84,14 +84,14 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
                 : "/fixture/.flyrail-\(digest).state"
             try append("ResourceRef", stateExtendingResource(destination, stateRoot), message)
             let ancestor = try Ancestor(
-                path: ResourcePath("/fixture/a"), device: 0, inode: 0, mode: 0, uid: 0, gid: 0
+                path: ResourcePath("/fixture/a"), device: 0, inode: 0, mode: 0, uid: 0, gid: 0,
             ).stateRecord()
             try append("Ancestor", stateReplacingField(
-                ancestor, "path", .object([("path", .string(destination))])
+                ancestor, "path", .object([("path", .string(destination))]),
             ), message)
         }
         try append("ResourceRef", stateExtendingResource(
-            "/fixture/\(mark)name", "/other/.flyrail-\(digest).state"
+            "/fixture/\(mark)name", "/other/.flyrail-\(digest).state",
         ), "resource state path disagrees with destination")
         for path in [
             "/\(mark)name", "a/../\(mark)name", "a/./\(mark)name", "a//\(mark)name", "a/\(mark)name/",
@@ -110,14 +110,14 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
                        "revision parents must be directories")
         }
         let resource = try ResourceRef.fromState(stateExtendingResource(
-            "/fixture/\(mark)name", "/fixture/.flyrail-\(digest).state"
+            "/fixture/\(mark)name", "/fixture/.flyrail-\(digest).state",
         ))
         let receipt = try Receipt(
-            resource: resource, transactionID: String(repeating: "1", count: 32), claims: [stateTestOwned(resource)]
+            resource: resource, transactionID: String(repeating: "1", count: 32), claims: [stateTestOwned(resource)],
         ).stateRecord()
         let provenance = try stateReplacingField(
             stateField(stateField(receipt, "fields"), "provenance"),
-            "empty_document", .object([("bytes", .string("f"))])
+            "empty_document", .object([("bytes", .string("f"))]),
         )
         try append("Receipt", stateReplacingField(receipt, "provenance", provenance),
                    "non-hexadecimal number found in fromhex() arg at position 1")

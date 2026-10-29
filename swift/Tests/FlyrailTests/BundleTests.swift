@@ -52,7 +52,7 @@ func packagedBundleFixtureMatchesRoot() throws {
     let packagedURL = try #require(Bundle.module.url(
         forResource: "bundles",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     let packaged = try Data(contentsOf: packagedURL)
     #expect(try packaged == Data(contentsOf: repositoryFile("spec/fixtures/bundles.json")))
@@ -106,11 +106,11 @@ func directorySourceRejectsChangesObservedDuringLoading() throws {
 func memoryBundlesInferDirectoriesAndRejectCollisions() throws {
     let manifest = Data(
         #"{"schema_version":1,"id":"team","version":"1","skills":[{"name":"review","path":"skills/review"}]}"#
-            .utf8
+            .utf8,
     )
     let bundle = try FlyrailBundle(
         manifest: manifest,
-        entries: [BundleEntry(path: "skills/review/SKILL.md", data: Data())]
+        entries: [BundleEntry(path: "skills/review/SKILL.md", data: Data())],
     )
     #expect(bundle.entries.map(\.path) == ["review", "review/SKILL.md"])
     #expect(throws: FlyrailValueError.self) {
@@ -119,7 +119,7 @@ func memoryBundlesInferDirectoriesAndRejectCollisions() throws {
             entries: [
                 BundleEntry(path: "skills/review/SKILL.md", data: Data()),
                 BundleEntry(path: "skills/REVIEW/other", data: Data()),
-            ]
+            ],
         )
     }
     #expect(throws: FlyrailValueError.self) {
@@ -148,7 +148,7 @@ func schemaOneManifestValidationIsStrict() throws {
     #expect(throws: FlyrailValueError.self) {
         try FlyrailBundle(
             manifest: Data([0xEF, 0xBB, 0xBF] + Array(valid.utf8)),
-            entries: []
+            entries: [],
         )
     }
 }
@@ -172,7 +172,7 @@ func directorySourcesRejectLinksSpecialFilesAndPortableCollisions() throws {
     try FileManager.default.removeItem(at: skill.appending(path: "same"))
     try FileManager.default.createSymbolicLink(
         at: skill.appending(path: "linked"),
-        withDestinationURL: skill.appending(path: "SKILL.md")
+        withDestinationURL: skill.appending(path: "SKILL.md"),
     )
     #expect(throws: FlyrailValueError.self) {
         try FlyrailBundle(directory: ResourcePath(root.path))
@@ -204,7 +204,7 @@ private func bundleFixture() throws -> [String: Any] {
     let url = try #require(Bundle.module.url(
         forResource: "bundles",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     return try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
 }
@@ -216,7 +216,7 @@ private func fixtureSourceEntries(_ rawCase: [String: Any]) throws -> [BundleEnt
     for file in rawCase["files"] as? [[String: Any]] ?? [] {
         try result.append(BundleEntry(
             path: #require(file["path"] as? String),
-            data: Data(interopHex: #require(file["data_hex"] as? String))
+            data: Data(interopHex: #require(file["data_hex"] as? String)),
         ))
     }
     return result
@@ -228,7 +228,7 @@ private func fixtureExpectedEntries(_ rawCase: [String: Any]) throws -> [BundleE
         return try BundleEntry(
             path: #require(entry["path"] as? String),
             data: text.map { try Data(interopHex: $0) },
-            executable: entry["executable"] as? Bool ?? false
+            executable: entry["executable"] as? Bool ?? false,
         )
     }
 }
@@ -237,20 +237,20 @@ private func writeFixtureCase(_ rawCase: [String: Any], to root: URL) throws {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     let manifest = try JSONSerialization.data(
         withJSONObject: rawCase["manifest"] as? [String: Any] ?? [:],
-        options: [.sortedKeys]
+        options: [.sortedKeys],
     )
     try manifest.write(to: root.appending(path: "flyrail.json"))
     for directory in rawCase["directories"] as? [String] ?? [] {
         try FileManager.default.createDirectory(
             at: root.appending(path: directory),
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
         )
     }
     for file in rawCase["files"] as? [[String: Any]] ?? [] {
         let path = try root.appending(path: #require(file["path"] as? String))
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
         )
         try Data(interopHex: #require(file["data_hex"] as? String)).write(to: path)
     }
@@ -262,8 +262,8 @@ private func fixtureArchive(_ rawCase: [String: Any]) throws -> Data {
             "flyrail/flyrail.json",
             JSONSerialization.data(
                 withJSONObject: rawCase["manifest"] as? [String: Any] ?? [:],
-                options: [.sortedKeys]
-            )
+                options: [.sortedKeys],
+            ),
         ),
     ]
     members.append(contentsOf: (rawCase["directories"] as? [String] ?? []).map {
@@ -272,7 +272,7 @@ private func fixtureArchive(_ rawCase: [String: Any]) throws -> Data {
     for file in rawCase["files"] as? [[String: Any]] ?? [] {
         try members.append((
             "flyrail/\(#require(file["path"] as? String))",
-            Data(interopHex: #require(file["data_hex"] as? String))
+            Data(interopHex: #require(file["data_hex"] as? String)),
         ))
     }
     var body = Data()

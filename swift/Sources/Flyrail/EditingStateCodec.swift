@@ -24,7 +24,9 @@ extension DocumentFormat: StateEnumeration { package static let stateTag = "Docu
 extension ResourceKind: StateEnumeration { package static let stateTag = "ResourceKind" }
 
 extension Key: StateCodable {
-    package func stateRecord() -> JSONValue { StateCodec.record("Key", [("name", .string(name))]) }
+    package func stateRecord() -> JSONValue {
+        StateCodec.record("Key", [("name", .string(name))])
+    }
 
     package static func fromState(_ value: JSONValue) throws -> Self {
         try Self(StateFields(value, tag: "Key", names: ["name"]).text("name"))
@@ -145,7 +147,7 @@ extension ArrayPosition: StateCodable {
         let fields = try StateFields(value, tag: "ArrayPosition", names: ["previous", "following", "prefix"])
         return try Self(
             previous: fields.optional("previous"), following: fields.optional("following"),
-            prefix: fields.bytes("prefix")
+            prefix: fields.bytes("prefix"),
         )
     }
 }
@@ -165,7 +167,7 @@ extension SelectionSnapshot: StateCodable {
 
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
-            value, tag: "SelectionSnapshot", names: ["value", "syntax", "owned_syntax", "position", "layout"]
+            value, tag: "SelectionSnapshot", names: ["value", "syntax", "owned_syntax", "position", "layout"],
         )
         let raw = try fields.raw("value")
         let snapshot: SnapshotValue = if case let .object(items) = raw, items.count == 1, items[0].0 == "bytes" {
@@ -175,7 +177,7 @@ extension SelectionSnapshot: StateCodable {
         }
         return try Self(
             value: snapshot, syntax: fields.bytes("syntax"), ownedSyntax: fields.bytes("owned_syntax"),
-            position: fields.optional("position"), layout: fields.bytes("layout")
+            position: fields.optional("position"), layout: fields.bytes("layout"),
         )
     }
 }
@@ -192,12 +194,12 @@ extension OwnedSelection: StateCodable {
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
             value, tag: "OwnedSelection",
-            names: ["claim", "format", "installed", "disposition", "baseline", "separator"]
+            names: ["claim", "format", "installed", "disposition", "baseline", "separator"],
         )
         return try Self(
             claim: fields.decode("claim"), format: fields.optional("format"), installed: fields.decode("installed"),
             disposition: fields.decode("disposition"), baseline: fields.optional("baseline"),
-            separator: fields.bytes("separator")
+            separator: fields.bytes("separator"),
         )
     }
 }
@@ -229,7 +231,7 @@ extension DocumentProvenance: StateCodable {
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
             value, tag: "DocumentProvenance",
-            names: ["empty_document", "containers", "trailing_separators", "schema_fields", "schema_empty_document"]
+            names: ["empty_document", "containers", "trailing_separators", "schema_fields", "schema_empty_document"],
         )
         let schemaEmptyDocument = try fields.raw("schema_empty_document")
         guard schemaEmptyDocument == .null || schemaEmptyDocument.isStateByteRecord else {
@@ -241,7 +243,7 @@ extension DocumentProvenance: StateCodable {
                 try stateText($0, message: "separator evidence must be SHA-256 digests")
             },
             schemaFields: fields.sequence("schema_fields"),
-            schemaEmptyDocument: fields.optionalBytes("schema_empty_document")
+            schemaEmptyDocument: fields.optionalBytes("schema_empty_document"),
         )
     }
 }

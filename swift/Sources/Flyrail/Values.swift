@@ -342,7 +342,7 @@ package func hashExactText(_ value: String, into hasher: inout Hasher) {
 }
 
 private func canonicalObjectItems(
-    _ items: [(String, SemanticValue)]
+    _ items: [(String, SemanticValue)],
 ) throws -> [(String, SemanticValue)] {
     let sorted = items.sorted { utf8Less($0.0, $1.0) }
     guard !zip(sorted, sorted.dropFirst()).contains(where: { exactTextEqual($0.0.0, $0.1.0) }) else {
@@ -352,7 +352,7 @@ private func canonicalObjectItems(
 }
 
 private func sortedObjectItems(
-    _ items: [(String, SemanticValue)]
+    _ items: [(String, SemanticValue)],
 ) -> [(String, SemanticValue)] {
     items.sorted { utf8Less($0.0, $1.0) }
 }
@@ -378,7 +378,7 @@ private func parsePythonHex(_ text: String) throws -> Double {
     let literal = unsigned.dropFirst(2)
     let exponentParts = literal.split(
         omittingEmptySubsequences: false,
-        whereSeparator: { $0 == "p" || $0 == "P" }
+        whereSeparator: { $0 == "p" || $0 == "P" },
     )
     guard exponentParts.count <= 2 else {
         throw malformed

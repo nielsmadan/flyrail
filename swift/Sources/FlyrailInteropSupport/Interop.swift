@@ -2,12 +2,12 @@ import Flyrail
 import Foundation
 
 package func runInterop(
-    arguments: [String], standardInput: FileHandle, standardOutput: FileHandle, standardError: FileHandle
+    arguments: [String], standardInput: FileHandle, standardOutput: FileHandle, standardError: FileHandle,
 ) -> Int32 {
     do {
         guard let name = arguments.first, let command = InteropCommand(rawValue: name) else {
             throw FlyrailValueError(
-                "usage: FlyrailInterop differential|render-hooks|encode|decode|write|inspect|remove|recover|records|hold|observe [options]"
+                "usage: FlyrailInterop differential|render-hooks|encode|decode|write|inspect|remove|recover|records|hold|observe [options]",
             )
         }
         if command == .differential {

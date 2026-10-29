@@ -5,3 +5,4 @@
 --semicolons inline
 --swiftversion 6.2
 --maxwidth 120
+--disable swiftTestingTestCaseNames

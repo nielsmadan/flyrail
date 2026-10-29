@@ -9,20 +9,20 @@ package struct ParsedConfiguration {
 
 package func readConfigurationManifest(
     _ data: Data,
-    source: some BundleSource
+    source: some BundleSource,
 ) throws -> ParsedConfiguration {
     let raw = try parseManifestJSON(data)
     let fields = try configObject(
         raw,
         required: ["schema_version", "id", "version", "artifacts"],
-        optional: ["assets", "dependencies"]
+        optional: ["assets", "dependencies"],
     )
     guard configValue(fields, "schema_version")?.signedInteger == 2 else {
         throw FlyrailValueError("configuration schema_version must be integer 2")
     }
     let identity = try BundleIdentity(
         id: configString(configValue(fields, "id"), label: "bundle id"),
-        version: configString(configValue(fields, "version"), label: "version")
+        version: configString(configValue(fields, "version"), label: "version"),
     )
     let artifacts = try configList(configValue(fields, "artifacts")).map {
         try parseArtifact($0, source: source)
@@ -35,7 +35,7 @@ package func readConfigurationManifest(
         identity: identity,
         artifacts: artifacts,
         assets: assets,
-        dependencies: dependencies
+        dependencies: dependencies,
     )
 }
 
@@ -47,7 +47,7 @@ private func parseArtifact(_ raw: JSONValue, source: some BundleSource) throws -
             "name", "path", "executables", "text", "transport", "event", "command",
             "timeout_ms", "outcomes", "tools", "protocol_version", "family", "audience",
             "destination", "content",
-        ]
+        ],
     )
     let id = try configString(configValue(header, "id"), label: "artifact id")
     switch try configString(configValue(header, "kind"), label: "artifact kind") {
@@ -55,24 +55,24 @@ private func parseArtifact(_ raw: JSONValue, source: some BundleSource) throws -
         let fields = try configObject(
             raw,
             required: ["kind", "id", "name", "path"],
-            optional: ["executables"]
+            optional: ["executables"],
         )
         return try .skill(SkillArtifact(
             id: id,
             name: configString(configValue(fields, "name"), label: "skill name"),
-            content: parseTree(fields, source: source)
+            content: parseTree(fields, source: source),
         ))
     case "instruction":
         let fields = try configObject(raw, required: ["kind", "id"], optional: ["text", "path"])
         return try .instruction(InstructionArtifact(
             id: id,
-            text: parseText(fields, source: source)
+            text: parseText(fields, source: source),
         ))
     case "mcp":
         let fields = try configObject(
             raw,
             required: ["kind", "id", "name", "transport"],
-            optional: []
+            optional: [],
         )
         guard let transport = configValue(fields, "transport") else {
             throw FlyrailValueError("MCP artifacts require a transport")
@@ -80,7 +80,7 @@ private func parseArtifact(_ raw: JSONValue, source: some BundleSource) throws -
         return try .mcp(MCPArtifact(
             id: id,
             name: configString(configValue(fields, "name"), label: "MCP server name"),
-            transport: parseTransport(transport)
+            transport: parseTransport(transport),
         ))
     case "hook":
         return try .hook(parseHookArtifact(raw, id: id))
@@ -95,7 +95,7 @@ private func parseHookArtifact(_ raw: JSONValue, id: String) throws -> HookArtif
     let fields = try configObject(
         raw,
         required: ["kind", "id", "event", "command", "protocol_version"],
-        optional: ["timeout_ms", "outcomes", "tools"]
+        optional: ["timeout_ms", "outcomes", "tools"],
     )
     guard configValue(fields, "protocol_version")?.signedInteger == 1 else {
         throw FlyrailValueError("hook protocol_version must be integer 1")
@@ -136,19 +136,19 @@ private func parseHookArtifact(_ raw: JSONValue, id: String) throws -> HookArtif
         command: parseCommand(rawCommand),
         timeoutMilliseconds: timeout,
         outcomes: outcomes,
-        tools: tools
+        tools: tools,
     )
 }
 
 private func parseNativeArtifact(
     _ raw: JSONValue,
     id: String,
-    source: some BundleSource
+    source: some BundleSource,
 ) throws -> NativeArtifact {
     let fields = try configObject(
         raw,
         required: ["kind", "id", "family", "audience", "destination", "content"],
-        optional: []
+        optional: [],
     )
     guard let rawAudience = configValue(fields, "audience"),
           let rawContent = configValue(fields, "content")
@@ -160,11 +160,11 @@ private func parseNativeArtifact(
         family: parseEnum(
             configValue(fields, "family"),
             label: "native family",
-            as: Family.self
+            as: Family.self,
         ),
         audience: parseAudience(rawAudience),
         destination: sourcePath(configValue(fields, "destination")),
-        content: parseContent(rawContent, source: source)
+        content: parseContent(rawContent, source: source),
     )
 }
 
@@ -172,12 +172,12 @@ private func parseAsset(_ raw: JSONValue, source: some BundleSource) throws -> S
     let fields = try configObject(
         raw,
         required: ["id", "family", "path"],
-        optional: ["executables"]
+        optional: ["executables"],
     )
     return try SupportAsset(
         id: configString(configValue(fields, "id"), label: "asset id"),
         family: parseEnum(configValue(fields, "family"), label: "asset family", as: Family.self),
-        content: parseTree(fields, source: source)
+        content: parseTree(fields, source: source),
     )
 }
 
@@ -191,7 +191,7 @@ private func parseDependency(_ raw: JSONValue) throws -> Dependency {
     return try Dependency(
         dependent: configString(configValue(fields, "dependent"), label: "dependent"),
         required: configString(configValue(fields, "required"), label: "required"),
-        mode: mode
+        mode: mode,
     )
 }
 
@@ -199,7 +199,7 @@ private func parseAudience(_ raw: JSONValue) throws -> Audience {
     let fields = try configObject(
         raw,
         required: ["agent", "scope"],
-        optional: ["surface", "platform"]
+        optional: ["surface", "platform"],
     )
     let surface: Surface = if let value = configValue(fields, "surface") {
         try parseEnum(value, label: "surface", as: Surface.self)
@@ -215,7 +215,7 @@ private func parseAudience(_ raw: JSONValue) throws -> Audience {
         agent: parseEnum(configValue(fields, "agent"), label: "agent", as: Agent.self),
         scope: parseEnum(configValue(fields, "scope"), label: "scope", as: TargetScope.self),
         surface: surface,
-        platform: platform
+        platform: platform,
     )
 }
 
@@ -223,7 +223,7 @@ private func parseTransport(_ raw: JSONValue) throws -> MCPTransport {
     let header = try configObject(
         raw,
         required: ["kind"],
-        optional: ["command", "url", "bearer_token_env"]
+        optional: ["command", "url", "bearer_token_env"],
     )
     switch try configString(configValue(header, "kind"), label: "MCP transport") {
     case "stdio":
@@ -236,14 +236,14 @@ private func parseTransport(_ raw: JSONValue) throws -> MCPTransport {
         let fields = try configObject(
             raw,
             required: ["kind", "url"],
-            optional: ["bearer_token_env"]
+            optional: ["bearer_token_env"],
         )
         let token = try configValue(fields, "bearer_token_env").map {
             try EnvRef(configString($0, label: "bearer environment reference"))
         }
         return try .http(HttpTransport(
             url: configString(configValue(fields, "url"), label: "MCP URL"),
-            bearerToken: token
+            bearerToken: token,
         ))
     default:
         throw FlyrailValueError("unknown MCP transport")
@@ -264,7 +264,7 @@ private func parseCommand(_ raw: JSONValue) throws -> Command {
                 let reference = try configObject(rawValue, required: ["env"], optional: [])
                 value = try .reference(EnvRef(configString(
                     configValue(reference, "env"),
-                    label: "environment reference"
+                    label: "environment reference",
                 )))
             } else {
                 value = try .text(configString(rawValue, label: "environment value"))
@@ -277,7 +277,7 @@ private func parseCommand(_ raw: JSONValue) throws -> Command {
     return try Command(
         argv: argv,
         env: environment,
-        cwd: configValue(fields, "cwd").map(parseArgument)
+        cwd: configValue(fields, "cwd").map(parseArgument),
     )
 }
 
@@ -288,7 +288,7 @@ private func parseArgument(_ raw: JSONValue) throws -> CommandArgument {
     let fields = try configObject(raw, required: ["asset"], optional: ["path"])
     return try .asset(AssetRef(
         assetID: configString(configValue(fields, "asset"), label: "referenced asset id"),
-        path: configValue(fields, "path").map { try sourcePath($0) }
+        path: configValue(fields, "path").map { try sourcePath($0) },
     ))
 }
 
@@ -299,7 +299,7 @@ private func parseContent(_ raw: JSONValue, source: some BundleSource) throws ->
         optional: [
             "path", "text", "mode", "executables", "marker", "format", "selector",
             "value", "semantic_value", "placement", "boundaries",
-        ]
+        ],
     )
     guard case let .object(header) = raw else {
         throw FlyrailValueError("manifest records must be JSON objects")
@@ -314,38 +314,38 @@ private func parseContent(_ raw: JSONValue, source: some BundleSource) throws ->
         }
         return try .file(FileContent(
             data: source.readFile(path: sourcePath(configValue(fields, "path"))),
-            mode: mode
+            mode: mode,
         ))
     case "tree":
         let fields = try configObject(
             raw,
             required: ["kind", "path"],
-            optional: ["executables"]
+            optional: ["executables"],
         )
         return try .tree(parseTree(fields, source: source))
     case "section":
         let fields = try configObject(
             raw,
             required: ["kind", "marker"],
-            optional: ["text", "path", "boundaries"]
+            optional: ["text", "path", "boundaries"],
         )
         let boundaries = try configValue(fields, "boundaries").map { rawBoundaries in
             let values = try configObject(rawBoundaries, required: ["start", "end"], optional: [])
             return try SectionBoundaries(
                 start: configString(configValue(values, "start"), label: "start boundary"),
-                end: configString(configValue(values, "end"), label: "end boundary")
+                end: configString(configValue(values, "end"), label: "end boundary"),
             )
         }
         return try .section(SectionContent(
             marker: configString(configValue(fields, "marker"), label: "section marker"),
             text: parseText(fields, source: source),
-            boundaries: boundaries
+            boundaries: boundaries,
         ))
     case "structured":
         let fields = try configObject(
             raw,
             required: ["kind", "format", "selector"],
-            optional: ["value", "semantic_value", "placement"]
+            optional: ["value", "semantic_value", "placement"],
         )
         let placement = try configValue(fields, "placement").map(parsePlacement)
         guard let rawSelector = configValue(fields, "selector") else {
@@ -355,11 +355,11 @@ private func parseContent(_ raw: JSONValue, source: some BundleSource) throws ->
             format: parseEnum(
                 configValue(fields, "format"),
                 label: "document format",
-                as: DocumentFormat.self
+                as: DocumentFormat.self,
             ),
             selector: parseSelector(rawSelector),
             value: configSemanticValue(fields, plain: "value", typed: "semantic_value"),
-            placement: placement
+            placement: placement,
         ))
     default:
         throw FlyrailValueError("unknown native content kind")
@@ -368,7 +368,7 @@ private func parseContent(_ raw: JSONValue, source: some BundleSource) throws ->
 
 private func parseTree(
     _ fields: [(String, JSONValue)],
-    source: some BundleSource
+    source: some BundleSource,
 ) throws -> TreeContent {
     let executables = try configList(configValue(fields, "executables")).map(sourcePath)
     guard Set(executables).count == executables.count else {
@@ -385,7 +385,7 @@ private func parseTree(
 
 private func parseText(
     _ fields: [(String, JSONValue)],
-    source: some BundleSource
+    source: some BundleSource,
 ) throws -> String {
     let inline = configValue(fields, "text")
     let path = configValue(fields, "path")
@@ -415,14 +415,14 @@ private func parseMember(_ raw: JSONValue) throws -> Member {
     let fields = try configObject(
         raw,
         required: [],
-        optional: ["identity", "semantic_identity", "key"]
+        optional: ["identity", "semantic_identity", "key"],
     )
     let key = try configList(configValue(fields, "key")).map {
         try configString($0, label: "member key")
     }
     return try Member(
         identity: configSemanticValue(fields, plain: "identity", typed: "semantic_identity"),
-        key: key
+        key: key,
     )
 }
 
@@ -432,16 +432,16 @@ private func parsePlacement(_ raw: JSONValue) throws -> Placement {
         position: parseEnum(
             configValue(fields, "position"),
             label: "placement position",
-            as: Position.self
+            as: Position.self,
         ),
-        anchor: configValue(fields, "anchor").map(parseMember)
+        anchor: configValue(fields, "anchor").map(parseMember),
     )
 }
 
 private func configSemanticValue(
     _ fields: [(String, JSONValue)],
     plain: String,
-    typed: String
+    typed: String,
 ) throws -> SemanticValue {
     let rawPlain = configValue(fields, plain)
     let rawTyped = configValue(fields, typed)
@@ -502,7 +502,7 @@ private func parseManifestJSON(_ data: Data) throws -> JSONValue {
 private func configObject(
     _ raw: JSONValue,
     required: [String],
-    optional: [String]
+    optional: [String],
 ) throws -> [(String, JSONValue)] {
     guard case let .object(items) = raw else {
         throw FlyrailValueError("manifest records must be JSON objects")
@@ -512,7 +512,7 @@ private func configObject(
           required.allSatisfy({ name in items.contains(where: { exactTextEqual($0.0, name) }) })
     else {
         throw FlyrailValueError(
-            "expected fields \(configFieldList(required)); optional fields \(configFieldList(optional))"
+            "expected fields \(configFieldList(required)); optional fields \(configFieldList(optional))",
         )
     }
     return items
@@ -540,7 +540,7 @@ private func configString(_ raw: JSONValue?, label: String) throws -> String {
 private func parseEnum<T: RawRepresentable>(
     _ raw: JSONValue?,
     label: String,
-    as _: T.Type
+    as _: T.Type,
 ) throws -> T where T.RawValue == String {
     let value = try configString(raw, label: label)
     guard let result = T(rawValue: value) else {

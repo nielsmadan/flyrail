@@ -106,11 +106,19 @@ public struct HookJSON: Sendable, Equatable {
     }
 
     public var isObject: Bool {
-        if case .object = value { true } else { false }
+        if case .object = value {
+            true
+        } else {
+            false
+        }
     }
 
     public var text: HookText? {
-        if case let .string(text) = value { text } else { nil }
+        if case let .string(text) = value {
+            text
+        } else {
+            nil
+        }
     }
 }
 
@@ -126,19 +134,31 @@ public struct HookRequest: Sendable, Equatable {
         context: HookJSON,
         tool: HookText? = nil,
         input: HookJSON? = nil,
-        result: HookJSON? = nil
+        result: HookJSON? = nil,
     ) throws {
         guard context.isObject else { throw HookFailure("host-input") }
         let toolEvent = event == .beforeTool || event == .afterTool
-        if toolEvent, tool?.isEmpty != false { throw HookFailure("host-tool") }
-        if toolEvent, input == nil { throw HookFailure("host-arguments") }
-        if event == .afterTool, result == nil { throw HookFailure("host-result") }
-        if event == .prompt, input?.text == nil { throw HookFailure("host-prompt") }
-        if !toolEvent, tool != nil { throw HookFailure("input-fields") }
+        if toolEvent, tool?.isEmpty != false {
+            throw HookFailure("host-tool")
+        }
+        if toolEvent, input == nil {
+            throw HookFailure("host-arguments")
+        }
+        if event == .afterTool, result == nil {
+            throw HookFailure("host-result")
+        }
+        if event == .prompt, input?.text == nil {
+            throw HookFailure("host-prompt")
+        }
+        if !toolEvent, tool != nil {
+            throw HookFailure("input-fields")
+        }
         if event != .beforeTool, event != .afterTool, event != .prompt, input != nil {
             throw HookFailure("input-fields")
         }
-        if event != .afterTool, result != nil { throw HookFailure("input-fields") }
+        if event != .afterTool, result != nil {
+            throw HookFailure("input-fields")
+        }
         self.event = event
         self.context = context
         self.tool = tool
@@ -176,7 +196,7 @@ public struct HookRequest: Sendable, Equatable {
             context: HookJSON(value: context),
             tool: tool,
             input: field(fields, "input").map(HookJSON.init(value:)),
-            result: field(fields, "result").map(HookJSON.init(value:))
+            result: field(fields, "result").map(HookJSON.init(value:)),
         )
     }
 
@@ -186,9 +206,15 @@ public struct HookRequest: Sendable, Equatable {
             (HookText("event"), .string(HookText(event.rawValue))),
             (HookText("context"), context.value),
         ]
-        if let tool { fields.append((HookText("tool"), .string(tool))) }
-        if let input { fields.append((HookText("input"), input.value)) }
-        if let result { fields.append((HookText("result"), result.value)) }
+        if let tool {
+            fields.append((HookText("tool"), .string(tool)))
+        }
+        if let input {
+            fields.append((HookText("input"), input.value))
+        }
+        if let result {
+            fields.append((HookText("result"), result.value))
+        }
         return encodeHookJSON(.object(fields))
     }
 }
@@ -276,7 +302,9 @@ public struct HookResponse: Sendable, Equatable {
             case .modifyInput: "input"
             case .continue: ""
             }
-            if !name.isEmpty { fields.append((HookText(name), value.value)) }
+            if !name.isEmpty {
+                fields.append((HookText(name), value.value))
+            }
         }
         return encodeHookJSON(.object(fields))
     }
@@ -319,7 +347,7 @@ public struct HookRuntime: Sendable, Hashable {
             guard let url = Bundle.module.url(
                 forResource: name,
                 withExtension: nil,
-                subdirectory: "Resources/runtime"
+                subdirectory: "Resources/runtime",
             ) else {
                 throw FlyrailValueError("packaged hook runtime is missing \(name)")
             }
@@ -361,7 +389,7 @@ public struct HookHandler: Sendable, Hashable {
         cwd: ResourcePath,
         timeoutMilliseconds: Int,
         outcomes: [HookOutcome],
-        tools: [String]
+        tools: [String],
     ) throws {
         try validateIdentifier(id, label: "artifact id")
         guard cwd.displayString.hasPrefix("/"), !cwd.displayString.split(separator: "/").contains("..") else {
@@ -475,7 +503,7 @@ public struct HookEffects: Sendable, Equatable {
         input: HookJSON? = nil,
         contexts: [HookText] = [],
         decision: HookOutcome? = nil,
-        reason: HookText? = nil
+        reason: HookText? = nil,
     ) throws {
         guard !contexts.contains(where: \.isBlank),
               contexts.map(\.utf8Length).reduce(max(0, contexts.count - 1), +) <= hookTextLimit
@@ -539,7 +567,7 @@ public struct HookEffects: Sendable, Equatable {
             input: field(fields, "input").map(HookJSON.init(value:)),
             contexts: contexts,
             decision: decision,
-            reason: reason
+            reason: reason,
         )
     }
 
@@ -547,9 +575,15 @@ public struct HookEffects: Sendable, Equatable {
         var fields: [(HookText, HookValue)] = [
             (HookText("contexts"), .array(contexts.map { .string($0) })),
         ]
-        if let input { fields.append((HookText("input"), input.value)) }
-        if let decision { fields.append((HookText("decision"), .string(HookText(decision.rawValue)))) }
-        if let reason { fields.append((HookText("reason"), .string(reason))) }
+        if let input {
+            fields.append((HookText("input"), input.value))
+        }
+        if let decision {
+            fields.append((HookText("decision"), .string(HookText(decision.rawValue))))
+        }
+        if let reason {
+            fields.append((HookText("reason"), .string(reason)))
+        }
         return encodeHookJSON(.object(fields))
     }
 }
@@ -627,7 +661,9 @@ private struct HookParser {
         skipWhitespace()
         var values: [(HookText, HookValue)] = []
         var keys: Set<HookText> = []
-        if peek == 125 { position += 1; return .object(values) }
+        if peek == 125 {
+            position += 1; return .object(values)
+        }
         while true {
             guard peek == 34 else { throw HookFailure("invalid-json") }
             let key = try parseString()
@@ -642,7 +678,9 @@ private struct HookParser {
             skipWhitespace()
             try values.append((key, parseValue(depth: depth + 1)))
             skipWhitespace()
-            if peek == 125 { position += 1; return .object(values) }
+            if peek == 125 {
+                position += 1; return .object(values)
+            }
             guard peek == 44 else { throw HookFailure("invalid-json") }
             position += 1
             skipWhitespace()
@@ -654,11 +692,15 @@ private struct HookParser {
         position += 1
         skipWhitespace()
         var values: [HookValue] = []
-        if peek == 93 { position += 1; return .array(values) }
+        if peek == 93 {
+            position += 1; return .array(values)
+        }
         while true {
             try values.append(parseValue(depth: depth + 1))
             skipWhitespace()
-            if peek == 93 { position += 1; return .array(values) }
+            if peek == 93 {
+                position += 1; return .array(values)
+            }
             guard peek == 44 else { throw HookFailure("invalid-json") }
             position += 1
             skipWhitespace()
@@ -708,10 +750,14 @@ private struct HookParser {
 
     mutating func parseNumber() throws -> Double {
         let start = position
-        if peek == 45 { position += 1 }
+        if peek == 45 {
+            position += 1
+        }
         if peek == 48 {
             position += 1
-            if peek.map({ (48 ... 57).contains($0) }) == true { throw HookFailure("invalid-json") }
+            if peek.map({ (48 ... 57).contains($0) }) == true {
+                throw HookFailure("invalid-json")
+            }
         } else {
             guard peek.map({ (49 ... 57).contains($0) }) == true else {
                 throw HookFailure("invalid-json")
@@ -727,7 +773,9 @@ private struct HookParser {
         }
         if peek == 101 || peek == 69 {
             position += 1
-            if peek == 43 || peek == 45 { position += 1 }
+            if peek == 43 || peek == 45 {
+                position += 1
+            }
             guard peek.map({ (48 ... 57).contains($0) }) == true else {
                 throw HookFailure("invalid-json")
             }
@@ -802,7 +850,9 @@ private func validateHookJSON(_ value: HookValue, depth: Int = 0, limit: Int) th
     default:
         break
     }
-    if depth == 0, encodeHookJSON(value).count > limit { throw HookFailure("input-limit") }
+    if depth == 0, encodeHookJSON(value).count > limit {
+        throw HookFailure("input-limit")
+    }
 }
 
 private func encodeHookJSON(_ value: HookValue) -> Data {
@@ -821,14 +871,18 @@ private func writeHookValue(_ value: HookValue, to output: inout [UInt8]) {
     case let .array(values):
         output.append(91)
         for (index, value) in values.enumerated() {
-            if index > 0 { output.append(44) }
+            if index > 0 {
+                output.append(44)
+            }
             writeHookValue(value, to: &output)
         }
         output.append(93)
     case let .object(values):
         output.append(123)
         for (index, value) in values.enumerated() {
-            if index > 0 { output.append(44) }
+            if index > 0 {
+                output.append(44)
+            }
             writeHookString(value.0, to: &output)
             output.append(58)
             writeHookValue(value.1, to: &output)
@@ -874,14 +928,16 @@ private func writeHookString(_ value: HookText, to output: inout [UInt8]) {
 }
 
 private func javascriptNumber(_ value: Double) -> String {
-    if value == 0 { return "0" }
+    if value == 0 {
+        return "0"
+    }
     let shortest = String(value)
     let negative = shortest.hasPrefix("-")
     let unsigned = negative ? String(shortest.dropFirst()) : shortest
     let exponentParts = unsigned.lowercased().split(
         separator: "e",
         maxSplits: 1,
-        omittingEmptySubsequences: false
+        omittingEmptySubsequences: false,
     )
     let rawCoefficient = String(exponentParts[0])
     let coefficient = rawCoefficient.hasSuffix(".0")

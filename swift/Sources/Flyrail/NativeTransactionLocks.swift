@@ -12,7 +12,7 @@ package final class NativeTransactionLocks {
     package init(
         target: InstallationTarget, bundleID: String, resources requested: [ResourceRef], timeout: Duration,
         allowRecovery: Bool = true,
-        validateIndex: (NativeIndexObservation) throws -> Void = { _ in }
+        validateIndex: (NativeIndexObservation) throws -> Void = { _ in },
     ) throws {
         self.target = target
         self.bundleID = bundleID
@@ -35,7 +35,7 @@ package final class NativeTransactionLocks {
         try NativeIndexRecovery.requireReceipts(
             observation.current,
             prepared: observation.prepared,
-            resources: resources
+            resources: resources,
         )
         guards = try resources.map { try NativeAdmission.reserve($0, timeout: timeout) }
         created = index.createdDirectories + guards.flatMap(\.createdDirectories)
@@ -86,7 +86,9 @@ package enum NativeIndexRecovery {
     }
 
     package static func promotes(_ current: Index?, prepared: Index) throws -> Bool {
-        if try prepared == current || completes(current, prepared: prepared) { return false }
+        if try prepared == current || completes(current, prepared: prepared) {
+            return false
+        }
         let previous = current?.current
         let retained = Set(current?.resources ?? [])
         let desired = Set(prepared.pending?.membership.map(\.resource) ?? [])
@@ -97,7 +99,7 @@ package enum NativeIndexRecovery {
     }
 
     package static func expectsReceipt(
-        _ current: Index?, prepared: Index?, resource: ResourceRef
+        _ current: Index?, prepared: Index?, resource: ResourceRef,
     ) throws -> Bool {
         let committed = [current?.current, current?.previous].compactMap(\.self)
         let completed = try completes(current, prepared: prepared) ? [prepared?.current].compactMap(\.self) : []
@@ -113,14 +115,14 @@ package enum NativeIndexRecovery {
             }
             if try receipt == nil && expectsReceipt(current, prepared: prepared, resource: resource) {
                 throw nativeFailure(
-                    .invalidState, "recorded ownership receipt is missing; restore metadata before retrying", path
+                    .invalidState, "recorded ownership receipt is missing; restore metadata before retrying", path,
                 )
             }
         }
     }
 
     package static func recover(
-        _ locks: NativeTransactionLocks, seam: NativeTransactionSeam = .none, retainingResults: Bool = false
+        _ locks: NativeTransactionLocks, seam: NativeTransactionSeam = .none, retainingResults: Bool = false,
     ) throws -> [ResourceResult] {
         try locks.validate()
         let observed = try NativeAdmission.observeIndex(locks.target, bundleID: locks.bundleID)
@@ -134,7 +136,7 @@ package enum NativeIndexRecovery {
             throw try nativeFailure(
                 .recoveryNeeded,
                 error.message,
-                appendPath(locks.target.indexRoot, "index.json.next")
+                appendPath(locks.target.indexRoot, "index.json.next"),
             )
         }
         try requireReceipts(observed.current, prepared: observed.prepared, resources: locks.resources)
@@ -165,9 +167,11 @@ package enum NativeIndexRecovery {
                 try NativeTransactionIO.rename(
                     next,
                     to: appendPath(locks.target.indexRoot, "index.json"),
-                    exclusive: false
+                    exclusive: false,
                 )
-            } else { try NativeTransactionIO.unlink(next, revision: revision) }
+            } else {
+                try NativeTransactionIO.unlink(next, revision: revision)
+            }
             try seam("recover-index")
         }
         return results

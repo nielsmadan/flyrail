@@ -5,7 +5,7 @@ public func editDocument(
     source: Data?,
     requests: [DocumentRequest],
     ownership: [OwnedSelection] = [],
-    provenance: DocumentProvenance = DocumentProvenance()
+    provenance: DocumentProvenance = DocumentProvenance(),
 ) throws -> DocumentEdit {
     let format = try validateEditingInputs(requests: requests, ownership: ownership)
     let decoded = try decodeDocument(source)
@@ -15,7 +15,7 @@ public func editDocument(
             after: source,
             ownership: ownership,
             provenance: provenance,
-            observations: []
+            observations: [],
         )
     }
     if format == nil {
@@ -25,7 +25,7 @@ public func editDocument(
             bom: decoded.bom,
             requests: requests,
             ownership: ownership,
-            provenance: provenance
+            provenance: provenance,
         )
     }
     return try editStructured(
@@ -35,7 +35,7 @@ public func editDocument(
         format: format ?? .json,
         requests: requests,
         ownership: ownership,
-        provenance: provenance
+        provenance: provenance,
     )
 }
 
@@ -64,7 +64,7 @@ package func observeSelections(source: Data?, ownership: [OwnedSelection]) throw
             claim: item.claim,
             status: selectionStatus(current: current, desired: item.installed.value, owned: item,
                                     acquisition: .conflict, format: format),
-            current: current
+            current: current,
         )
     }
 }
@@ -102,7 +102,7 @@ private func decodeDocument(_ source: Data?) throws -> DecodedDocument {
 
 private func validateEditingInputs(
     requests: [DocumentRequest],
-    ownership: [OwnedSelection]
+    ownership: [OwnedSelection],
 ) throws -> DocumentFormat? {
     guard Set(requests.map(\.claim)).count == requests.count,
           Set(ownership.map(\.claim)).count == ownership.count
@@ -141,7 +141,7 @@ private func editSections(
     bom: Data,
     requests: [DocumentRequest],
     ownership previous: [OwnedSelection],
-    provenance: DocumentProvenance
+    provenance: DocumentProvenance,
 ) throws -> DocumentEdit {
     let pairs = try (requests.map(\.claim) + previous.map(\.claim)).map { claim in
         guard case let .section(pair) = claim.selector else {
@@ -177,7 +177,7 @@ private func editSections(
             desired: desired.map(SnapshotValue.bytes),
             owned: old,
             acquisition: request.acquisition,
-            format: nil
+            format: nil,
         )
         observations.append(.init(claim: request.claim, status: status, current: current))
         if status == .conflict || status == .modified {
@@ -224,7 +224,7 @@ private func editSections(
                 installed: installed,
                 current: current,
                 previous: old,
-                status: status
+                status: status,
             )
             replaceOwned(&owned, selection)
         } else {
@@ -258,7 +258,7 @@ private func editSections(
             current: nil,
             previous: nil,
             status: status,
-            separator: separator
+            separator: separator,
         )
         replaceOwned(&owned, selection)
     }
@@ -268,7 +268,7 @@ private func editSections(
         containers: provenance.containers,
         trailingSeparators: provenance.trailingSeparators,
         schemaFields: provenance.schemaFields,
-        schemaEmptyDocument: provenance.schemaEmptyDocument
+        schemaEmptyDocument: provenance.schemaEmptyDocument,
     )
     var withBOM = bom
     withBOM.append(result)
@@ -279,13 +279,13 @@ private func editSections(
         owned: owned,
         oldProvenance: provenance,
         provenance: creation,
-        observations: observations
+        observations: observations,
     )
 }
 
 private func sectionSpans(
     in data: Data,
-    boundaries: [SectionBoundaries]
+    boundaries: [SectionBoundaries],
 ) throws -> [SectionBoundaries: SectionSpan] {
     var pairs = Set(boundaries)
     for line in documentLines(data) {
@@ -440,7 +440,7 @@ private func editStructured(
     format: DocumentFormat,
     requests: [DocumentRequest],
     ownership previous: [OwnedSelection],
-    provenance: DocumentProvenance
+    provenance: DocumentProvenance,
 ) throws -> DocumentEdit {
     let selectors = try (requests.map(\.claim) + previous.map(\.claim)).map { claim in
         guard case let .structured(selector) = claim.selector else {
@@ -449,7 +449,11 @@ private func editStructured(
         return selector
     }
     let rootArray = selectors.contains {
-        if case .member? = $0.parts.first { true } else { false }
+        if case .member? = $0.parts.first {
+            true
+        } else {
+            false
+        }
     }
     let empty = format == .toml ? Data() : Data(rootArray ? "[]".utf8 : "{}".utf8)
     let initial = source == nil ? empty : payload
@@ -477,7 +481,7 @@ private func editStructured(
                   desired: nil,
                   owned: old,
                   acquisition: request.acquisition,
-                  format: format
+                  format: format,
               ) == .removed
         else {
             return nil
@@ -518,7 +522,7 @@ private func editStructured(
             desired: desired.map(SnapshotValue.typed),
             owned: old,
             acquisition: request.acquisition,
-            format: format
+            format: format,
         )
         if status == .conflict || status == .modified {
             observations.append(.init(claim: request.claim, status: status, current: current))
@@ -564,8 +568,8 @@ private func editStructured(
                         installed: installed,
                         current: current,
                         previous: old,
-                        status: status
-                    )
+                        status: status,
+                    ),
                 )
             }
             backend = candidate
@@ -578,7 +582,7 @@ private func editStructured(
                 claim: request.claim,
                 status: .conflict,
                 current: current,
-                message: error.message
+                message: error.message,
             ))
         }
     }
@@ -589,7 +593,7 @@ private func editStructured(
             after: source,
             ownership: previous,
             provenance: provenance,
-            observations: observations
+            observations: observations,
         )
     }
     containers = try pruneContainers(backend, containers: containers, owned: owned)
@@ -598,14 +602,16 @@ private func editStructured(
        payload.last != 10, payload.last != 13, backend.data.last == 10
     {
         let digest = SHA256.hash(data: bom + payload).map { String(format: "%02x", $0) }.joined()
-        if !separators.contains(digest) { separators.append(digest) }
+        if !separators.contains(digest) {
+            separators.append(digest)
+        }
     }
     let creation = try DocumentProvenance(
         emptyDocument: source == nil && !owned.isEmpty ? empty : provenance.emptyDocument,
         containers: containers,
         trailingSeparators: separators,
         schemaFields: provenance.schemaFields,
-        schemaEmptyDocument: provenance.schemaEmptyDocument
+        schemaEmptyDocument: provenance.schemaEmptyDocument,
     )
     var result = bom
     result.append(backend.data)
@@ -616,13 +622,13 @@ private func editStructured(
         owned: owned,
         oldProvenance: provenance,
         provenance: creation,
-        observations: observations
+        observations: observations,
     )
 }
 
 package func structuredSnapshot(
     _ backend: any StructuredEditingDocument,
-    selector: Selector
+    selector: Selector,
 ) throws -> SelectionSnapshot? {
     guard let path = try resolve(backend, selector: selector) else {
         return nil
@@ -640,13 +646,13 @@ package func structuredSnapshot(
         syntax: syntax,
         ownedSyntax: backend.ownedSyntax(path),
         position: position,
-        layout: backend.layout(path)
+        layout: backend.layout(path),
     )
 }
 
 private func resolve(
     _ backend: any StructuredEditingDocument,
-    selector: Selector
+    selector: Selector,
 ) throws -> [DocumentPathPart]? {
     var path: [DocumentPathPart] = []
     for part in selector.parts {
@@ -713,7 +719,7 @@ private func memberIndex(_ array: [SemanticValue], member: Member) throws -> Int
 private func anchor(
     _ array: [SemanticValue],
     index: Int,
-    key: [String]
+    key: [String],
 ) throws -> Member {
     let probe = try Member(identity: .scalar(.null), key: key)
     let result: Member
@@ -732,7 +738,7 @@ private func anchor(
 private func arrayPosition(
     _ backend: any StructuredEditingDocument,
     path: [DocumentPathPart],
-    member: Member
+    member: Member,
 ) throws -> ArrayPosition {
     guard case let .array(array) = try backend.native(Array(path.dropLast())),
           case let .index(index)? = path.last
@@ -742,14 +748,14 @@ private func arrayPosition(
     return try .init(
         previous: index > 0 ? anchor(array, index: index - 1, key: member.key) : nil,
         following: index + 1 < array.count ? anchor(array, index: index + 1, key: member.key) : nil,
-        prefix: backend.positionPrefix(path)
+        prefix: backend.positionPrefix(path),
     )
 }
 
 private func putStructured(
     _ backend: any StructuredEditingDocument,
     content: StructuredContent,
-    containers: inout [CreatedContainer]
+    containers: inout [CreatedContainer],
 ) throws {
     let selector = content.selector
     guard let part = selector.parts.last else {
@@ -780,7 +786,7 @@ private func putStructured(
                 try backend.relocate(
                     parent + [.index(index)],
                     index: insertion,
-                    value: content.value
+                    value: content.value,
                 )
             }
         } else {
@@ -793,7 +799,7 @@ private func putStructured(
 private func createParents(
     _ backend: any StructuredEditingDocument,
     selector: Selector,
-    containers: inout [CreatedContainer]
+    containers: inout [CreatedContainer],
 ) throws -> [DocumentPathPart] {
     var path: [DocumentPathPart] = []
     for index in 0 ..< max(0, selector.parts.count - 1) {
@@ -830,7 +836,7 @@ private func createParents(
 
 private func insertionIndex(
     _ array: [SemanticValue],
-    placement: Placement?
+    placement: Placement?,
 ) throws -> Int {
     let position = placement?.position ?? .last
     switch position {
@@ -851,7 +857,7 @@ private func insertionIndex(
 private func restoreStructured(
     _ backend: any StructuredEditingDocument,
     selector: Selector,
-    baseline: SelectionSnapshot?
+    baseline: SelectionSnapshot?,
 ) throws {
     guard let path = try resolve(backend, selector: selector) else {
         throw FlyrailValueError("owned selection is missing")
@@ -885,14 +891,14 @@ private func restoreStructured(
             value: value,
             syntax: baseline.syntax,
             prefix: position.prefix,
-            layout: baseline.layout
+            layout: baseline.layout,
         )
     }
 }
 
 private func restorationIndex(
     _ array: [SemanticValue],
-    position: ArrayPosition
+    position: ArrayPosition,
 ) throws -> Int {
     let previous = try position.previous.flatMap { try memberIndex(array, member: $0) }
     let following = try position.following.flatMap { try memberIndex(array, member: $0) }
@@ -913,7 +919,7 @@ private func restorationIndex(
 
 private func restoreBatch(
     _ backend: any StructuredEditingDocument,
-    selections: [OwnedSelection]
+    selections: [OwnedSelection],
 ) throws {
     var snapshots: [Int: SelectionSnapshot] = [:]
     var arrayPath: [DocumentPathPart] = []
@@ -979,7 +985,7 @@ private func restoreBatch(
                 index: current.count - 1,
                 value: value,
                 syntax: syntax,
-                layout: backend.layout(path)
+                layout: backend.layout(path),
             )
             current.append(current.remove(at: target))
         }
@@ -1001,7 +1007,7 @@ private func restoreBatch(
                 value: value,
                 syntax: baseline.syntax,
                 prefix: position.prefix,
-                layout: baseline.layout
+                layout: baseline.layout,
             )
             current.insert(current.remove(at: index), at: target)
         }
@@ -1011,7 +1017,7 @@ private func restoreBatch(
 private func pruneContainers(
     _ backend: any StructuredEditingDocument,
     containers: [CreatedContainer],
-    owned: [OwnedSelection]
+    owned: [OwnedSelection],
 ) throws -> [CreatedContainer] {
     var retained: [CreatedContainer] = []
     for container in containers.sorted(by: {
@@ -1046,7 +1052,7 @@ private func selectionStatus(
     desired: SnapshotValue?,
     owned: OwnedSelection?,
     acquisition: Acquisition,
-    format: DocumentFormat?
+    format: DocumentFormat?,
 ) -> EditStatus {
     if let owned {
         if current == nil ||
@@ -1083,7 +1089,7 @@ private func updatedOwnership(
     current: SelectionSnapshot?,
     previous: OwnedSelection?,
     status: EditStatus,
-    separator: Data = Data()
+    separator: Data = Data(),
 ) throws -> OwnedSelection {
     if let previous {
         return try OwnedSelection(
@@ -1092,7 +1098,7 @@ private func updatedOwnership(
             installed: installed,
             disposition: previous.disposition,
             baseline: previous.baseline,
-            separator: previous.separator
+            separator: previous.separator,
         )
     }
     let disposition: Disposition = switch status {
@@ -1111,7 +1117,7 @@ private func updatedOwnership(
         installed: installed,
         disposition: disposition,
         baseline: disposition == .takenOver ? current : nil,
-        separator: separator
+        separator: separator,
     )
 }
 
@@ -1131,7 +1137,7 @@ private func editingResult(
     owned: [OwnedSelection],
     oldProvenance: DocumentProvenance,
     provenance: DocumentProvenance,
-    observations: [EditObservation]
+    observations: [EditObservation],
 ) throws -> DocumentEdit {
     if observations.contains(where: { $0.status == .conflict || $0.status == .modified }) {
         return .init(
@@ -1139,7 +1145,7 @@ private func editingResult(
             after: before,
             ownership: previous,
             provenance: oldProvenance,
-            observations: observations
+            observations: observations,
         )
     }
     if owned.isEmpty {
@@ -1147,7 +1153,9 @@ private func editingResult(
         for suffix in [Data([13, 10]), Data([10]), Data([13])] where after.hasSuffix(suffix) {
             let candidate = Data(after.dropLast(suffix.count))
             let digest = SHA256.hash(data: candidate).map { String(format: "%02x", $0) }.joined()
-            if oldProvenance.trailingSeparators.contains(digest) { after = candidate; break }
+            if oldProvenance.trailingSeparators.contains(digest) {
+                after = candidate; break
+            }
         }
         let result = provenance.emptyDocument != nil && after == provenance.emptyDocument
             ? nil
@@ -1157,7 +1165,7 @@ private func editingResult(
             after: result,
             ownership: [],
             provenance: DocumentProvenance(),
-            observations: observations
+            observations: observations,
         )
     }
     return .init(
@@ -1165,7 +1173,7 @@ private func editingResult(
         after: after,
         ownership: owned,
         provenance: provenance,
-        observations: observations
+        observations: observations,
     )
 }
 

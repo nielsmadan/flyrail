@@ -21,13 +21,15 @@ func skillConvenienceInstallAndInspectPreserveNameIdentityAcrossLanguages(_ firs
     #expect(droid.notices.map(\.artifactID) == ["review"])
     let language = first.hasSuffix("rust") ? "rust" : "python"
     _ = try repositoryFile("python/src/flyrail")
-    if language == "rust" { _ = try repositoryFile("rust/Cargo.toml") }
+    if language == "rust" {
+        _ = try repositoryFile("rust/Cargo.toml")
+    }
     if !first.hasPrefix("swift") {
         let installed = try skillReference(
             language: language,
             operation: "install",
             source: source,
-            target: target.root
+            target: target.root,
         )
         #expect(installed["status"] as? String == "applied")
         #expect(installed["render_digest"] as? String == rendered.renderDigest)
@@ -43,7 +45,7 @@ func skillConvenienceInstallAndInspectPreserveNameIdentityAcrossLanguages(_ firs
         language: language,
         operation: "install",
         source: source,
-        target: target.root
+        target: target.root,
     )
     #expect(reference["current"] as? Bool == true)
     #expect(reference["content_matches"] as? Bool == true)

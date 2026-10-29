@@ -137,7 +137,7 @@ package struct ZIPBundleSource: BundleSource {
             path: spec.path,
             installedRoot: spec.name,
             executables: spec.executables,
-            budget: &budget
+            budget: &budget,
         )
     }
 
@@ -145,7 +145,7 @@ package struct ZIPBundleSource: BundleSource {
         path sourcePath: String,
         installedRoot: String,
         executables: [String],
-        budget: inout BundleEntryBudget
+        budget: inout BundleEntryBudget,
     ) throws -> [BundleEntry] {
         let sourceComponents = pathComponents(sourcePath)
         guard let sourceRoot = findNode(sourceComponents, from: rootNode, in: nodes),
@@ -165,7 +165,7 @@ package struct ZIPBundleSource: BundleSource {
             TraversalStep(
                 component: $0.component,
                 node: $0.node,
-                parentPathLength: path.count
+                parentPathLength: path.count,
             )
         }
         while let current = stack.popLast() {
@@ -185,7 +185,7 @@ package struct ZIPBundleSource: BundleSource {
                     data: data,
                     executable: executables.contains {
                         $0.utf8.elementsEqual(path.dropFirst(relativeStart))
-                    }
+                    },
                 ))
             } else {
                 try budget.reserve(path: installedPath, dataBytes: nil)
@@ -198,7 +198,7 @@ package struct ZIPBundleSource: BundleSource {
                 TraversalStep(
                     component: $0.component,
                     node: $0.node,
-                    parentPathLength: path.count
+                    parentPathLength: path.count,
                 )
             })
         }
@@ -220,7 +220,7 @@ package struct ZIPBundleSource: BundleSource {
             path: path,
             installedRoot: "content",
             executables: executables,
-            budget: &budget
+            budget: &budget,
         )
         let prefix = "content/"
         return try entries.compactMap { entry in
@@ -230,7 +230,7 @@ package struct ZIPBundleSource: BundleSource {
             return try BundleEntry(
                 path: String(entry.path.dropFirst(prefix.count)),
                 data: entry.data,
-                executable: entry.executable
+                executable: entry.executable,
             )
         }
     }
@@ -247,7 +247,7 @@ private func overlaps(_ left: [String], _ right: [String]) -> Bool {
 private func findNode(
     _ components: [String],
     from start: Int = 0,
-    in nodes: [ZIPBundleSource.EntryNode]
+    in nodes: [ZIPBundleSource.EntryNode],
 ) -> Int? {
     var node = start
     for component in components {

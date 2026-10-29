@@ -17,7 +17,7 @@ func stateCodecPairsMatchPythonAndRustInBothDirections() throws {
             "cargo", "build", "--locked", "--quiet", "--example", "interop", "--features", "interop-test-seams",
             "--manifest-path", manifest.path,
         ],
-        root: root, environment: environment
+        root: root, environment: environment,
     )
     try #require(build.status == 0, "\(String(decoding: build.error, as: UTF8.self))")
     let rust = root.appending(path: "rust/target/debug/examples/interop")
@@ -33,7 +33,7 @@ func stateCodecPairsMatchPythonAndRustInBothDirections() throws {
             executable: python,
             arguments: ["-B", driver.path, "encode"],
             input: swift,
-            root: root
+            root: root,
         )
         #expect(pythonResult.status == 0, "\(String(decoding: pythonResult.error, as: UTF8.self))")
         #expect(pythonResult.output == swift)
@@ -46,7 +46,7 @@ func stateCodecPairsMatchPythonAndRustInBothDirections() throws {
             executable: rust,
             arguments: ["encode", "--type", tag],
             input: swift,
-            root: root
+            root: root,
         )
         #expect(rustResult.status == 0, "\(String(decoding: rustResult.error, as: UTF8.self))")
         #expect(rustResult.output == swift)
@@ -54,7 +54,7 @@ func stateCodecPairsMatchPythonAndRustInBothDirections() throws {
             #expect(try StateCodec.transcode(rustResult.output) == swift)
         }
         let reverse = try stateProcess(
-            executable: python, arguments: ["-B", driver.path, "encode"], input: rustResult.output, root: root
+            executable: python, arguments: ["-B", driver.path, "encode"], input: rustResult.output, root: root,
         )
         #expect(reverse.status == 0)
         #expect(reverse.output == swift)
@@ -72,7 +72,7 @@ func stateCodecPairsMatchPythonAndRustInBothDirections() throws {
             executable: python,
             arguments: ["-B", driver.path, "encode"],
             input: input,
-            root: root
+            root: root,
         )
         #expect(pythonResult.status == 1)
         #expect(pythonResult.output == Data())
@@ -84,7 +84,7 @@ func stateCodecPairsMatchPythonAndRustInBothDirections() throws {
             executable: rust,
             arguments: ["encode", "--type", rustVector.tag],
             input: rustVector.input,
-            root: root
+            root: root,
         )
         #expect(rustResult.status == 1)
         #expect(rustResult.output == Data())
@@ -101,7 +101,7 @@ private func stateNestedPairsMatchPython(python: URL, driver: URL, root: URL) th
     }
     let paths: [JSONValue] = [.object([("path", .string("//fixture/é.md"))]), .object([("path", .string("//"))])]
     let nested = try Set(
-        nestedStateRecords(stateRelocatedFixture(stateFixture())) + stateSupplementalRecords() + semantic + paths
+        nestedStateRecords(stateRelocatedFixture(stateFixture())) + stateSupplementalRecords() + semantic + paths,
     )
     for record in nested {
         let swift = try StateCodec.encodeRecord(record)
@@ -109,7 +109,7 @@ private func stateNestedPairsMatchPython(python: URL, driver: URL, root: URL) th
             executable: python,
             arguments: ["-B", driver.path, "encode"],
             input: swift,
-            root: root
+            root: root,
         )
         #expect(result.status == 0, "\(String(decoding: result.error, as: UTF8.self))")
         #expect(result.output == swift)
@@ -124,16 +124,16 @@ private func stateRustSupports(_ record: JSONValue) -> Bool {
 private func statePairEnclosingRecords(_ records: [JSONValue]) throws -> [JSONValue] {
     let resource = try stateTestResource("nested.json")
     let container = try CreatedContainer(
-        selector: Selector(parts: [.key(Key("created"))]), emptySyntax: Data("{}".utf8)
+        selector: Selector(parts: [.key(Key("created"))]), emptySyntax: Data("{}".utf8),
     )
     let receipt = try Receipt(
         resource: resource, transactionID: String(repeating: "1", count: 32),
-        provenance: DocumentProvenance(emptyDocument: nil, containers: [container])
+        provenance: DocumentProvenance(emptyDocument: nil, containers: [container]),
     )
     func journal(_ revision: Revision, ancestors: [Ancestor] = []) throws -> JSONValue {
         try Journal(
             resource: resource, previous: nil, receipt: receipt, before: revision,
-            staged: Revision(), published: Revision(), backup: revision, ancestors: ancestors
+            staged: Revision(), published: Revision(), backup: revision, ancestors: ancestors,
         ).stateRecord()
     }
     return try [receipt.stateRecord()] + stateSupplementalRecords().filter(stateRustSupports) +
@@ -159,10 +159,10 @@ private func statePairEnclosingRecords(_ records: [JSONValue]) throws -> [JSONVa
                     claim: claim, claimID: claim.identity(destination: skills.destination),
                     bundleID: "team", artifactID: "guide", version: "1",
                     bundleDigest: String(repeating: "a", count: 64), renderDigest: String(repeating: "b", count: 64),
-                    installed: Revision(nodes: [stateTestNode("", Data())])
+                    installed: Revision(nodes: [stateTestNode("", Data())]),
                 )
                 return try [Receipt(
-                    resource: skills, transactionID: String(repeating: "1", count: 32), claims: [owned]
+                    resource: skills, transactionID: String(repeating: "1", count: 32), claims: [owned],
                 ).stateRecord()]
             default:
                 return []
@@ -171,9 +171,11 @@ private func statePairEnclosingRecords(_ records: [JSONValue]) throws -> [JSONVa
 }
 
 private func stateRustMalformedVector(
-    _ vector: StateCompatibilityVector, enclosing records: [JSONValue]
+    _ vector: StateCompatibilityVector, enclosing records: [JSONValue],
 ) throws -> StateCompatibilityVector {
-    if ["Index", "Journal", "Receipt", "ResourceRef"].contains(vector.tag) { return vector }
+    if ["Index", "Journal", "Receipt", "ResourceRef"].contains(vector.tag) {
+        return vector
+    }
     let enclosing = try #require(records.first {
         nestedStateRecords($0).contains { stateRecordTag($0) == vector.tag }
     }, "No supported enclosing Rust record for \(vector.tag)")
@@ -183,7 +185,7 @@ private func stateRustMalformedVector(
     let range = try #require(text.range(of: nestedText))
     let embedded = text.replacingCharacters(in: range, with: String(decoding: vector.input, as: UTF8.self))
     return try StateCompatibilityVector(
-        tag: #require(stateRecordTag(enclosing)), input: Data(embedded.utf8), message: vector.message
+        tag: #require(stateRecordTag(enclosing)), input: Data(embedded.utf8), message: vector.message,
     )
 }
 
@@ -214,7 +216,7 @@ func stateInteropCodecCommandsValidateAndReportRecords() throws {
             arguments: arguments,
             standardInput: stdin,
             standardOutput: stdout,
-            standardError: stderr
+            standardError: stderr,
         )
         return try (status, Data(contentsOf: output), Data(contentsOf: error))
     }
@@ -255,12 +257,12 @@ private func statePairRecords() throws -> [JSONValue] {
     let highCount = try Count(decimal: "18446744073709551616")
     let receipt = try Receipt(
         resource: resource, transactionID: String(repeating: "1", count: 32),
-        claims: [stateTestOwned(resource, version: "e\u{301} \0", inode: highCount)]
+        claims: [stateTestOwned(resource, version: "e\u{301} \0", inode: highCount)],
     )
     let generation = try stateTestGeneration([resource])
     let first = try Index(bundleID: "team", contextDigest: String(repeating: "d", count: 64), pending: generation)
     let complete = try Index(
-        bundleID: "team", contextDigest: String(repeating: "d", count: 64), current: generation, residual: [resource]
+        bundleID: "team", contextDigest: String(repeating: "d", count: 64), current: generation, residual: [resource],
     )
     return try fixtures + [
         resource.stateRecord(), receipt.stateRecord(), first.stateRecord(), complete.stateRecord(),
@@ -276,12 +278,12 @@ private func statePairMalformedRecords(_ records: [JSONValue]) throws -> [StateC
         var result = try items.map { name, _ in
             try StateCompatibilityVector(
                 tag: tag, input: StateCodec.encodeRecord(StateCodec.record(tag, items.filter { $0.0 != name })),
-                message: "state record fields do not match schema"
+                message: "state record fields do not match schema",
             )
         }
         try result.append(StateCompatibilityVector(
             tag: tag, input: StateCodec.encodeRecord(StateCodec.record(tag, items + [("unexpected", .null)])),
-            message: "state record fields do not match schema"
+            message: "state record fields do not match schema",
         ))
         if tag == "ResourceRef" {
             let replacement = StateCodec.record(tag, items.map { key, value in
@@ -289,7 +291,7 @@ private func statePairMalformedRecords(_ records: [JSONValue]) throws -> [StateC
             })
             try result.append(StateCompatibilityVector(
                 tag: tag, input: StateCodec.encodeRecord(replacement),
-                message: "resource state path disagrees with destination"
+                message: "resource state path disagrees with destination",
             ))
         }
         return result
@@ -304,7 +306,7 @@ private struct StateProcessResult {
 
 private func stateProcess(
     executable: URL, arguments: [String], input: Data = Data(), root: URL,
-    environment: [String: String]? = nil
+    environment: [String: String]? = nil,
 ) throws -> StateProcessResult {
     let process = Process()
     let stdin = Pipe()

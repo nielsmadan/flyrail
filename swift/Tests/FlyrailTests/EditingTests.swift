@@ -25,7 +25,7 @@ func portableSectionJSONAndJSONCEditsMatchFixtures() throws {
                 source: observed,
                 requests: requests,
                 ownership: ownership,
-                provenance: provenance
+                provenance: provenance,
             )
             #expect(edit.after == dataValue(step["expected"]))
             let expected = (step["statuses"] as? [String] ?? [step["status"] as? String ?? ""])
@@ -86,7 +86,7 @@ func JSONEditingRejectsMalformedOversizedAndDeepDocuments() throws {
     let content = try StructuredContent(
         format: .json,
         selector: Flyrail.Selector(parts: [.key(Key("x"))]),
-        value: .scalar(.integer(1))
+        value: .scalar(.integer(1)),
     )
     let request = try DocumentRequest.set(.structured(content))
     for malformed in [
@@ -111,12 +111,12 @@ func JSONEditingRejectsMalformedOversizedAndDeepDocuments() throws {
         selector: Flyrail.Selector(parts: [
             .member(Member(identity: .scalar(.integer(0)))),
         ]),
-        value: .scalar(.integer(0))
+        value: .scalar(.integer(0)),
     )
     #expect(throws: FlyrailValueError.self) {
         try editDocument(
             source: Data(deep.utf8),
-            requests: [DocumentRequest.set(.structured(deepContent), acquisition: .adopt)]
+            requests: [DocumentRequest.set(.structured(deepContent), acquisition: .adopt)],
         )
     }
 }
@@ -134,7 +134,7 @@ func contentClaimsAcceptOnlySharedContent() throws {
     let structured = try contentClaim(.structured(StructuredContent(
         format: .json,
         selector: Flyrail.Selector(parts: [.key(Key("x"))]),
-        value: .scalar(.boolean(true))
+        value: .scalar(.boolean(true)),
     )))
     #expect(section.kind == .section)
     #expect(structured.kind == .structured)
@@ -145,7 +145,7 @@ func packagedEditFixtureMatchesRoot() throws {
     let packaged = try Data(contentsOf: #require(Bundle.module.url(
         forResource: "edits",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     )))
     #expect(try packaged == Data(contentsOf: repositoryFile("spec/fixtures/edits.json")))
 }
@@ -154,7 +154,7 @@ func editFixture() throws -> [String: Any] {
     let url = try #require(Bundle.module.url(
         forResource: "edits",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     let data = try Data(contentsOf: url)
     guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -176,7 +176,7 @@ private func dataValue(_ value: Any?) -> Data? {
 
 func fixtureRequest(
     format: String,
-    record: [String: Any]
+    record: [String: Any],
 ) throws -> DocumentRequest {
     let claim: Claim
     let selector: Flyrail.Selector?
@@ -189,7 +189,7 @@ func fixtureRequest(
         }
         claim = try Claim(
             kind: .section,
-            selector: .section(SectionBoundaries(start: start, end: end))
+            selector: .section(SectionBoundaries(start: start, end: end)),
         )
         selector = nil
     } else {
@@ -213,7 +213,7 @@ func fixtureRequest(
         let content = try SectionContent(
             marker: record["marker"] as? String ?? "fixture",
             text: text,
-            boundaries: boundaries
+            boundaries: boundaries,
         )
         return try .set(.section(content), acquisition: acquisition)
     }
@@ -229,7 +229,7 @@ func fixtureRequest(
     {
         try Placement(
             position: position,
-            anchor: (raw["anchor"] as? [String: Any]).map(fixtureMember)
+            anchor: (raw["anchor"] as? [String: Any]).map(fixtureMember),
         )
     } else {
         nil
@@ -241,7 +241,7 @@ func fixtureRequest(
         format: documentFormat,
         selector: selector,
         value: value,
-        placement: placement
+        placement: placement,
     )
     return try .set(.structured(content), acquisition: acquisition)
 }
@@ -259,7 +259,7 @@ private func fixtureSelectorPart(_ value: Any) throws -> SelectorPart {
 private func fixtureMember(_ record: [String: Any]) throws -> Member {
     let identity = if let semantic = record["semantic_identity"] {
         try SemanticValue(
-            semanticBytes: JSONSerialization.data(withJSONObject: semantic)
+            semanticBytes: JSONSerialization.data(withJSONObject: semantic),
         )
     } else if let identity = record["identity"] {
         try fixtureSemanticValue(identity)

@@ -16,7 +16,7 @@ private struct ZIPSpec {
 @Test
 func ZIPBundlesLoadStoredDeflatedUTF8AndCP437Members() throws {
     let manifest = Data(
-        #"{"schema_version":1,"id":"tiny","version":"1","skills":[{"name":"a","path":"a"}]}"#.utf8
+        #"{"schema_version":1,"id":"tiny","version":"1","skills":[{"name":"a","path":"a"}]}"#.utf8,
     )
     let stored = makeZIP([
         ZIPSpec(name: Array("flyrail/flyrail.json".utf8), data: manifest),
@@ -34,7 +34,7 @@ func ZIPBundlesLoadStoredDeflatedUTF8AndCP437Members() throws {
             name: Array("flyrail/a/SKILL.md".utf8),
             data: Data("hello".utf8),
             payload: Data([0xCB, 0x48, 0xCD, 0xC9, 0xC9, 0x07, 0x00]),
-            method: 8
+            method: 8,
         ),
     ])
     #expect(try loadZIP(deflated).entries.last?.data == Data("hello".utf8))
@@ -59,7 +59,7 @@ func ZIPBundlesLoadStoredDeflatedUTF8AndCP437Members() throws {
             name: Array("flyrail/a/SKILL.md".utf8),
             data: signatureCRC,
             flags: 0x0008,
-            descriptorSignature: false
+            descriptorSignature: false,
         ),
     ])
     #expect(try loadZIP(unsignedDescriptor).entries.last?.data == signatureCRC)
@@ -122,7 +122,7 @@ func ZIPParserRejectsCorruptionFlagsMismatchesAndOverlaps() throws {
 @Test
 func ZIPSourcesRejectTraversalCollisionsNULAndSpecialEntries() throws {
     let manifest = Data(
-        #"{"schema_version":1,"id":"tiny","version":"1","skills":[{"name":"a","path":"a"}]}"#.utf8
+        #"{"schema_version":1,"id":"tiny","version":"1","skills":[{"name":"a","path":"a"}]}"#.utf8,
     )
     let required = [
         ZIPSpec(name: Array("flyrail/flyrail.json".utf8), data: manifest),
@@ -149,7 +149,7 @@ func ZIPSourcesRejectTraversalCollisionsNULAndSpecialEntries() throws {
             ZIPSpec(
                 name: Array("flyrail/a/link".utf8),
                 data: Data("target".utf8),
-                externalAttributes: UInt32(0o120600) << 16
+                externalAttributes: UInt32(0o120600) << 16,
             ),
         ]))
     }
@@ -158,7 +158,7 @@ func ZIPSourcesRejectTraversalCollisionsNULAndSpecialEntries() throws {
 @Test
 func ZIPBundlesIgnoreUnrelatedPayloadFormatsAndCorruption() throws {
     let manifest = Data(
-        #"{"schema_version":1,"id":"tiny","version":"1","skills":[{"name":"a","path":"a"}]}"#.utf8
+        #"{"schema_version":1,"id":"tiny","version":"1","skills":[{"name":"a","path":"a"}]}"#.utf8,
     )
     let archive = makeZIP([
         ZIPSpec(name: Array("ignored-encrypted".utf8), data: Data(), flags: 0x0001),
@@ -179,13 +179,13 @@ func ZIPSourceTraversesDeepSelectedTreesWithoutRebuildingPrefixes() throws {
         data: makeZIP([
             ZIPSpec(name: Array(leafPath.utf8), data: Data("leaf".utf8)),
         ]),
-        limits: .default
+        limits: .default,
     )
     let source = try ZIPBundleSource(archive: archive, root: "flyrail")
     let spec = try SkillSpec(
         name: "a",
         path: "a",
-        executables: ["\(nestedPath)/leaf.txt"]
+        executables: ["\(nestedPath)/leaf.txt"],
     )
     var budget = BundleEntryBudget(limits: .default)
 
@@ -193,7 +193,7 @@ func ZIPSourceTraversesDeepSelectedTreesWithoutRebuildingPrefixes() throws {
     let expectedLeaf = try BundleEntry(
         path: "a/\(nestedPath)/leaf.txt",
         data: Data("leaf".utf8),
-        executable: true
+        executable: true,
     )
 
     #expect(entries.count == depth + 2)
@@ -213,8 +213,8 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
                 maximumMemberBytes: 1000,
                 maximumTotalBytes: 2000,
                 maximumNameBytes: 1000,
-                maximumExpansionRatio: 1000
-            )
+                maximumExpansionRatio: 1000,
+            ),
         )
     }
     let metadataLimits = [
@@ -224,7 +224,7 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
             maximumMemberBytes: 1000,
             maximumTotalBytes: 2000,
             maximumNameBytes: 1000,
-            maximumExpansionRatio: 1000
+            maximumExpansionRatio: 1000,
         ),
         BundleLimits(
             maximumArchiveBytes: 10000,
@@ -232,7 +232,7 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
             maximumMemberBytes: 1000,
             maximumTotalBytes: 2000,
             maximumNameBytes: 2,
-            maximumExpansionRatio: 1000
+            maximumExpansionRatio: 1000,
         ),
     ]
     for limits in metadataLimits {
@@ -247,7 +247,7 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
             maximumMemberBytes: 1,
             maximumTotalBytes: 2000,
             maximumNameBytes: 1000,
-            maximumExpansionRatio: 1000
+            maximumExpansionRatio: 1000,
         ),
         BundleLimits(
             maximumArchiveBytes: 10000,
@@ -255,7 +255,7 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
             maximumMemberBytes: 1000,
             maximumTotalBytes: 1,
             maximumNameBytes: 1000,
-            maximumExpansionRatio: 1000
+            maximumExpansionRatio: 1000,
         ),
     ] {
         #expect(throws: FlyrailValueError.self) {
@@ -268,7 +268,7 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
             name: Array("x".utf8),
             data: Data("hello".utf8),
             payload: Data([0xCB, 0x48, 0xCD, 0xC9, 0xC9, 0x07, 0x00]),
-            method: 8
+            method: 8,
         ),
     ])
     #expect(throws: FlyrailValueError.self) {
@@ -278,11 +278,11 @@ func ZIPParserEnforcesEveryLimitBeforeAllocation() throws {
             maximumMemberBytes: 1000,
             maximumTotalBytes: 2000,
             maximumNameBytes: 1000,
-            maximumExpansionRatio: 0
+            maximumExpansionRatio: 0,
         )
         let parsed = try ZIPArchive(
             data: deflated,
-            limits: limits
+            limits: limits,
         )
         _ = try parsed.data(at: 0, limits: limits)
     }
@@ -301,7 +301,7 @@ private func loadZIP(_ data: Data) throws -> FlyrailBundle {
     try data.write(to: archive)
     return try FlyrailBundle(
         archive: ResourcePath(archive.path),
-        root: ResourcePath("flyrail")
+        root: ResourcePath("flyrail"),
     )
 }
 

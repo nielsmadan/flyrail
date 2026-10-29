@@ -18,7 +18,7 @@ func nativeTransactionLocksAreIndexFirstThenSortedPermanentAuthorities() throws 
                 target: target,
                 bundleID: "team",
                 resources: references,
-                timeout: .milliseconds(25)
+                timeout: .milliseconds(25),
             )
         }
         #expect(start.duration(to: clock.now) >= .milliseconds(25))
@@ -54,7 +54,7 @@ func nativeUnrecognizedIndexPreparationNeverReservesItsUnknownReferences() throw
     let unknown = try Index(bundleID: "team", contextDigest: target.contextDigest, current: generation)
     try NativeTransactionIO.createFile(
         appendPath(target.indexRoot, "index.json.next"),
-        data: StateCodec.encode(unknown)
+        data: StateCodec.encode(unknown),
     )
     let before = try NativeObservation.snapshot(root.path)
     expectNativeError(.recoveryNeeded) {
@@ -79,13 +79,13 @@ func nativeMissingCommittedReceiptPreservesAllIndexAndRecoveryEvidence(_ members
             bundleID: "team", contextDigest: target.contextDigest,
             pending: membership == "prepared-completion" ? current.current : nil,
             previous: membership == "previous" ? current.current : nil,
-            residual: current.resources
+            residual: current.resources,
         )
         try NativeTransactionIO.atomic(appendPath(target.indexRoot, "index.json"), value: pending, phase: "fixture")
         if membership == "prepared-completion" {
             try NativeTransactionIO.createFile(
                 appendPath(target.indexRoot, "index.json.next"),
-                data: StateCodec.encode(current)
+                data: StateCodec.encode(current),
             )
         }
     }

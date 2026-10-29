@@ -12,7 +12,7 @@ func configurationFixturesMatchDigestsAndReconstruction() throws {
         let entries = try (rawCase["entries"] as? [[String: Any]] ?? []).map { item in
             try BundleEntry(
                 path: #require(item["path"] as? String),
-                data: (item["data_hex"] as? String).map { try Data(interopHex: $0) }
+                data: (item["data_hex"] as? String).map { try Data(interopHex: $0) },
             )
         }
         let bundle = try FlyrailBundle(manifest: data, entries: entries)
@@ -22,7 +22,7 @@ func configurationFixturesMatchDigestsAndReconstruction() throws {
             identity: bundle.identity,
             artifacts: bundle.artifacts,
             assets: bundle.assets,
-            dependencies: bundle.dependencies
+            dependencies: bundle.dependencies,
         )
         #expect(rebuilt.contentDigest == bundle.contentDigest)
         #expect(try rebuilt.differentialCanonicalValue() == bundle.differentialCanonicalValue())
@@ -71,21 +71,21 @@ func sectionBoundariesRecognizeCRLFWithoutNormalizingText() throws {
     let accepted = try SectionContent(
         marker: "section",
         text: "prefix\r\nnot START\r\nsuffix",
-        boundaries: boundaries
+        boundaries: boundaries,
     )
     #expect(accepted.text == "prefix\r\nnot START\r\nsuffix")
     #expect(throws: FlyrailValueError.self) {
         try SectionContent(
             marker: "section",
             text: "prefix\r\nSTART\r\nsuffix",
-            boundaries: boundaries
+            boundaries: boundaries,
         )
     }
     #expect(throws: FlyrailValueError.self) {
         try SectionContent(
             marker: "section",
             text: "prefix\r\nEND\r\nsuffix",
-            boundaries: boundaries
+            boundaries: boundaries,
         )
     }
 }
@@ -120,14 +120,14 @@ func hookArtifactToolNamesUseExactUTF8Identity() throws {
         id: "hook",
         event: .beforeTool,
         command: command,
-        tools: ["é", "e\u{301}"]
+        tools: ["é", "e\u{301}"],
     )
     #expect(throws: FlyrailValueError.self) {
         try HookArtifact(
             id: "hook",
             event: .beforeTool,
             command: command,
-            tools: ["é", "é"]
+            tools: ["é", "é"],
         )
     }
 }
@@ -141,14 +141,14 @@ func configurationDependenciesAndAssetReferencesAreValidated() throws {
         content: TreeContent(entries: [
             BundleEntry(path: "run.js", data: Data()),
             BundleEntry(path: "data"),
-        ])
+        ]),
     )
     let server = try Artifact.mcp(MCPArtifact(
         id: "server",
         name: "server",
         transport: .stdio(Command(argv: [
             .asset(AssetRef(assetID: "runtime", path: "run.js")),
-        ]))
+        ])),
     ))
     #expect(throws: FlyrailValueError.self) {
         try FlyrailBundle(identity: identity, artifacts: [server], assets: [asset])
@@ -157,7 +157,7 @@ func configurationDependenciesAndAssetReferencesAreValidated() throws {
         identity: identity,
         artifacts: [server],
         assets: [asset],
-        dependencies: [Dependency(dependent: "server", required: "runtime")]
+        dependencies: [Dependency(dependent: "server", required: "runtime")],
     )
     #expect(bundle.schemaVersion == 2)
 }
@@ -168,7 +168,7 @@ func packagedConfigurationAndHookFixturesMatchRoot() throws {
         let packaged = try Data(contentsOf: #require(Bundle.module.url(
             forResource: name,
             withExtension: "json",
-            subdirectory: "Fixtures"
+            subdirectory: "Fixtures",
         )))
         #expect(try packaged == Data(contentsOf: repositoryFile("spec/fixtures/\(name).json")))
     }
@@ -194,7 +194,7 @@ private func configurationFixture() throws -> [String: Any] {
     let url = try #require(Bundle.module.url(
         forResource: "configurations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     return try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
 }

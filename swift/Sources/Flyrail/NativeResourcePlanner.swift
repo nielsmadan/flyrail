@@ -14,7 +14,9 @@ package enum NativeResourcePlanner {
     }
 
     package static func claim(_ artifact: RenderedArtifact) throws -> Claim {
-        if let subtree = artifact.subtree { return try Claim(kind: .subtree, selector: .subtree(subtree)) }
+        if let subtree = artifact.subtree {
+            return try Claim(kind: .subtree, selector: .subtree(subtree))
+        }
         switch artifact.content {
         case .file: return try Claim(kind: .file, selector: .whole)
         case .tree: return try Claim(kind: .tree, selector: .whole)
@@ -25,7 +27,7 @@ package enum NativeResourcePlanner {
     package static func node(_ path: String, data: Data?, mode: UInt64) throws -> Node {
         try Node(
             path: path, data: data, mode: Count(mode),
-            uid: Count(UInt64(geteuid())), gid: Count(UInt64(getegid())), device: 0, inode: 0
+            uid: Count(UInt64(geteuid())), gid: Count(UInt64(getegid())), device: 0, inode: 0,
         )
     }
 
@@ -34,7 +36,7 @@ package enum NativeResourcePlanner {
     {
         try Node(
             path: path, data: replaceData ? data : node.data, mode: node.mode,
-            uid: node.uid, gid: node.gid, device: node.device, inode: node.inode, security: node.security
+            uid: node.uid, gid: node.gid, device: node.device, inode: node.inode, security: node.security,
         )
     }
 
@@ -79,7 +81,9 @@ package enum NativeResourcePlanner {
         var nodes = revision.nodes.filter {
             !exactTextEqual($0.path, selector) && !$0.path.utf8.starts(with: prefix.utf8)
         }
-        if !content.nodes.isEmpty, nodes.isEmpty { try nodes.append(node("", data: nil, mode: 0o755)) }
+        if !content.nodes.isEmpty, nodes.isEmpty {
+            try nodes.append(node("", data: nil, mode: 0o755))
+        }
         try nodes += content.nodes.map { try rebase($0, path: $0.path.isEmpty ? selector : prefix + $0.path) }
         if !content.nodes.isEmpty {
             let parts = selector.split(separator: "/")
@@ -109,7 +113,7 @@ package enum NativeResourcePlanner {
             return try ClaimObservation(
                 claimID: owned.claimID, bundleID: owned.bundleID, artifactID: owned.artifactID,
                 version: owned.version, bundleDigest: owned.bundleDigest, renderDigest: owned.renderDigest,
-                status: schemasMatch ? status : .modified
+                status: schemasMatch ? status : .modified,
             )
         }
     }
@@ -120,7 +124,7 @@ package enum NativeResourcePlanner {
         bundle: FlyrailBundle?, rendered: RenderedBundle, artifacts: [RenderedArtifact],
         acquisition: Acquisition, replaceModified: Bool,
         requirements: [String: [ClaimRequirement]] = [:], stableRequirements: [String: [ClaimRequirement]] = [:],
-        transactionID: String = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        transactionID: String = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased(),
     ) throws -> ResourcePlan {
         let before = observation.revision
         let previous = observation.receipt
@@ -148,7 +152,7 @@ package enum NativeResourcePlanner {
             error = nativeFailure(
                 .unsafePath,
                 "resource kind disagrees with existing destination",
-                resource.destination
+                resource.destination,
             )
         }
         let foreign = claims.filter { $0.bundleID != bundleID }
@@ -163,13 +167,13 @@ package enum NativeResourcePlanner {
                     before, destination: resource.destination, own: own, claims: claims,
                     desired: desired, acquisition: acquisition,
                     replaceModified: replaceModified, provenance: provenance,
-                    schemas: foreign.flatMap(\.schemaRequirements) + artifacts.flatMap(\.schemaRequirements)
+                    schemas: foreign.flatMap(\.schemaRequirements) + artifacts.flatMap(\.schemaRequirements),
                 )
                 if let issue = edit.observations.first(where: { $0.status == .modified || $0.status == .conflict }) {
                     error = nativeFailure(
                         issue.status == .modified ? .modified : .conflict,
                         issue.message.isEmpty ? "owned selection cannot be changed" : issue.message,
-                        resource.destination
+                        resource.destination,
                     )
                 } else {
                     provenance = edit.provenance
@@ -177,7 +181,9 @@ package enum NativeResourcePlanner {
                         after = try Revision(nodes: [before.nodes.first.map {
                             try rebase($0, path: "", data: data, replaceData: true)
                         } ?? node("", data: data, mode: 0o600)])
-                    } else { after = try Revision() }
+                    } else {
+                        after = try Revision()
+                    }
                     for (claim, artifact) in wanted {
                         guard let selection = edit.ownership.first(where: { $0.claim == claim }) else {
                             throw FlyrailValueError("planned selection ownership is missing")
@@ -185,7 +191,7 @@ package enum NativeResourcePlanner {
                         try result.append(owned(
                             artifact, resource: resource, bundle: bundle, rendered: rendered, selection: selection,
                             disposition: selection.disposition, requirements: requirements,
-                            stableRequirements: stableRequirements
+                            stableRequirements: stableRequirements,
                         ))
                     }
                 }
@@ -193,7 +199,7 @@ package enum NativeResourcePlanner {
                 let planned = try wholePlan(
                     before, resource: resource, own: own, desired: desired, bundle: bundle, rendered: rendered,
                     acquisition: acquisition, replaceModified: replaceModified,
-                    requirements: requirements, stableRequirements: stableRequirements
+                    requirements: requirements, stableRequirements: stableRequirements,
                 )
                 after = planned.after
                 result += planned.claims
@@ -207,14 +213,14 @@ package enum NativeResourcePlanner {
         let receipt = try error == nil ? Receipt(
             resource: resource, transactionID: transactionID,
             claims: result.sorted { utf8Less($0.claimID, $1.claimID) },
-            provenance: provenance, createdDirectories: created
+            provenance: provenance, createdDirectories: created,
         ) : (previous ?? Receipt(resource: resource, transactionID: transactionID))
         return try ResourcePlan(
             resource: resource, before: before, after: error == nil ? after : before,
             previous: previous, receipt: transactionReceipt(receipt, previous: previous, unchanged: before == after),
             ancestors: observation.ancestors,
             stateRevision: observation.state.revision, recoveryPaths: observation.recovery,
-            requireExisting: required, error: error
+            requireExisting: required, error: error,
         )
     }
 
@@ -225,10 +231,12 @@ package enum NativeResourcePlanner {
 
     private static func transactionReceipt(_ receipt: Receipt, previous: Receipt?, unchanged: Bool) throws -> Receipt {
         guard let previous else { return receipt }
-        if unchanged, try replacingTransaction(receipt, id: previous.transactionID) == previous { return previous }
+        if unchanged, try replacingTransaction(receipt, id: previous.transactionID) == previous {
+            return previous
+        }
         guard receipt.transactionID == previous.transactionID else { return receipt }
         return try replacingTransaction(
-            receipt, id: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            receipt, id: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased(),
         )
     }
 
@@ -236,7 +244,7 @@ package enum NativeResourcePlanner {
     private static func sharedEdit(
         _ before: Revision, destination: ResourcePath, own: [Claim: OwnedClaim], claims: [OwnedClaim],
         desired: [Claim: RenderedArtifact], acquisition: Acquisition, replaceModified: Bool,
-        provenance: DocumentProvenance, schemas: [DocumentSchema]
+        provenance: DocumentProvenance, schemas: [DocumentSchema],
     ) throws -> DocumentEdit {
         var requests = try own.keys.filter { desired[$0] == nil }.sorted {
             try $0.identity(destination: destination) < $1.identity(destination: destination)
@@ -257,7 +265,7 @@ package enum NativeResourcePlanner {
             })?.current else { return item }
             return try OwnedSelection(
                 claim: item.claim, format: item.format, installed: current, disposition: item.disposition,
-                baseline: item.baseline, separator: item.separator
+                baseline: item.baseline, separator: item.separator,
             )
         }
         return try editSchemaDocument(source: before.data, requests: requests, ownership: ownership,
@@ -275,7 +283,7 @@ package enum NativeResourcePlanner {
         _ before: Revision, resource: ResourceRef, own: [Claim: OwnedClaim],
         desired: [Claim: RenderedArtifact], bundle: FlyrailBundle?, rendered: RenderedBundle,
         acquisition: Acquisition, replaceModified: Bool,
-        requirements: [String: [ClaimRequirement]], stableRequirements: [String: [ClaimRequirement]]
+        requirements: [String: [ClaimRequirement]], stableRequirements: [String: [ClaimRequirement]],
     ) throws -> WholePlan {
         let ordered = try Set(own.keys).union(desired.keys).map {
             try ($0.identity(destination: resource.destination), $0)
@@ -287,7 +295,7 @@ package enum NativeResourcePlanner {
             let actual = try selected(before, claim: claim)
             if let installed = old?.installed, !intact(actual, installed), !replaceModified {
                 return WholePlan(after: before, claims: [], error: nativeFailure(
-                    .modified, "owned resource has local modifications", resource.destination
+                    .modified, "owned resource has local modifications", resource.destination,
                 ))
             }
             let replacement: Revision
@@ -299,12 +307,12 @@ package enum NativeResourcePlanner {
                     switch acquisition {
                     case .conflict:
                         return WholePlan(after: before, claims: [], error: nativeFailure(
-                            .conflict, "unowned content already exists", resource.destination
+                            .conflict, "unowned content already exists", resource.destination,
                         ))
                     case .adopt:
                         guard intact(actual, replacement) else {
                             return WholePlan(after: before, claims: [], error: nativeFailure(
-                                .conflict, "adoption requires matching content", resource.destination
+                                .conflict, "adoption requires matching content", resource.destination,
                             ))
                         }
                         disposition = .adopted
@@ -316,9 +324,11 @@ package enum NativeResourcePlanner {
                 try claims.append(owned(
                     artifact, resource: resource, bundle: bundle, rendered: rendered, installed: replacement,
                     disposition: disposition, baseline: baseline,
-                    requirements: requirements, stableRequirements: stableRequirements
+                    requirements: requirements, stableRequirements: stableRequirements,
                 ))
-            } else { replacement = try old?.baseline ?? Revision() }
+            } else {
+                replacement = try old?.baseline ?? Revision()
+            }
             if !intact(actual, replacement) {
                 after = try replaceSelection(after, claim: claim, content: replacement)
             }
@@ -331,7 +341,7 @@ package enum NativeResourcePlanner {
         _ artifact: RenderedArtifact, resource: ResourceRef, bundle: FlyrailBundle?, rendered: RenderedBundle,
         selection: OwnedSelection? = nil, installed: Revision? = nil,
         disposition: Disposition, baseline: Revision? = nil,
-        requirements: [String: [ClaimRequirement]], stableRequirements: [String: [ClaimRequirement]]
+        requirements: [String: [ClaimRequirement]], stableRequirements: [String: [ClaimRequirement]],
     ) throws -> OwnedClaim {
         guard let bundle else { throw FlyrailValueError("desired content requires a bundle") }
         let claim = try claim(artifact)
@@ -341,12 +351,12 @@ package enum NativeResourcePlanner {
             bundleDigest: bundle.contentDigest, renderDigest: rendered.renderDigest,
             selection: selection, installed: installed, disposition: disposition, baseline: baseline,
             requirements: requirements[artifact.id] ?? [], stableRequirements: stableRequirements[artifact.id] ?? [],
-            schemaRequirements: artifact.schemaRequirements
+            schemaRequirements: artifact.schemaRequirements,
         )
     }
 
     package static func containerProvenance(
-        _ before: Revision, after: Revision, previous: Receipt?, claims: [OwnedClaim]
+        _ before: Revision, after: Revision, previous: Receipt?, claims: [OwnedClaim],
     ) throws -> (Revision, [Node]) {
         let existing = Dictionary(uniqueKeysWithValues: before.nodes.map { (Data($0.path.utf8), $0) })
         var created = Dictionary(uniqueKeysWithValues: (previous?.createdDirectories ?? [])

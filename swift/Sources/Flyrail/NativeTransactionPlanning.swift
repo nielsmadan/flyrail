@@ -21,10 +21,12 @@ package enum NativeTransactionPlanning {
             }
             let pair = try ClaimRequirement(
                 destination: resource.destination,
-                claimID: NativeResourcePlanner.claim(artifact).identity(destination: resource.destination)
+                claimID: NativeResourcePlanner.claim(artifact).identity(destination: resource.destination),
             )
             requirements[edge.dependent, default: []].insert(pair)
-            if edge.mode == .stableReference { stable[edge.dependent, default: []].insert(pair) }
+            if edge.mode == .stableReference {
+                stable[edge.dependent, default: []].insert(pair)
+            }
         }
         var grouped: [ResourceRef: [RenderedArtifact]] = [:]
         for artifact in rendered.artifacts {
@@ -40,10 +42,12 @@ package enum NativeTransactionPlanning {
                     id: previous.id, family: previous.family, destination: previous.destination,
                     content: previous.content, subtree: previous.subtree,
                     requireExisting: previous.requireExisting || artifact.requireExisting,
-                    schemaRequirements: previous.schemaRequirements
+                    schemaRequirements: previous.schemaRequirements,
                 )
                 grouped[resource] = grouped[resource]?.map { $0.id == previous.id ? merged : $0 }
-            } else { grouped[resource, default: []].append(artifact) }
+            } else {
+                grouped[resource, default: []].append(artifact)
+            }
         }
         func ordered(_ pairs: Set<ClaimRequirement>) -> [ClaimRequirement] {
             pairs.sorted {
@@ -61,7 +65,7 @@ package enum NativeTransactionPlanning {
     }
 
     package static func order(
-        _ plans: [ResourcePlan], rendered: RenderedBundle, byID: [String: ResourceRef]
+        _ plans: [ResourcePlan], rendered: RenderedBundle, byID: [String: ResourceRef],
     ) throws -> [ResourcePlan] {
         var edges = Set(rendered.dependencies.compactMap { edge -> Edge? in
             guard let dependent = byID[edge.dependent], let required = byID[edge.required], dependent != required else {
@@ -101,7 +105,9 @@ package enum NativeTransactionPlanning {
             }.sorted { $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes) }
             guard !ready.isEmpty else { throw FlyrailValueError("cyclic resource dependencies") }
             for resource in ready {
-                if let plan = pending.removeValue(forKey: resource) { ordered.append(plan) }
+                if let plan = pending.removeValue(forKey: resource) {
+                    ordered.append(plan)
+                }
             }
         }
         return ordered

@@ -86,20 +86,22 @@ func skillPublicModelsPreserveExactUTF8AndSendability() throws {
         version: "é",
         contentDigest: "digest",
         transactionID: "transaction",
-        entries: []
+        entries: [],
     )
     let second = try Installation(
         bundleID: "team",
         version: "e\u{301}",
         contentDigest: "digest",
         transactionID: "transaction",
-        entries: []
+        entries: [],
     )
     #expect(Set([first, second]).count == 2)
     #expect(Set([Conflict(path: "é"), Conflict(path: "e\u{301}")]).count == 2)
     #expect(try Set([Modification(bundleID: "team", path: "é", kind: .missing),
                      Modification(bundleID: "team", path: "e\u{301}", kind: .missing)]).count == 2)
-    func sendable<T: Sendable>(_ value: T) -> T { value }
+    func sendable<T: Sendable>(_ value: T) -> T {
+        value
+    }
     #expect(sendable(first) == first)
     #expect(sendable(Observation(state: .absent)).state == .absent)
 }

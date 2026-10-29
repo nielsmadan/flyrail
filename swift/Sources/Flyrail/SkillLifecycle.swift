@@ -30,7 +30,9 @@ private func skillOperation<T: SkillTarget>(bundle: FlyrailBundle?, bundleID: St
         var root = target.root
         var prior: Observation?
         do {
-            if let bundle { try SkillInspection.validate(bundle) }
+            if let bundle {
+                try SkillInspection.validate(bundle)
+            }
             let prepared = try SkillInspection.target(target, bundleID: bundleID)
             root = prepared.0
             if let alias = known[root] {

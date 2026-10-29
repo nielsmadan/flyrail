@@ -53,7 +53,7 @@ public struct InstallationTarget: Sendable, Hashable {
     public let routingContext: [(String, String)]
 
     package init(
-        recordedIndexRoot: ResourcePath, context: [(String, String)] = [], routingContext: [(String, String)] = []
+        recordedIndexRoot: ResourcePath, context: [(String, String)] = [], routingContext: [(String, String)] = [],
     ) throws {
         try requireResourcePath(recordedIndexRoot)
         indexRoot = recordedIndexRoot
@@ -111,7 +111,7 @@ public struct ClaimObservation: Sendable, Hashable {
 
     public init(
         claimID: String, bundleID: String, artifactID: String, version: String,
-        bundleDigest: String, renderDigest: String, status: EditStatus
+        bundleDigest: String, renderDigest: String, status: EditStatus,
     ) throws {
         try hexadecimalIdentity(claimID)
         try validateIdentifier(bundleID, label: "bundle id")
@@ -155,11 +155,13 @@ public struct ResourceObservation: Sendable, Hashable {
 
     public init(
         destination: ResourcePath, stateRoot: ResourcePath, claims: [ClaimObservation] = [],
-        revisionDigest: String? = nil, error: TargetError? = nil, recoveryPaths: [ResourcePath] = []
+        revisionDigest: String? = nil, error: TargetError? = nil, recoveryPaths: [ResourcePath] = [],
     ) throws {
         try requireResourcePath(destination)
         try requireResourcePath(stateRoot)
-        if let revisionDigest { try hexadecimalIdentity(revisionDigest) }
+        if let revisionDigest {
+            try hexadecimalIdentity(revisionDigest)
+        }
         try recoveryPaths.forEach(requireResourcePath)
         self.destination = destination
         self.stateRoot = stateRoot
@@ -198,10 +200,12 @@ public struct InstallationObservation: Sendable, Hashable {
     public init(
         bundleID: String, target: InstallationTarget, resources: [ResourceObservation], isCurrent: Bool,
         pending: Bool, version: String? = nil, bundleDigest: String? = nil, renderDigest: String? = nil,
-        error: TargetError? = nil
+        error: TargetError? = nil,
     ) throws {
         try validateIdentifier(bundleID, label: "bundle id")
-        if let version { try validateVersion(version) }
+        if let version {
+            try validateVersion(version)
+        }
         try [bundleDigest, renderDigest].compactMap(\.self).forEach { try hexadecimalIdentity($0) }
         self.bundleID = bundleID
         self.target = target
@@ -249,7 +253,7 @@ public struct ResourceResult: Sendable, Hashable {
     public let recoveryPaths: [ResourcePath]
 
     public init(
-        resource: ResourceRef, status: OperationStatus, error: TargetError? = nil, recoveryPaths: [ResourcePath] = []
+        resource: ResourceRef, status: OperationStatus, error: TargetError? = nil, recoveryPaths: [ResourcePath] = [],
     ) throws {
         try recoveryPaths.forEach(requireResourcePath)
         self.resource = resource
@@ -268,7 +272,7 @@ public struct InstallationResult: Sendable, Hashable {
 
     public init(
         status: OperationStatus, observation: InstallationObservation, resources: [ResourceResult] = [],
-        error: TargetError? = nil, notices: [Notice] = []
+        error: TargetError? = nil, notices: [Notice] = [],
     ) {
         self.status = status
         self.observation = observation
@@ -293,7 +297,7 @@ public struct ResourcePlan: Sendable, Hashable {
     public init(
         resource: ResourceRef, before: Revision, after: Revision, previous: Receipt?, receipt: Receipt,
         ancestors: [Ancestor], stateRevision: Revision, recoveryPaths: [ResourcePath],
-        requireExisting: Bool = false, error: TargetError? = nil
+        requireExisting: Bool = false, error: TargetError? = nil,
     ) throws {
         guard receipt.resource == resource, previous == nil || previous?.resource == resource else {
             throw FlyrailValueError("planned receipts disagree with resource")
@@ -331,7 +335,7 @@ public struct LifecyclePreview: Sendable, Hashable {
         bundleID: String, bundle: FlyrailBundle?, rendered: RenderedBundle, target: InstallationTarget,
         acquisition: Acquisition, replaceModified: Bool, index: Index?, indexRevision: Revision?,
         indexAncestors: [Ancestor], generation: Generation?, resources: [ResourcePlan], error: TargetError? = nil,
-        artifactsByResource: [ResourceRef: [RenderedArtifact]] = [:]
+        artifactsByResource: [ResourceRef: [RenderedArtifact]] = [:],
     ) throws {
         try validateIdentifier(bundleID, label: "bundle id")
         guard bundle == nil || bundle?.identity.id == bundleID else {

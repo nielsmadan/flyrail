@@ -7,7 +7,7 @@ private enum StateJSONWork {
 }
 
 package func mapStateJSON(
-    _ value: JSONValue, descendObjects: Bool = true, transform: (JSONValue) throws -> JSONValue
+    _ value: JSONValue, descendObjects: Bool = true, transform: (JSONValue) throws -> JSONValue,
 ) throws -> JSONValue {
     var pending: [StateJSONWork] = [.value(value)]
     var results: [JSONValue] = []

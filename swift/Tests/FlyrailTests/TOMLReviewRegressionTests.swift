@@ -78,7 +78,7 @@ func TOMLDottedTableAndAOTUpdatesUseDeclarationRelativePaths() throws {
         (
             "[[hooks]]\nname=\"a\"\nfoo.command=1\nfoo.other=2\n",
             ["hooks", ["identity": "a", "key": ["name"]], "foo"],
-            "[[hooks]]\nname=\"a\"\nfoo.command = 3\n"
+            "[[hooks]]\nname=\"a\"\nfoo.command = 3\n",
         ),
     ]
     for (source, selector, expected) in cases {
@@ -117,7 +117,7 @@ func TOMLNativeTemporalPrecisionTruncatesSemanticsAndPreservesTokens() throws {
         ("2000-01-01T00:00:00.123456789Z", .scalar(.offsetDateTime(OffsetDateTime("2000-01-01T00:00:00.123456Z")))),
         (
             "2000-01-01 01:00:00.123456789+01:00",
-            .scalar(.offsetDateTime(OffsetDateTime("2000-01-01T00:00:00.123456Z")))
+            .scalar(.offsetDateTime(OffsetDateTime("2000-01-01T00:00:00.123456Z"))),
         ),
     ]
     for (token, value) in values {
@@ -134,7 +134,7 @@ func TOMLNativeTemporalPrecisionTruncatesSemanticsAndPreservesTokens() throws {
 private func retireTOMLRegression(_ edit: DocumentEdit) throws -> DocumentEdit {
     try editDocument(
         source: edit.after, requests: edit.ownership.map { try .retire($0.claim) },
-        ownership: edit.ownership, provenance: edit.provenance
+        ownership: edit.ownership, provenance: edit.provenance,
     )
 }
 
@@ -156,14 +156,14 @@ func tomlReviewRegressionCases() -> [[String: Any]] {
             "x.a=1\n# owned between\n\nx.b=2\nforeign=3\n",
             ["x"],
             ["a": 5, "b": 6],
-            acquisition: "takeover"
+            acquisition: "takeover",
         ),
         row(
             "toml-review-mixed-prefix",
             "x.a=1\n\"x\".b=2\nforeign=3\n",
             ["x"],
             ["a": 5, "b": 6],
-            acquisition: "takeover"
+            acquisition: "takeover",
         ),
         row("toml-review-detach-indented-scalar", "  x=1 # foreign\n", ["x"], 1, acquisition: "adopt"),
         row("toml-review-detach-indented-table", "  [x] # foreign\na=1\n", ["x"], ["a": 1], acquisition: "adopt"),
@@ -172,7 +172,7 @@ func tomlReviewRegressionCases() -> [[String: Any]] {
             "[mcp]\nfoo.command=1\nfoo.other=2\n",
             ["mcp", "foo"],
             ["command": 3],
-            acquisition: "takeover"
+            acquisition: "takeover",
         ),
         row("toml-review-aot-relative", "[[hooks]]\nname=\"a\"\nfoo.command=1\nfoo.other=2\n",
             ["hooks", ["identity": "a", "key": ["name"]], "foo"], ["command": 3], acquisition: "takeover"),
@@ -183,7 +183,7 @@ func tomlReviewRegressionCases() -> [[String: Any]] {
             "x={a=1\(gap)}\nforeign=2\n",
             ["x", "b"],
             3,
-            acquisition: "conflict"
+            acquisition: "conflict",
         ))
     }
     let malformed = ["x={}\nx.y=2\n", "x=1_e2\n", "x=1e_2\n", "x=\"\\u+123\"\n", "x=2000-01-01T12:34:56+01\n"]
@@ -201,7 +201,7 @@ func tomlReviewRegressionCases() -> [[String: Any]] {
             "x=\(temporal.0)\n",
             ["y"],
             1,
-            acquisition: "conflict"
+            acquisition: "conflict",
         ))
         cases.append([
             "name": "toml-review-selected-precision-\(index)", "format": "toml", "before": "x=\(temporal.0)\n",

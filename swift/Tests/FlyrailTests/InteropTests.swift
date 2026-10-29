@@ -92,7 +92,7 @@ func interopBoundsInputAndCanonicalizesState() throws {
 }
 
 private func invokeInterop(
-    _ arguments: [String], input: Data, root: URL
+    _ arguments: [String], input: Data, root: URL,
 ) throws -> (status: Int32, output: Data, error: Data) {
     let inputURL = root.appending(path: "stdin")
     let outputURL = root.appending(path: "stdout")

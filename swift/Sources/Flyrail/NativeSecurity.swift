@@ -61,7 +61,9 @@ package enum NativeSecurity {
     private static func aclText(_ descriptor: Int32, path: ResourcePath, ancestor: Bool) throws -> Data {
         guard let acl = acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED) else {
             let code = errno
-            if code == ENOENT { return Data() }
+            if code == ENOENT {
+                return Data()
+            }
             throw nativeIO(code, message: "cannot inspect file ACL", path: path)
         }
         defer { acl_free(UnsafeMutableRawPointer(acl)) }
@@ -105,5 +107,7 @@ package enum NativeSecurity {
 }
 
 package extension Data {
-    var nativeHex: String { map { String(format: "%02x", $0) }.joined() }
+    var nativeHex: String {
+        map { String(format: "%02x", $0) }.joined()
+    }
 }

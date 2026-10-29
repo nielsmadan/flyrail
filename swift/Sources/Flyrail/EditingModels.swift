@@ -171,7 +171,7 @@ public struct SelectionSnapshot: Sendable, Hashable {
         value: SnapshotValue,
         syntax: Data,
         ownedSyntax: Data,
-        position: ArrayPosition? = nil
+        position: ArrayPosition? = nil,
     ) {
         self.value = value
         self.syntax = syntax
@@ -182,7 +182,7 @@ public struct SelectionSnapshot: Sendable, Hashable {
 
     public init(
         value: SnapshotValue, syntax: Data, ownedSyntax: Data,
-        position: ArrayPosition? = nil, layout: Data
+        position: ArrayPosition? = nil, layout: Data,
     ) throws {
         self.value = value
         self.syntax = syntax
@@ -207,7 +207,7 @@ public struct OwnedSelection: Sendable, Hashable {
         installed: SelectionSnapshot,
         disposition: Disposition,
         baseline: SelectionSnapshot? = nil,
-        separator: Data = Data()
+        separator: Data = Data(),
     ) throws {
         let validClaim = (claim.kind == .section && format == nil) ||
             (claim.kind == .structured && format != nil)
@@ -218,7 +218,11 @@ public struct OwnedSelection: Sendable, Hashable {
             throw FlyrailValueError("only takeover ownership has a baseline")
         }
         for snapshot in [installed, baseline].compactMap(\.self) {
-            let containsBytes = if case .bytes = snapshot.value { true } else { false }
+            let containsBytes = if case .bytes = snapshot.value {
+                true
+            } else {
+                false
+            }
             guard containsBytes == (format == nil) else {
                 throw FlyrailValueError("selection snapshot and document format disagree")
             }
@@ -271,7 +275,7 @@ public struct DocumentProvenance: Sendable, Hashable {
         containers: [CreatedContainer] = [],
         trailingSeparators: [String] = [],
         schemaFields: [OwnedSelection] = [],
-        schemaEmptyDocument: Data? = nil
+        schemaEmptyDocument: Data? = nil,
     ) throws {
         guard Set(containers.map(\.selector)).count == containers.count else {
             throw FlyrailValueError("duplicate container provenance")
@@ -319,7 +323,7 @@ public struct DocumentRequest: Sendable, Hashable {
     public init(
         claim: Claim,
         content: Content?,
-        acquisition: Acquisition = .conflict
+        acquisition: Acquisition = .conflict,
     ) throws {
         guard claim.kind == .section || claim.kind == .structured else {
             throw FlyrailValueError("document requests require section or structured claims")
@@ -338,7 +342,7 @@ public struct DocumentRequest: Sendable, Hashable {
 
     public static func set(
         _ content: Content,
-        acquisition: Acquisition = .conflict
+        acquisition: Acquisition = .conflict,
     ) throws -> Self {
         try Self(claim: contentClaim(content), content: content, acquisition: acquisition)
     }
@@ -358,7 +362,7 @@ public struct EditObservation: Sendable, Hashable {
         claim: Claim,
         status: EditStatus,
         current: SelectionSnapshot?,
-        message: String = ""
+        message: String = "",
     ) {
         self.claim = claim
         self.status = status

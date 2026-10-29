@@ -7,16 +7,25 @@ public protocol SkillTarget: Sendable {
 }
 
 public extension SkillTarget {
-    var agent: Agent? { nil }
-    var skillRoutingContext: [(String, String)] { [("agent", ""), ("scope", "directory"), ("home", "")] }
+    var agent: Agent? {
+        nil
+    }
+
+    var skillRoutingContext: [(String, String)] {
+        [("agent", ""), ("scope", "directory"), ("home", "")]
+    }
 }
 
 extension Target: SkillTarget {
-    public var skillRoutingContext: [(String, String)] { routingContext }
+    public var skillRoutingContext: [(String, String)] {
+        routingContext
+    }
 }
 
 extension ResourcePath: SkillTarget {
-    public var root: ResourcePath { self }
+    public var root: ResourcePath {
+        self
+    }
 }
 
 package let droidUnsupported = "Flyrail detects droid but has no verified configuration translation."
@@ -30,7 +39,7 @@ public func renderSkills(_ bundle: FlyrailBundle, target: some SkillTarget) thro
                 artifactID: skill.name,
                 kind: .unsupported,
                 message: droidUnsupported,
-                code: "agent-unsupported"
+                code: "agent-unsupported",
             )
         })
     }
@@ -39,7 +48,13 @@ public func renderSkills(_ bundle: FlyrailBundle, target: some SkillTarget) thro
 
 package enum SkillInspection {
     package static func validate(_ bundle: FlyrailBundle) throws {
-        guard bundle.artifacts.allSatisfy({ if case .skill = $0 { true } else { false } }) else {
+        guard bundle.artifacts.allSatisfy({
+            if case .skill = $0 {
+                true
+            } else {
+                false
+            }
+        }) else {
             throw FlyrailValueError("use explicit rendering for non-skill artifacts")
         }
         guard bundle.assets.isEmpty, bundle.dependencies.isEmpty else {
@@ -59,7 +74,10 @@ package enum SkillInspection {
                                bundleID: String) throws -> (ResourcePath, InstallationTarget)
     {
         if target
-            .agent == .droid { throw TargetError(code: .unsupported, message: droidUnsupported, path: target.root) }
+            .agent == .droid
+        {
+            throw TargetError(code: .unsupported, message: droidUnsupported, path: target.root)
+        }
         try validateIdentifier(bundleID, label: "bundle id")
         let root = try NativeAuthority.canonicalDestination(target.root)
         let parts = try NativeFilesystem.components(root)
@@ -111,7 +129,7 @@ package enum SkillInspection {
         return Observation(state: state, installed: installed, installations: installations,
                            versionMatches: bundle.flatMap { bundle in installed.map { exactTextEqual(
                                $0.version,
-                               bundle.identity.version
+                               bundle.identity.version,
                            ) } },
                            recordedContentMatches: bundle
                                .flatMap { bundle in installed.map { $0.contentDigest == bundle.contentDigest } },

@@ -27,7 +27,7 @@ func TOMLBoundsCoverParsedAndGeneratedDocuments() throws {
             value = .array([value])
         }
         let content = try StructuredContent(
-            format: .toml, selector: Flyrail.Selector(parts: [.key(Key("x"))]), value: value
+            format: .toml, selector: Flyrail.Selector(parts: [.key(Key("x"))]), value: value,
         )
         let edit = try editDocument(source: nil, requests: [.set(.structured(content))])
         #expect(edit.applicable == (depth == 100))
@@ -38,7 +38,7 @@ func TOMLBoundsCoverParsedAndGeneratedDocuments() throws {
     #expect(throws: FlyrailValueError("TOML input exceeds the byte limit")) {
         try editDocument(
             source: Data(repeating: 32, count: JSONLimits.default.maximumInputBytes + 1),
-            requests: [request]
+            requests: [request],
         )
     }
 }
@@ -70,7 +70,7 @@ func TOMLLayoutRejectsInjectedHeadersInvalidPathsAndMismatchedDestinations() thr
     }
     let snapshot = try SelectionSnapshot(
         value: .typed(value), syntax: Data(), ownedSyntax: Data(),
-        layout: Data(#"{"version":1,"headers":[[["env"],"foreign.env"]]}"#.utf8)
+        layout: Data(#"{"version":1,"headers":[[["env"],"foreign.env"]]}"#.utf8),
     )
     let claim = try Claim(kind: .structured, selector: .structured(Flyrail.Selector(parts: [.key(Key("x"))])))
     #expect(throws: FlyrailValueError("TOML restoration header does not match its destination")) {
@@ -101,7 +101,7 @@ func TOMLExactStringAndKeyIdentityRetainsForeignSpellings() throws {
         .after == Data("\"\(composed)\"=3\n\"\(decomposed)\"=2\nhooks=[\"\(composed)\",\"\(decomposed)\"]\n".utf8))
     let removed = try editDocument(
         source: installed.after, requests: installed.ownership.map { try .retire($0.claim) },
-        ownership: installed.ownership, provenance: installed.provenance
+        ownership: installed.ownership, provenance: installed.provenance,
     )
     #expect(removed.after == Data("\"\(composed)\"=1\n\"\(decomposed)\"=2\nhooks=[\"\(composed)\"]\n".utf8))
 }

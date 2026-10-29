@@ -11,7 +11,7 @@ public func matchesSchema(source: Data?, requirement: DocumentSchema) throws -> 
 public func editSchemaDocument(
     source: Data?, requests: [DocumentRequest], ownership: [OwnedSelection] = [],
     provenance: DocumentProvenance = DocumentProvenance(),
-    activeSchemas: [DocumentSchema], validate: Bool
+    activeSchemas: [DocumentSchema], validate: Bool,
 ) throws -> DocumentEdit {
     let unique = Set(activeSchemas)
     guard unique.count == Set(activeSchemas.map { Data($0.key.utf8) }).count else {
@@ -46,7 +46,7 @@ public func editSchemaDocument(
                     before: source, after: source, ownership: ownership, provenance: provenance,
                     observations: requests.map {
                         .init(claim: $0.claim, status: .conflict, current: nil, message: "document schema differs")
-                    }
+                    },
                 )
             }
         }
@@ -60,12 +60,12 @@ public func editSchemaDocument(
     let ordinary = try schemaProvenance(provenance, fields: [], empty: nil)
     let edit = try editDocument(
         source: normalized, requests: requests + additions,
-        ownership: ownership + created, provenance: ordinary
+        ownership: ownership + created, provenance: ordinary,
     )
     guard edit.applicable else {
         return .init(
             before: source, after: source, ownership: ownership, provenance: provenance,
-            observations: edit.observations
+            observations: edit.observations,
         )
     }
     let fields = edit.ownership.filter { createdIDs.contains($0.claim) }
@@ -74,25 +74,25 @@ public func editSchemaDocument(
     if activeSchemas.isEmpty {
         let candidate = try editDocument(
             source: edit.after, requests: fields.map { try .retire($0.claim) },
-            ownership: owned + fields, provenance: edit.provenance
+            ownership: owned + fields, provenance: edit.provenance,
         )
         if candidate.applicable, owned.isEmpty, candidate.after == nil || emptySchemaObject(candidate.after) {
             return .init(
                 before: source, after: emptySource ?? candidate.after,
                 ownership: candidate.ownership, provenance: candidate.provenance,
-                observations: observations
+                observations: observations,
             )
         }
         return try .init(
             before: source, after: edit.after, ownership: owned,
             provenance: schemaProvenance(edit.provenance, fields: [], empty: owned.isEmpty ? nil : emptySource),
-            observations: observations
+            observations: observations,
         )
     }
     return try .init(
         before: source, after: edit.after, ownership: owned,
         provenance: schemaProvenance(edit.provenance, fields: fields, empty: emptySource),
-        observations: observations
+        observations: observations,
     )
 }
 
@@ -105,11 +105,11 @@ private func emptySchemaObject(_ data: Data?) -> Bool {
 }
 
 private func schemaProvenance(
-    _ provenance: DocumentProvenance, fields: [OwnedSelection], empty: Data?
+    _ provenance: DocumentProvenance, fields: [OwnedSelection], empty: Data?,
 ) throws -> DocumentProvenance {
     try .init(
         emptyDocument: provenance.emptyDocument, containers: provenance.containers,
         trailingSeparators: provenance.trailingSeparators,
-        schemaFields: fields, schemaEmptyDocument: empty
+        schemaFields: fields, schemaEmptyDocument: empty,
     )
 }

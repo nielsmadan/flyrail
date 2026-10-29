@@ -28,7 +28,7 @@ public struct CalendarDate: Sendable, Hashable, Comparable {
         try self.init(
             year: UInt16(asciiDigits(bytes[0 ..< 4])),
             month: UInt8(asciiDigits(bytes[5 ..< 7])),
-            day: UInt8(asciiDigits(bytes[8 ..< 10]))
+            day: UInt8(asciiDigits(bytes[8 ..< 10])),
         )
     }
 
@@ -107,7 +107,7 @@ public struct LocalTime: Sendable, Hashable, Comparable {
             hour: UInt8(hour),
             minute: UInt8(minute),
             second: UInt8(second),
-            microsecond: microsecond
+            microsecond: microsecond,
         )
     }
 
@@ -129,7 +129,7 @@ public struct LocalTime: Sendable, Hashable, Comparable {
             hour: UInt8(secondsOfDay / 3600),
             minute: UInt8((secondsOfDay % 3600) / 60),
             second: UInt8(secondsOfDay % 60),
-            microsecond: microsecond
+            microsecond: microsecond,
         )
     }
 }
@@ -174,7 +174,7 @@ public struct OffsetDateTime: Sendable, Hashable, Comparable {
         self.date = try CalendarDate(daysSinceEpoch: instant.floorDividing(by: 86400))
         self.time = try LocalTime(
             secondsOfDay: instant.floorRemainder(dividingBy: 86400),
-            microsecond: time.microsecond
+            microsecond: time.microsecond,
         )
     }
 
@@ -221,19 +221,19 @@ private func splitOffset(_ text: String) throws -> (time: String, offsetSeconds:
         components = try (
             asciiDigits(body[0 ..< 2]),
             asciiDigits(body[2 ..< 4]),
-            0
+            0,
         )
     case 5 where body[2] == 58:
         components = try (
             asciiDigits(body[0 ..< 2]),
             asciiDigits(body[3 ..< 5]),
-            0
+            0,
         )
     case 8 where body[2] == 58 && body[5] == 58:
         components = try (
             asciiDigits(body[0 ..< 2]),
             asciiDigits(body[3 ..< 5]),
-            asciiDigits(body[6 ..< 8])
+            asciiDigits(body[6 ..< 8]),
         )
     default:
         throw FlyrailValueError("datetime offset must be written as ±HH:MM")

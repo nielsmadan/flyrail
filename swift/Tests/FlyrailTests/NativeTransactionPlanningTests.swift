@@ -6,18 +6,18 @@ import Testing
 func transactionWrite(
     _ bundle: FlyrailBundle, rendered: RenderedBundle, target: InstallationTarget,
     acquisition: Acquisition = .conflict, replaceModified: Bool = false,
-    seam: NativeTransactionSeam = .none
+    seam: NativeTransactionSeam = .none,
 ) throws -> InstallationResult {
     try NativeTransactionDriver.write(
         bundle: bundle, bundleID: bundle.identity.id, rendered: rendered, target: target,
-        acquisition: acquisition, replaceModified: replaceModified, timeout: .zero, seam: seam
+        acquisition: acquisition, replaceModified: replaceModified, timeout: .zero, seam: seam,
     )
 }
 
 func transactionRemove(_ owner: String, target: InstallationTarget) throws -> InstallationResult {
     try NativeTransactionDriver.write(
         bundle: nil, bundleID: owner, rendered: .empty, target: target, acquisition: .conflict,
-        replaceModified: false, timeout: .zero
+        replaceModified: false, timeout: .zero,
     )
 }
 
@@ -37,7 +37,9 @@ func nativeWholeAcquisitionRetainsFirstBaselineAndOwnership(_ acquisition: Acqui
     ])
     #expect(try transactionWrite(transactionBundle(), rendered: first, target: target,
                                  acquisition: acquisition).observation.isCurrent)
-    if acquisition == .adopt { #expect(try NativeObservation.snapshot(path).revision == before) }
+    if acquisition == .adopt {
+        #expect(try NativeObservation.snapshot(path).revision == before)
+    }
     let ref = try NativeAuthority.reference(path, kind: .document)
     let receipt = try #require(NativeAdmission.observe(ref).receipt)
     #expect(receipt.claims.first?.disposition == (acquisition == .adopt ? .adopted : .takenOver))

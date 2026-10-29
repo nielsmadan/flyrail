@@ -2,7 +2,9 @@ import Foundation
 
 package enum LifecycleExecution {
     package static func requireApplicable(_ preview: LifecyclePreview) throws {
-        if let error = preview.error ?? preview.resources.compactMap(\.error).first { throw error }
+        if let error = preview.error ?? preview.resources.compactMap(\.error).first {
+            throw error
+        }
         guard preview.resources.allSatisfy(\.recoveryPaths.isEmpty) else {
             throw TargetError(code: .recoveryNeeded, message: "preview requires recovery and re-observation")
         }
@@ -32,7 +34,7 @@ package enum LifecycleExecution {
             return try InstallationResult(status: .unchanged,
                                           observation: InstallationInspection.observe(
                                               bundleID: fresh.bundleID,
-                                              target: fresh.target
+                                              target: fresh.target,
                                           ),
                                           notices: fresh.rendered.notices)
         }
@@ -50,7 +52,7 @@ package enum LifecycleExecution {
         return try InstallationResult(status: outcome.status,
                                       observation: InstallationInspection.observe(
                                           bundleID: fresh.bundleID,
-                                          target: fresh.target
+                                          target: fresh.target,
                                       ),
                                       resources: outcome.resources, error: outcome.error,
                                       notices: fresh.rendered.notices)
@@ -66,14 +68,14 @@ package enum LifecycleExecution {
             return try InstallationResult(status: changed ? .applied : .unchanged,
                                           observation: InstallationInspection.observe(
                                               bundleID: bundleID,
-                                              target: target
+                                              target: target,
                                           ),
                                           resources: resources)
         } catch let failure as NativeIndexRecoveryFailure {
             return try InstallationResult(status: .incomplete,
                                           observation: InstallationInspection.observe(
                                               bundleID: bundleID,
-                                              target: target
+                                              target: target,
                                           ),
                                           resources: failure.resources, error: failure.error)
         }
@@ -91,7 +93,7 @@ package enum LifecycleExecution {
                                                      target: target,
                                                      error: TargetError(
                                                          code: .unsupported,
-                                                         message: "rendered target has unsupported requirements"
+                                                         message: "rendered target has unsupported requirements",
                                                      ),
                                                      notices: rendered.notices)
             }
@@ -103,19 +105,21 @@ package enum LifecycleExecution {
                 index: index,
                 target: target,
                 bundle: bundle,
-                group: group
+                group: group,
             )
             let locks = try locks(bundleID: bundleID, target: target, observed: observed,
                                   resources: references, timeout: lockTimeout)
             let recovered = try recover(bundleID: bundleID, target: target, locks: locks, seam: seam)
-            if recovered.error != nil { return recovered }
+            if recovered.error != nil {
+                return recovered
+            }
             let preview = try LifecyclePlanning.build(
                 bundleID: bundleID,
                 bundle: bundle,
                 rendered: rendered,
                 target: target,
                 acquisition: acquisition,
-                replaceModified: replaceModified
+                replaceModified: replaceModified,
             )
             return try run(preview, locks: locks, seam: seam)
         } catch {

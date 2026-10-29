@@ -17,7 +17,7 @@ package struct NativeResourceSnapshot: Sendable, Equatable {
 package enum NativeObservation {
     package static func snapshot(
         _ path: ResourcePath, limits: NativeLimits = .default, privateStorage: Bool = false,
-        resourcePayloads: Bool = false
+        resourcePayloads: Bool = false,
     ) throws -> NativeResourceSnapshot {
         if String(bytes: path.platformBytes, encoding: .utf8) == nil {
             throw nativeFailure(.unsafePath, "nonportable resource path", path)
@@ -30,7 +30,7 @@ package enum NativeObservation {
             return try NativeResourceSnapshot(revision: Revision(), ancestors: before, stamps: [])
         }
         let walker = NativeRevisionWalk(
-            limits: limits, privateStorage: privateStorage, resourcePayloads: resourcePayloads
+            limits: limits, privateStorage: privateStorage, resourcePayloads: resourcePayloads,
         )
         _ = try walker.walk(parent.descriptor, name: parent.name, path: path, relative: "", depth: 0)
         try walker.finish(parent.descriptor)
@@ -45,7 +45,7 @@ package enum NativeObservation {
         }
         return try NativeResourceSnapshot(
             revision: Revision(nodes: ordered.map { walker.nodes[$0] }),
-            ancestors: parent.ancestors, stamps: ordered.map { walker.bindings[$0].stamp }
+            ancestors: parent.ancestors, stamps: ordered.map { walker.bindings[$0].stamp },
         )
     }
 
@@ -74,10 +74,10 @@ package enum NativeObservation {
     }
 
     package static func read<T: StateCodable>(
-        _ path: ResourcePath, as type: T.Type, tag: String
+        _ path: ResourcePath, as type: T.Type, tag: String,
     ) throws -> T? {
         let snapshot = try snapshot(
-            path, limits: NativeLimits(maximumFileBytes: JSONLimits.default.maximumInputBytes), privateStorage: true
+            path, limits: NativeLimits(maximumFileBytes: JSONLimits.default.maximumInputBytes), privateStorage: true,
         )
         guard !snapshot.revision.nodes.isEmpty else { return nil }
         guard snapshot.revision.nodes.count == 1, let data = snapshot.revision.data else {
@@ -115,13 +115,15 @@ private final class NativeRevisionWalk {
     }
 
     func walk(
-        _ parent: NativeDescriptor, name: [UInt8], path: ResourcePath, relative: String, depth: Int
+        _ parent: NativeDescriptor, name: [UInt8], path: ResourcePath, relative: String, depth: Int,
     ) throws -> Int? {
         guard nodes.count < limits.maximumNodes, depth <= limits.maximumDepth else {
             throw nativeIO(ENOTSUP, message: "resource exceeds the node limit", path: path)
         }
         guard let before = try NativeFilesystem.metadata(parent.raw, name: name, path: path) else {
-            if depth > 0 { throw nativeFailure(.concurrentChange, "listed path disappeared during inspection", path) }
+            if depth > 0 {
+                throw nativeFailure(.concurrentChange, "listed path disappeared during inspection", path)
+            }
             return nil
         }
         try NativeFilesystem.ordinary(before, path: path)
@@ -144,7 +146,7 @@ private final class NativeRevisionWalk {
         }
         let security = try NativeSecurity.capture(descriptor.raw, path: path)
         let data = try isDirectory ? nil : NativeFilesystem.read(
-            descriptor, path: path, maximumBytes: min(limits.maximumFileBytes, limits.maximumTotalBytes - totalBytes)
+            descriptor, path: path, maximumBytes: min(limits.maximumFileBytes, limits.maximumTotalBytes - totalBytes),
         )
         totalBytes += data?.count ?? 0
         let names = try isDirectory ? NativeFilesystem.portableNames(descriptor, path: path) : nil
@@ -153,7 +155,7 @@ private final class NativeRevisionWalk {
                 path: relative, data: data, mode: Count(UInt64(before.st_mode & 0o777)),
                 uid: Count(UInt64(before.st_uid)), gid: Count(UInt64(before.st_gid)),
                 device: Count(UInt64(UInt32(bitPattern: before.st_dev))), inode: Count(before.st_ino),
-                security: security
+                security: security,
             ))
         } catch let error as FlyrailValueError {
             throw nativeFailure(.unsafePath, error.message, path)
@@ -161,7 +163,7 @@ private final class NativeRevisionWalk {
         let index = bindings.count
         bindings.append(NativeNodeBinding(
             name: name, path: path, stamp: NativeStamp(opened),
-            security: security, names: names
+            security: security, names: names,
         ))
         var children: [Int] = []
         for child in names ?? [] {
@@ -170,7 +172,7 @@ private final class NativeRevisionWalk {
             }
             if let childIndex = try walk(
                 descriptor, name: child, path: NativeFilesystem.child(path, child),
-                relative: relative.isEmpty ? text : "\(relative)/\(text)", depth: depth + 1
+                relative: relative.isEmpty ? text : "\(relative)/\(text)", depth: depth + 1,
             ) {
                 children.append(childIndex)
             }
@@ -184,7 +186,7 @@ private final class NativeRevisionWalk {
         guard !bindings.isEmpty else { return }
         let binding = bindings[index]
         let descriptor = try NativeFilesystem.open(
-            parent.raw, name: binding.name, directory: binding.names != nil, path: binding.path
+            parent.raw, name: binding.name, directory: binding.names != nil, path: binding.path,
         )
         try validate(binding, parent: parent, descriptor: descriptor)
         for child in binding.children {
@@ -194,11 +196,11 @@ private final class NativeRevisionWalk {
     }
 
     private func validate(
-        _ binding: NativeNodeBinding, parent: NativeDescriptor, descriptor: NativeDescriptor
+        _ binding: NativeNodeBinding, parent: NativeDescriptor, descriptor: NativeDescriptor,
     ) throws {
         let path = binding.path
         guard try NativeFilesystem.identity(
-            parent.raw, name: binding.name, descriptor: descriptor, path: path
+            parent.raw, name: binding.name, descriptor: descriptor, path: path,
         ), try NativeStamp(NativeFilesystem.stat(descriptor, path: path)) == binding.stamp else {
             throw nativeFailure(.concurrentChange, "path changed during inspection", path)
         }

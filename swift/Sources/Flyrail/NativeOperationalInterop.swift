@@ -12,7 +12,7 @@ extension NativeInterop {
         let prepared = try command == .write ? prepareWrite(options: options, owner: owner) : nil
         if command == .inspect {
             try output.write(contentsOf: StateCodec.encodeRecord(observationValue(
-                inspectInstallation(bundleID: owner, target: target)
+                inspectInstallation(bundleID: owner, target: target),
             )))
             return
         }
@@ -38,7 +38,7 @@ extension NativeInterop {
                 result = LifecycleExecution.synchronize(
                     bundleID: owner, bundle: bundle, rendered: rendered, target: target,
                     acquisition: acquisition, replaceModified: options["--replace-modified"] != nil,
-                    lockTimeout: timeout, seam: seam
+                    lockTimeout: timeout, seam: seam,
                 )
             default: throw FlyrailValueError("unsupported operational command")
             }
@@ -46,14 +46,14 @@ extension NativeInterop {
             let error = NativeTransactionExecution.detail(error)
             let observation = try inspectInstallation(bundleID: owner, target: target)
             result = InstallationResult(
-                status: error.code == .recoveryNeeded ? .incomplete : .failed, observation: observation, error: error
+                status: error.code == .recoveryNeeded ? .incomplete : .failed, observation: observation, error: error,
             )
         }
         try output.write(contentsOf: StateCodec.encodeRecord(resultValue(result)))
     }
 
     private static func prepareWrite(
-        options: [String: String], owner: String
+        options: [String: String], owner: String,
     ) throws -> (FlyrailBundle, RenderedBundle, Acquisition) {
         guard let destination = options["--destination"],
               let acquisition = Acquisition(rawValue: options["--acquisition"] ?? "conflict")
@@ -65,7 +65,7 @@ extension NativeInterop {
             let bundle = try FlyrailBundle(
                 identity: BundleIdentity(id: owner, version: options["--version"] ?? "1"),
                 artifacts: [.instruction(InstructionArtifact(id: "guide", text: "text"))], assets: [],
-                dependencies: []
+                dependencies: [],
             )
             return try (bundle, rendered(options, destination: ResourcePath(destination)), acquisition)
         }
@@ -83,7 +83,7 @@ extension NativeInterop {
         }
         let context = try RenderContext(
             target: .project(agent: agent, root: NativeAuthority.absolute(ResourcePath(destination))),
-            platform: .macOS, surface: .cli
+            platform: .macOS, surface: .cli,
         ).hookRuntime(HookRuntime(node: options["--node"].map(ResourcePath.init)))
         return try (bundle, render(bundle, for: context), acquisition)
     }
@@ -106,7 +106,9 @@ extension NativeInterop {
             }
             let pattern = Array("flyrail-interop-payload\n".utf8)
             payload = Data((0 ..< size).lazy.map { pattern[$0 % pattern.count] })
-        } else { payload = Data((options["--payload"] ?? "generated\n").utf8) }
+        } else {
+            payload = Data((options["--payload"] ?? "generated\n").utf8)
+        }
         guard payload.count <= 1024 * 1024 else {
             throw FlyrailValueError("payload must not exceed 1048576 bytes")
         }
@@ -143,7 +145,7 @@ extension NativeInterop {
         let phase = options["--barrier-phase"]
         let ready = options["--barrier-ready"]
         let release = options["--barrier-release"]
-        let boundaries: Set<String> = [
+        let boundaries: Set = [
             "stage-node", "index-pending-created", "journal-created", "receipt-created", "index-completion-created",
             "index-pending-prepared", "index-pending-reread", "index-pending-committed",
             "resource-precondition", "index-require", "index-ancestor", "guard-lookup",
@@ -161,7 +163,9 @@ extension NativeInterop {
         else { throw FlyrailValueError("fault and barrier options cannot be combined") }
         if let fault {
             return NativeTransactionSeam {
-                if $0 == fault { throw TargetError(code: .ioError, message: "injected \(fault) fault", errno: EIO) }
+                if $0 == fault {
+                    throw TargetError(code: .ioError, message: "injected \(fault) fault", errno: EIO)
+                }
             }
         }
         guard let phase else {

@@ -21,7 +21,9 @@ public struct AgentPresence: Sendable, Hashable {
 
 public func detectAgents(path: [ResourcePath]? = nil, applications: [ResourcePath]? = nil) throws -> [AgentPresence] {
     let directories: [ResourcePath]
-    if let path { directories = path } else {
+    if let path {
+        directories = path
+    } else {
         let value = ProcessInfo.processInfo.environment["PATH"] ?? ""
         directories = try value.isEmpty ? [] :
             value.split(separator: ":", omittingEmptySubsequences: false)
@@ -66,10 +68,16 @@ private func discoveryAbsolute(_ path: ResourcePath) throws -> ResourcePath {
     let parts = absolute.platformBytes.split(separator: 47)
     var normalized: [[UInt8]] = []
     for part in parts {
-        if part.elementsEqual([46]) { continue }
+        if part.elementsEqual([46]) {
+            continue
+        }
         if part.elementsEqual([46, 46]) {
-            if !normalized.isEmpty { normalized.removeLast() }
-        } else { normalized.append(Array(part)) }
+            if !normalized.isEmpty {
+                normalized.removeLast()
+            }
+        } else {
+            normalized.append(Array(part))
+        }
     }
     return try ResourcePath(platformBytes: [47] + normalized.joined(separator: [47]))
 }

@@ -7,7 +7,7 @@ func stateFixtureBytesHaveNotDrifted() throws {
     let packaged = try #require(Bundle.module.url(
         forResource: "configurations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     let data = try Data(contentsOf: packaged)
     _ = try JSONParser.parse(data)
@@ -99,14 +99,14 @@ func everyNestedDurableFixtureRecordIsStrictlyDecoded() throws {
         else { continue }
         for (name, _) in fields {
             let missing = try StateCodec.record(
-                #require(stateRecordTag(record)), fields.filter { $0.0 != name }
+                #require(stateRecordTag(record)), fields.filter { $0.0 != name },
             )
             #expect(throws: FlyrailValueError.self) {
                 try StateCodec.transcode(StateCodec.encodeRecord(missing))
             }
         }
         let unknown = try StateCodec.record(
-            #require(stateRecordTag(record)), fields + [("unexpected", .null)]
+            #require(stateRecordTag(record)), fields + [("unexpected", .null)],
         )
         #expect(throws: FlyrailValueError.self) {
             try StateCodec.transcode(StateCodec.encodeRecord(unknown))
@@ -128,7 +128,7 @@ func stateFixture() throws -> JSONValue {
     let url = try #require(Bundle.module.url(
         forResource: "configurations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     return try JSONParser.parse(Data(contentsOf: url))
 }
@@ -168,10 +168,12 @@ private func fixtureClaim(_ value: JSONValue) throws -> Claim {
     case .structured:
         selector = try .structured(Selector(parts: stateArray(raw).map { part in
             let items = try stateArray(part)
-            if try stateText(items[0]) == "key" { return try .key(Key(stateText(items[1]))) }
+            if try stateText(items[0]) == "key" {
+                return try .key(Key(stateText(items[1])))
+            }
             return try .member(Member(
                 identity: SemanticValue(semanticBytes: JSONWriter.canonicalData(items[2])),
-                key: stateArray(items[1]).map(stateText)
+                key: stateArray(items[1]).map(stateText),
             ))
         }))
     }

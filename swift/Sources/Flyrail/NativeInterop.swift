@@ -97,7 +97,7 @@ package enum NativeInterop {
     {
         guard let seconds = Double(options[key] ?? String(fallback)), seconds.isFinite, seconds >= 0 else {
             throw FlyrailValueError(
-                "\(key.dropFirst(2).replacingOccurrences(of: "-", with: " ")) must be finite and nonnegative"
+                "\(key.dropFirst(2).replacingOccurrences(of: "-", with: " ")) must be finite and nonnegative",
             )
         }
         guard seconds <= 1e9 else { throw FlyrailValueError("invalid \(key): duration is too large") }
@@ -155,7 +155,7 @@ package enum NativeInterop {
         if let destination = options["--destination"] {
             try roots.append(ResourceAuthority(destination: ResourcePath(destination)).stateRoot)
         }
-        let recordNames: Set<String> = [
+        let recordNames: Set = [
             "authority.json", "authority.json.next", "receipt.json", "receipt.json.next",
             "transaction.json", "transaction.json.next", "index.json", "index.json.next",
         ]
@@ -163,14 +163,14 @@ package enum NativeInterop {
         for root in roots {
             try NativeAuthority.managedSpelling(root)
             let snapshot = try NativeObservation.snapshot(
-                root, privateStorage: true, resourcePayloads: root != index.indexRoot
+                root, privateStorage: true, resourcePayloads: root != index.indexRoot,
             )
             for node in snapshot.revision.nodes.dropFirst() where recordNames.contains(node.path) {
                 guard let bytes = node.data else {
                     throw try nativeFailure(
                         .invalidState,
                         "metadata must be a regular file",
-                        appendPath(root, node.path)
+                        appendPath(root, node.path),
                     )
                 }
                 try records.append((appendPath(root, node.path), bytes))

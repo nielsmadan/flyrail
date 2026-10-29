@@ -14,7 +14,7 @@ func summaryRoutingPreservesCanonicallyEquivalentDistinctKeys() throws {
     let proposed = try preview(
         bundle: transactionBundle(),
         rendered: lifecycleSection(root.child("document")),
-        target: target
+        target: target,
     )
     let summary = try summarize(proposed)
     #expect(summary.agent == .claude)
@@ -58,7 +58,7 @@ func rejectedApplyCannotAdmitOrRecoverResources(_ reason: String) throws {
             let lock = try NativeAdmission.reserve(ref, timeout: .zero)
             try NativeTransactionIO.createFile(
                 appendPath(ref.stateRoot, "authority.json.next"),
-                data: StateCodec.encode(ref)
+                data: StateCodec.encode(ref),
             )
             try lock.validate()
         }

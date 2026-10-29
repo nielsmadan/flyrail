@@ -84,7 +84,7 @@ private func translationDifferential(_ fixture: URL) throws -> String {
         ]
         let bundle = try FlyrailBundle(
             manifest: JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]),
-            entries: []
+            entries: [],
         )
         let root = try ResourcePath("/fixture/project")
         let target = if scope == "project" {
@@ -134,11 +134,11 @@ private func expandedTranslationDifferential(document: [String: Any]) throws -> 
         entries: [
             BundleEntry(path: "runtime/server.js", data: Data("console.log(\"MCP\");".utf8)),
             BundleEntry(path: "runtime/data"),
-        ]
+        ],
     )
     let assetContext = try RenderContext(
         target: Target.project(agent: .codex, root: root),
-        platform: .linux
+        platform: .linux,
     ).assetRoot(appendPath(root, "assets"))
     var records = try [renderRecord("asset-manifest", render(assetBundle, for: assetContext))]
     records += try combinedRenderRecords(document: document, root: root)
@@ -169,11 +169,11 @@ private func expandedTranslationDifferential(document: [String: Any]) throws -> 
     ])
     let codex = try RenderContext(
         target: Target.project(agent: .codex, root: root),
-        platform: .linux
+        platform: .linux,
     )
     try records.append(renderRecord(
         "dependency-audience",
-        render(dependencyBundle, for: codex)
+        render(dependencyBundle, for: codex),
     ))
 
     let droidBundle = try fixtureBundle(manifest: [
@@ -199,15 +199,15 @@ private func expandedTranslationDifferential(document: [String: Any]) throws -> 
     ])
     let claude = try RenderContext(
         target: Target.project(agent: .claude, root: root),
-        platform: .linux
+        platform: .linux,
     )
     let droid = try RenderContext(
         target: Target.project(agent: .droid, root: root),
-        platform: .linux
+        platform: .linux,
     )
     try records.append(renderRecord(
         "mixed-droid",
-        renderMany(droidBundle, for: [claude, droid])
+        renderMany(droidBundle, for: [claude, droid]),
     ))
     return records
 }
@@ -237,16 +237,16 @@ private func relocationRenderRecord(root: ResourcePath) throws -> String {
             environment: [
                 "XDG_CONFIG_HOME": "~/configuration",
                 "OPENCODE_CONFIG": "~/selected/opencode.jsonc",
-            ]
+            ],
         ),
-        platform: .linux
+        platform: .linux,
     )
     return try renderRecord("relocation-opencode", render(bundle, for: context))
 }
 
 private func combinedRenderRecords(
     document: [String: Any],
-    root: ResourcePath
+    root: ResourcePath,
 ) throws -> [String] {
     try requiredDictionaries(document["combined_cases"]).map { item in
         let artifacts = try requiredDictionaries(item["artifacts"])
@@ -262,7 +262,7 @@ private func combinedRenderRecords(
             }
             return try RenderContext(
                 target: Target.project(agent: agent, root: root),
-                platform: .linux
+                platform: .linux,
             )
         }
         guard let name = item["name"] as? String else {
@@ -292,7 +292,7 @@ private func hookRenderRecords(root: ResourcePath) throws -> [String] {
     return try [Agent.claude, .codex, .opencode, .pi, .cursor, .copilot].map { agent in
         let context = try RenderContext(
             target: Target.project(agent: agent, root: root),
-            platform: .linux
+            platform: .linux,
         ).hookRuntime(runtime)
         return try renderRecord("hook-\(agent.rawValue)", render(hookBundle, for: context))
     }
@@ -300,11 +300,11 @@ private func hookRenderRecords(root: ResourcePath) throws -> [String] {
 
 private func fixtureBundle(
     manifest: [String: Any],
-    entries: [BundleEntry] = []
+    entries: [BundleEntry] = [],
 ) throws -> FlyrailBundle {
     try FlyrailBundle(
         manifest: JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]),
-        entries: entries
+        entries: entries,
     )
 }
 

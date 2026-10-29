@@ -12,7 +12,9 @@ func nativeEmptyReadableLocksInteroperateWithoutExposingPayloads() throws {
     let path = try appendPath(ref.stateRoot, "lock")
     let raw = open(path.displayString, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0o644)
     #expect(raw >= 0)
-    if raw >= 0 { close(raw) }
+    if raw >= 0 {
+        close(raw)
+    }
     let lock = try NativeAdmission.reserve(ref, timeout: .zero)
     try NativeAdmission.admit(ref, lock: lock)
     #expect(try (NativeFilesystem.metadata(path)?.st_mode ?? 0) & 0o777 == 0o644)
@@ -47,7 +49,7 @@ func nativeStateRootReplacementInvalidatesHeldLock() throws {
     #expect(rename(ref.stateRoot.displayString, root.url.appending(path: "replaced-state").path) == 0)
     try FileManager.default.createDirectory(
         atPath: ref.stateRoot.displayString, withIntermediateDirectories: false,
-        attributes: [.posixPermissions: 0o700]
+        attributes: [.posixPermissions: 0o700],
     )
     expectNativeError(.concurrentChange) { try lock.validate() }
     #expect(try NativeFilesystem.metadata(appendPath(ref.stateRoot, "authority.json")) == nil)

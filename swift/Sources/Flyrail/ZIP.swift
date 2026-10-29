@@ -40,7 +40,7 @@ package struct ZIPArchive: Sendable {
                 count: UInt64(end.entryCount),
                 size: UInt64(end.directorySize),
                 offset: UInt64(end.directoryOffset),
-                boundary: end.offset
+                boundary: end.offset,
             )
         }
         try validateZIP64Agreement(end: end, directory: directory)
@@ -82,14 +82,14 @@ package struct ZIPArchive: Sendable {
             let visibleName = record.name.split(
                 separator: "\0",
                 maxSplits: 1,
-                omittingEmptySubsequences: false
+                omittingEmptySubsequences: false,
             ).first.map(String.init) ?? ""
             return ZIPMember(
                 name: visibleName,
                 originalName: record.name,
                 isDirectory: visibleName.hasSuffix("/"),
                 createSystem: record.createSystem,
-                externalAttributes: record.externalAttributes
+                externalAttributes: record.externalAttributes,
             )
         }
         archive = bytes
@@ -121,7 +121,7 @@ package struct ZIPArchive: Sendable {
             archive,
             record: record,
             boundary: boundaries[index],
-            limits: limits
+            limits: limits,
         )
     }
 
@@ -180,7 +180,7 @@ private struct EndRecord {
                 entryCount: uint16(data, at: offset + 10),
                 directorySize: uint32(data, at: offset + 12),
                 directoryOffset: uint32(data, at: offset + 16),
-                offset: offset
+                offset: offset,
             )
         }
         throw FlyrailValueError("archive is not a ZIP file")
@@ -207,7 +207,7 @@ private struct DirectoryRecord {
         }
         let recordOffset = try checkedIndex(
             uint64(data, at: locatorOffset + 8),
-            label: "ZIP64 end record offset"
+            label: "ZIP64 end record offset",
         )
         let minimumEnd = try checkedAdd(recordOffset, 56, label: "ZIP64 end record range")
         guard minimumEnd <= locatorOffset,
@@ -232,7 +232,7 @@ private struct DirectoryRecord {
             count: uint64(data, at: recordOffset + 32),
             size: uint64(data, at: recordOffset + 40),
             offset: uint64(data, at: recordOffset + 48),
-            boundary: recordOffset
+            boundary: recordOffset,
         )
     }
 }
@@ -253,7 +253,7 @@ private struct CentralRecord: Sendable {
     static func read(
         _ data: [UInt8],
         cursor: inout Int,
-        limits: BundleLimits
+        limits: BundleLimits,
     ) throws -> Self {
         let offset = cursor
         guard try uint32(data, at: offset) == centralSignature else {
@@ -285,7 +285,7 @@ private struct CentralRecord: Sendable {
             compressed: compressed32,
             uncompressed: uncompressed32,
             offset: local32,
-            extra: Array(data[extraStart ..< commentStart])
+            extra: Array(data[extraStart ..< commentStart]),
         )
         return try Self(
             createSystem: dataValue(data, at: offset + 5),
@@ -298,7 +298,7 @@ private struct CentralRecord: Sendable {
             localOffset: expanded.offset,
             rawName: rawName,
             name: name,
-            usesZIP64Sizes: compressed32 == UInt32.max || uncompressed32 == UInt32.max
+            usesZIP64Sizes: compressed32 == UInt32.max || uncompressed32 == UInt32.max,
         )
     }
 }
@@ -307,7 +307,7 @@ private func readMember(
     _ archive: [UInt8],
     record: CentralRecord,
     boundary: UInt64,
-    limits: BundleLimits
+    limits: BundleLimits,
 ) throws -> Data {
     let offset = try checkedIndex(record.localOffset, label: "local header offset")
     guard try uint32(archive, at: offset) == localSignature else {
@@ -338,7 +338,7 @@ private func readMember(
         uncompressed: localUncompressed,
         offset: 0,
         extra: Array(archive[extraStart ..< payloadStart]),
-        requireOffset: false
+        requireOffset: false,
     )
     if flags & descriptorFlag == 0 {
         guard localChecksum == record.checksum,
@@ -362,7 +362,7 @@ private func readMember(
         at: payloadEnd,
         record: record,
         zip64: record.usesZIP64Sizes,
-        required: flags & descriptorFlag != 0
+        required: flags & descriptorFlag != 0,
     )
     let memberEnd = try checkedAdd(payloadEnd, descriptorLength, label: "archive member range")
     guard UInt64(memberEnd) <= boundary, memberEnd <= archive.count else {
@@ -374,7 +374,7 @@ private func readMember(
     guard expansionAllowed(
         compressed: record.compressedSize,
         uncompressed: record.uncompressedSize,
-        ratio: limits.maximumExpansionRatio
+        ratio: limits.maximumExpansionRatio,
     ) else {
         throw FlyrailValueError("archive member exceeds the expansion ratio limit")
     }
@@ -402,7 +402,7 @@ private func dataDescriptorLength(
     at offset: Int,
     record: CentralRecord,
     zip64: Bool,
-    required: Bool
+    required: Bool,
 ) throws -> Int {
     guard required else {
         return 0
@@ -412,7 +412,7 @@ private func dataDescriptorLength(
         at: offset,
         record: record,
         zip64: zip64,
-        signed: false
+        signed: false,
     )
     if let unsigned {
         return unsigned
@@ -422,7 +422,7 @@ private func dataDescriptorLength(
         at: offset,
         record: record,
         zip64: zip64,
-        signed: true
+        signed: true,
     )
     guard let signed else {
         throw FlyrailValueError("archive data descriptor differs from the central directory")
@@ -435,7 +435,7 @@ private func descriptorLength(
     at offset: Int,
     record: CentralRecord,
     zip64: Bool,
-    signed: Bool
+    signed: Bool,
 ) -> Int? {
     do {
         var cursor = offset
@@ -485,7 +485,7 @@ private func expandZIP64(
     uncompressed: UInt32,
     offset: UInt32,
     extra: [UInt8],
-    requireOffset: Bool = true
+    requireOffset: Bool = true,
 ) throws -> (compressed: UInt64, uncompressed: UInt64, offset: UInt64) {
     var compressedValue = UInt64(compressed)
     var uncompressedValue = UInt64(uncompressed)
@@ -561,7 +561,7 @@ private func inflateRawDeflate(_ payload: Data, expectedSize: UInt64) throws -> 
         dst_size: 0,
         src_ptr: UnsafePointer(dummy),
         src_size: 0,
-        state: nil
+        state: nil,
     )
     guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) ==
         COMPRESSION_STATUS_OK

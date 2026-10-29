@@ -36,7 +36,7 @@ enum InteropHookRendering {
                 return shell
             }
             context = try context.hookRuntime(HookRuntime(
-                node: (request["node"] as? String).map(ResourcePath.init), shell: shell
+                node: (request["node"] as? String).map(ResourcePath.init), shell: shell,
             ))
         }
         let rendered = try render(bundle, for: context)

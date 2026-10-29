@@ -82,7 +82,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
     }
 
     package func put(
-        _ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout: Data
+        _ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout: Data,
     ) throws {
         guard let part = path.last else { throw FlyrailValueError("document selector path is missing") }
         let parentPath = Array(path.dropLast())
@@ -93,7 +93,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
             try publish(
                 [(current.start, current.end, inlineFragment(value, syntax: syntax))],
                 path: path,
-                value: value
+                value: value,
             )
             return
         }
@@ -101,7 +101,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
             try publish(
                 [(current.start, current.end, inlineFragment(value, syntax: syntax))],
                 path: path,
-                value: value
+                value: value,
             )
             return
         }
@@ -130,11 +130,13 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
             let comma = parent.fields.isEmpty ? "" : ","
             let rawField = try Data("\(tomlKey(key)) = ".utf8) + raw
             var patches = [(parent.end - 1, parent.end - 1, rawField)]
-            if !comma.isEmpty { patches.append((gapStart, gapStart, Data(comma.utf8))) }
+            if !comma.isEmpty {
+                patches.append((gapStart, gapStart, Data(comma.utf8)))
+            }
             try publish(
                 patches,
                 path: path,
-                value: value
+                value: value,
             )
             return
         }
@@ -157,14 +159,16 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
                 tableEnd(parentPath, statements: statements)
         }
         var prefix = ""
-        if insertion > 0, data[insertion - 1] != 10 { prefix = newline }
+        if insertion > 0, data[insertion - 1] != 10 {
+            prefix = newline
+        }
         try publish([(insertion, insertion, Data((prefix + raw).utf8))], path: path, value: value)
     }
 
     // swiftlint:disable:next function_parameter_count
     package func insert(
         _ path: [DocumentPathPart], index: Int, value: SemanticValue,
-        syntax: Data?, prefix: Data?, layout: Data
+        syntax: Data?, prefix: Data?, layout: Data,
     ) throws {
         let parent = try node(path)
         guard index >= 0,
@@ -201,7 +205,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
         let members = try selectedStatements(path).filter { $0.header && $0.path.count == path.count + 1 }
         let insertion = try index < members.count ? members[index].start : tableEnd(
             path,
-            statements: selectedStatements(path)
+            statements: selectedStatements(path),
         )
         let raw = try reboundFragment(path + [.index(index)], value: value, syntax: syntax, layout: layout)
         try publishInsertion([(insertion, insertion, Data(raw.utf8))], path: path, index: index, value: value)
@@ -252,7 +256,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
     // swiftlint:disable:next function_parameter_count
     package func relocate(
         _ path: [DocumentPathPart], index: Int, value: SemanticValue,
-        syntax: Data?, prefix: Data?, layout: Data
+        syntax: Data?, prefix: Data?, layout: Data,
     ) throws {
         let parentPath = Array(path.dropLast())
         let parent = try node(parentPath)
@@ -269,7 +273,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
             let insertion = index < remaining.count ? remaining[index].start :
                 remaining.last.map { member in tableEnd(
                     member.path,
-                    statements: parsed.statements.filter { $0.path.starts(with: member.path) }
+                    statements: parsed.statements.filter { $0.path.starts(with: member.path) },
                 ) } ??
                 first.start
             try patch([(insertion, insertion, moved)])
@@ -288,12 +292,16 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
         let indices = parsed.statements.indices.filter { parsed.statements[$0].path.starts(with: path) }
         if let first = indices.first, let last = indices.last,
            indices != Array(first ... last)
-        { throw FlyrailValueError("a noncontiguous TOML table cannot be an owned unit") }
+        {
+            throw FlyrailValueError("a noncontiguous TOML table cannot be an owned unit")
+        }
         return indices.map { parsed.statements[$0] }
     }
 
     private func tableEnd(_ path: [DocumentPathPart], statements: [TOMLStatement]) -> Int {
-        if path.isEmpty { return data.count }
+        if path.isEmpty {
+            return data.count
+        }
         guard let last = statements.last else { return data.count }
         return parsed.statements.first { $0.start >= last.end && !$0.path.starts(with: path) }?.start ?? data.count
     }
@@ -325,7 +333,11 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
                     }
                 } else if synthetic || statement.aot {
                     let keyCount = statement.path.dropFirst(path.count).filter {
-                        if case .key = $0 { true } else { false }
+                        if case .key = $0 {
+                            true
+                        } else {
+                            false
+                        }
                     }.count
                     let suffix = statement.keyParts.suffix(keyCount).map(\.1).joined(separator: ".")
                     let name = !synthetic && selected.kind == .table ? suffix :
@@ -366,7 +378,11 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
             return statement.keyParts.prefix(max(0, path.count - contextCount)).map(\.1).joined(separator: ".")
         }
         return try path.compactMap { part -> String? in
-            if case let .key(key) = part { try tomlKey(key) } else { nil }
+            if case let .key(key) = part {
+                try tomlKey(key)
+            } else {
+                nil
+            }
         }.joined(separator: ".")
     }
 
@@ -380,7 +396,9 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
         var scanner = try TOMLScanner(data: syntax)
         let result = try scanner.parse()
         let node = try tomlNode(result.root, path: [.key("value")])
-        if node.kind != .table, node.kind != .aot { return syntax.subdata(in: node.start ..< node.end) }
+        if node.kind != .table, node.kind != .aot {
+            return syntax.subdata(in: node.start ..< node.end)
+        }
         return try Data(tomlInline(node.value()).utf8)
     }
 
@@ -406,7 +424,11 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
                     continue
                 }
                 let keys = statement.path.dropFirst().compactMap { part -> String? in
-                    if case let .key(key) = part { key } else { nil }
+                    if case let .key(key) = part {
+                        key
+                    } else {
+                        nil
+                    }
                 }
                 let rendered = statement.keyParts.map(\.1).joined(separator: ".")
                 let key: String = keys.count == statement.keyParts.count
@@ -422,15 +444,21 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
         }
         guard case let .object(fields) = value else { throw representationError() }
         if fields.contains(where: {
-            if case .array = $0.1 { tomlTableValue($0.1) } else { false }
-        }) { throw FlyrailValueError("TOML layout cannot preserve the selected and foreign values") }
+            if case .array = $0.1 {
+                tomlTableValue($0.1)
+            } else {
+                false
+            }
+        }) {
+            throw FlyrailValueError("TOML layout cannot preserve the selected and foreign values")
+        }
         return try Data(fields.map {
             try "\(prefix).\(tomlKey($0.0)) = \(tomlInline($0.1))\(newline)"
         }.joined().utf8)
     }
 
     private func tableReplacement(
-        _ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout: Data
+        _ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout: Data,
     ) throws -> Data {
         let statements = try selectedStatements(path)
         let own = statements.first { $0.header && $0.path == path }
@@ -439,11 +467,19 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
         let replacement = try scanner.parse()
         guard let own else { return Data(raw.utf8) }
         let destination = path.compactMap { part -> String? in
-            if case let .key(key) = part { key } else { nil }
+            if case let .key(key) = part {
+                key
+            } else {
+                nil
+            }
         }.map { Data($0.utf8) }
         guard let header = replacement.statements.first(where: {
             $0.header && $0.path.compactMap { part -> Data? in
-                if case let .key(key) = part { Data(key.utf8) } else { nil }
+                if case let .key(key) = part {
+                    Data(key.utf8)
+                } else {
+                    nil
+                }
             } == destination
         }) else { throw FlyrailValueError("TOML layout cannot preserve valid syntax") }
         var result = Data(raw.utf8)
@@ -452,17 +488,21 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
     }
 
     private func reboundFragment(
-        _ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout: Data, forceHeader: Bool = false
+        _ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout: Data, forceHeader: Bool = false,
     ) throws -> String {
         let name = try physicalName(path)
-        let element = if case .index? = path.last { true } else { false }
+        let element = if case .index? = path.last {
+            true
+        } else {
+            false
+        }
         guard let syntax else {
             let synthetic = try tomlGenerated(
                 value,
                 name: "value",
                 newline: newline,
                 element: element,
-                forceHeader: forceHeader
+                forceHeader: forceHeader,
             )
             var scanner = try TOMLScanner(data: Data(synthetic.utf8))
             _ = try scanner.parse()
@@ -475,12 +515,18 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
         var patches: [(Int, Int, Data)] = []
         for statement in result.statements where statement.header {
             var relative = Array(statement.path.dropFirst())
-            if element, case .index? = relative.first { relative.removeFirst() }
+            if element, case .index? = relative.first {
+                relative.removeFirst()
+            }
             let name: String
             if let stored = headers.first(where: { $0.0 == relative }) {
                 let expected = path + relative
                 let keys = expected.compactMap { part -> Data? in
-                    if case let .key(key) = part { Data(key.utf8) } else { nil }
+                    if case let .key(key) = part {
+                        Data(key.utf8)
+                    } else {
+                        nil
+                    }
                 }
                 guard try tomlHeaderPath(stored.1).map({ Data($0.utf8) }) == keys else {
                     throw FlyrailValueError("TOML restoration header does not match its destination")
@@ -488,7 +534,11 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
                 name = stored.1
             } else {
                 name = try physicalName(path) + relative.compactMap { part -> String? in
-                    if case let .key(key) = part { try "." + tomlKey(key) } else { nil }
+                    if case let .key(key) = part {
+                        try "." + tomlKey(key)
+                    } else {
+                        nil
+                    }
                 }.joined()
             }
             patches.append((statement.keyStart, statement.keyEnd, Data(name.utf8)))
@@ -551,13 +601,15 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
             data = previous
             if let error = error as? FlyrailValueError,
                error.message == "TOML layout cannot preserve the selected and foreign values"
-            { throw error }
+            {
+                throw error
+            }
             throw FlyrailValueError("TOML layout cannot preserve valid syntax")
         }
     }
 
     private func publishInsertion(
-        _ patches: [(Int, Int, Data)], path: [DocumentPathPart], index: Int, value: SemanticValue
+        _ patches: [(Int, Int, Data)], path: [DocumentPathPart], index: Int, value: SemanticValue,
     ) throws {
         guard case var .array(items) = try native(path)
         else { throw FlyrailValueError("member selector requires an array") }
@@ -586,7 +638,7 @@ package final class TOMLEditingDocument: StructuredEditingDocument {
 }
 
 private func replacingTOMLValue(
-    _ current: SemanticValue, path: [DocumentPathPart], value: SemanticValue
+    _ current: SemanticValue, path: [DocumentPathPart], value: SemanticValue,
 ) throws -> SemanticValue {
     guard let first = path.first else { return value }
     let remaining = Array(path.dropFirst())

@@ -45,19 +45,19 @@ func editingDifferentialMatchesCompletePythonRecords() throws {
                         return try DocumentSchema(
                             format: value.format,
                             key: schema["key"] as? String ?? "",
-                            value: scalar
+                            value: scalar,
                         )
                     }
                     edit = try editSchemaDocument(
                         source: observed, requests: requests, ownership: ownership, provenance: provenance,
-                        activeSchemas: schemas, validate: step["validate"] as? Bool ?? true
+                        activeSchemas: schemas, validate: step["validate"] as? Bool ?? true,
                     )
                 } else {
                     edit = try editDocument(
                         source: observed,
                         requests: requests,
                         ownership: ownership,
-                        provenance: provenance
+                        provenance: provenance,
                     )
                 }
                 record = try editingRecord(edit)

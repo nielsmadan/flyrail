@@ -48,12 +48,12 @@ func nativeFixtureReceiptsAreReadThroughTheirAuthority() throws {
                 selection: owned.selection, installed: owned.installed, disposition: owned.disposition,
                 baseline: owned.baseline, requirements: owned.requirements,
                 stableRequirements: owned.stableRequirements,
-                schemaRequirements: owned.schemaRequirements
+                schemaRequirements: owned.schemaRequirements,
             )
         }
         let receipt = try Receipt(
             resource: resource, transactionID: original.transactionID, claims: claims,
-            provenance: original.provenance, createdDirectories: original.createdDirectories
+            provenance: original.provenance, createdDirectories: original.createdDirectories,
         )
         let lock = try NativeAdmission.reserve(resource, timeout: .zero)
         try NativeAdmission.admit(resource, lock: lock)
@@ -81,7 +81,7 @@ func nativeAdmissionReplaysOnlyMatchingPreparedHeaders() throws {
     #expect(try NativeObservation.read(
         appendPath(ref.stateRoot, "authority.json"),
         as: ResourceRef.self,
-        tag: "ResourceRef"
+        tag: "ResourceRef",
     ) == ref)
     #expect(try NativeFilesystem.metadata(prepared) == nil)
     let mismatched = try ResourceRef(destination: ref.destination, kind: .tree, stateRoot: ref.stateRoot)
@@ -101,7 +101,9 @@ func nativeStateLinksAndCaseAliasedStorageNeverReceivePayloads() throws {
         }
         let lock = try NativeAdmission.reserve(ref, timeout: .zero)
         let path = try appendPath(ref.stateRoot, entry)
-        if entry == "lock" { #expect(unlink(path.displayString) == 0) }
+        if entry == "lock" {
+            #expect(unlink(path.displayString) == 0)
+        }
         #expect(symlink(root.path.displayString, path.displayString) == 0)
         expectNativeError(entry == "lock" ? .concurrentChange : .unsafePath) {
             try NativeAdmission.admit(ref, lock: lock)
@@ -113,9 +115,9 @@ func nativeStateLinksAndCaseAliasedStorageNeverReceivePayloads() throws {
     try FileManager.default.createDirectory(
         atPath: ref.stateRoot.displayString.uppercased().replacingOccurrences(
             of: root.path.displayString.uppercased(),
-            with: root.path.displayString
+            with: root.path.displayString,
         ),
-        withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
+        withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700],
     )
     expectNativeError(.unsafePath) { _ = try NativeAdmission.reserve(ref, timeout: .zero) }
 }
@@ -143,7 +145,11 @@ func nativeAncestorsBindRestrictiveModesAndXattrTransitions() throws {
     let before = try NativeObservation.snapshot(absent)
     let descriptor = open(root.path.displayString, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
     #expect(descriptor >= 0)
-    defer { if descriptor >= 0 { close(descriptor) } }
+    defer {
+        if descriptor >= 0 {
+            close(descriptor)
+        }
+    }
     #expect(fchmod(descriptor, 0o700) == 0)
     expectNativeError(.concurrentChange) { try NativeObservation.require(absent, before) }
     let restrictive = try NativeObservation.snapshot(absent)
@@ -177,18 +183,18 @@ func nativeErrnoDiagnosticsHavePythonFraming() throws {
     #expect(nativeIO(ENOTSUP, message: "extended ACLs are unsupported", path: path) == TargetError(
         code: .unsupported,
         message: "[Errno 45] extended ACLs are unsupported: PosixPath('/synthetic/quote\\'and\"double')",
-        path: path, errno: ENOTSUP
+        path: path, errno: ENOTSUP,
     ))
     #expect(nativeIO(EACCES, path: path) == TargetError(
         code: .ioError,
         message: "[Errno 13] Permission denied: '/synthetic/quote\\'and\"double'",
-        path: path, errno: EACCES
+        path: path, errno: EACCES,
     ))
     let controls = try ResourcePath("/synthetic/quote'\n\r\t\u{1}\u{7F}\u{85}\u{2028}")
     #expect(nativeIO(ENOTSUP, message: "extended attributes are unsupported", path: controls) == TargetError(
         code: .unsupported,
         message: "[Errno 45] extended attributes are unsupported: PosixPath(\"/synthetic/quote'\\n\\r\\t\\x01\\x7f\\x85\\u2028\")",
-        path: controls, errno: ENOTSUP
+        path: controls, errno: ENOTSUP,
     ))
 }
 
@@ -206,7 +212,9 @@ func nativeTransactionPayloadModesDoNotWeakenAdministrativePrivacy() throws {
                 #expect(mkdir(directory.displayString, 0o700) == 0)
                 let payload = try appendPath(directory, "resource")
                 let file = tree ? try appendPath(payload, "file") : payload
-                if tree { #expect(mkdir(payload.displayString, 0o755) == 0) }
+                if tree {
+                    #expect(mkdir(payload.displayString, 0o755) == 0)
+                }
                 try Data("resource bytes".utf8).write(to: URL(fileURLWithPath: file.displayString))
                 #expect(chmod(file.displayString, mode) == 0)
                 let observed = try NativeAdmission.observe(ref, lock: lock)
@@ -223,7 +231,11 @@ func nativeTransactionPayloadModesDoNotWeakenAdministrativePrivacy() throws {
                 #expect(chmod(directory.displayString, 0o700) == 0)
                 let descriptor = open(file.displayString, O_RDONLY | O_NOFOLLOW)
                 #expect(descriptor >= 0)
-                defer { if descriptor >= 0 { close(descriptor) } }
+                defer {
+                    if descriptor >= 0 {
+                        close(descriptor)
+                    }
+                }
                 #expect(fsetxattr(descriptor, "flyrail.payload-test", nil, 0, 0, 0) == 0)
                 expectNativeError(.unsupported) { _ = try NativeAdmission.validateState(ref) }
                 #expect(fremovexattr(descriptor, "flyrail.payload-test", 0) == 0)

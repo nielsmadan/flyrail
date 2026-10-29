@@ -22,7 +22,7 @@ public extension InstallationTarget {
         let routingContext = try stateContext(routingContext)
         try self.init(
             recordedIndexRoot: NativeAuthority.canonicalDestination(indexRoot),
-            context: context, routingContext: routingContext
+            context: context, routingContext: routingContext,
         )
     }
 }
@@ -51,7 +51,9 @@ package enum NativeAuthority {
         var current = root
         var missing: [[UInt8]] = []
         for part in parts.dropLast() {
-            if !missing.isEmpty { missing.append(part); continue }
+            if !missing.isEmpty {
+                missing.append(part); continue
+            }
             let candidate = try NativeFilesystem.child(current, part)
             guard let metadata = try NativeFilesystem.metadata(descriptor.raw, name: part, path: candidate) else {
                 missing.append(part)
@@ -66,7 +68,7 @@ package enum NativeAuthority {
                 name: part,
                 directory: true,
                 path: candidate,
-                flags: O_SEARCH
+                flags: O_SEARCH,
             )
             guard try NativeFilesystem.identity(descriptor.raw, name: part, descriptor: opened, path: candidate) else {
                 throw nativeFailure(.concurrentChange, "resource parent changed during canonicalization", candidate)
@@ -95,7 +97,9 @@ package enum NativeAuthority {
     }
 
     package static func absolute(_ path: ResourcePath) throws -> ResourcePath {
-        if path.platformBytes.first == 47 { return path }
+        if path.platformBytes.first == 47 {
+            return path
+        }
         var bytes = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         guard getcwd(&bytes, bytes.count) != nil else { throw nativeIO(errno, path: path) }
         let cwd = bytes.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }
@@ -108,12 +112,14 @@ package enum NativeAuthority {
                 throw nativeFailure(.unsafePath, "nonportable resource path", path)
             }
             try validateRelativePath(name, label: "resource path component")
-            if managementName(name) { throw FlyrailValueError("resource destination enters reserved management state") }
+            if managementName(name) {
+                throw FlyrailValueError("resource destination enters reserved management state")
+            }
         }
     }
 
     private static func canonicalChild(
-        _ descriptor: NativeDescriptor, parent: ResourcePath, name: [UInt8]
+        _ descriptor: NativeDescriptor, parent: ResourcePath, name: [UInt8],
     ) throws -> [UInt8] {
         let candidate = try NativeFilesystem.child(parent, name)
         guard let text = String(bytes: name, encoding: .utf8) else {
@@ -143,7 +149,7 @@ package enum NativeAuthority {
     }
 
     package static func matchingNames(
-        _ descriptor: NativeDescriptor, parent: ResourcePath, name: String
+        _ descriptor: NativeDescriptor, parent: ResourcePath, name: String,
     ) throws -> [[UInt8]] {
         let key = portablePathKey(name)
         return try NativeFilesystem.names(descriptor, path: parent).filter { bytes in
@@ -155,7 +161,7 @@ package enum NativeAuthority {
         guard let parent = try NativeFilesystem.parent(path) else { return }
         let parentPath = try NativeFilesystem.physicalPath(parent.descriptor, path: path)
         let matches = try matchingNames(
-            parent.descriptor, parent: parentPath, name: String(decoding: parent.name, as: UTF8.self)
+            parent.descriptor, parent: parentPath, name: String(decoding: parent.name, as: UTF8.self),
         )
         guard matches.count <= 1 else { throw nativeFailure(.unsafePath, "portable filename collision", path) }
         if let first = matches.first, first != parent.name {
@@ -174,7 +180,7 @@ package enum NativeAuthority {
         var conflicts = try authority.ancestorFences.filter { try NativeFilesystem.metadata($0) != nil }
         if wholeTree, let parent = try NativeFilesystem.parent(authority.destination),
            let metadata = try NativeFilesystem.metadata(
-               parent.descriptor.raw, name: parent.name, path: authority.destination
+               parent.descriptor.raw, name: parent.name, path: authority.destination,
            )
         {
             try safe(metadata, path: authority.destination)
@@ -182,11 +188,11 @@ package enum NativeAuthority {
                 throw nativeFailure(.unsafePath, "whole-tree resource must be a directory", authority.destination)
             }
             let opened = try NativeFilesystem.open(
-                parent.descriptor.raw, name: parent.name, directory: true, path: authority.destination
+                parent.descriptor.raw, name: parent.name, directory: true, path: authority.destination,
             )
             try descendants(opened, path: authority.destination, depth: 0, conflicts: &conflicts)
             guard try NativeFilesystem.identity(
-                parent.descriptor.raw, name: parent.name, descriptor: opened, path: authority.destination
+                parent.descriptor.raw, name: parent.name, descriptor: opened, path: authority.destination,
             )
             else {
                 throw nativeFailure(.concurrentChange, "resource changed during inspection", authority.destination)
@@ -197,7 +203,7 @@ package enum NativeAuthority {
     }
 
     private static func descendants(
-        _ descriptor: NativeDescriptor, path: ResourcePath, depth: Int, conflicts: inout [ResourcePath]
+        _ descriptor: NativeDescriptor, path: ResourcePath, depth: Int, conflicts: inout [ResourcePath],
     ) throws {
         guard depth <= NativeLimits.default.maximumDepth else {
             throw nativeIO(ENOTSUP, message: "resource exceeds the node limit", path: path)
@@ -208,7 +214,9 @@ package enum NativeAuthority {
             guard let text = String(bytes: name, encoding: .utf8) else {
                 throw nativeFailure(.unsafePath, "nonportable resource path", child)
             }
-            if managementName(text) { conflicts.append(child); continue }
+            if managementName(text) {
+                conflicts.append(child); continue
+            }
             guard let metadata = try NativeFilesystem.metadata(descriptor.raw, name: name, path: child) else {
                 throw nativeFailure(.concurrentChange, "listed path disappeared during inspection", child)
             }
@@ -232,7 +240,7 @@ package enum NativeAuthority {
             throw nativeFailure(
                 .unsafePath,
                 "resource links and special files are unsupported: \(path.displayString)",
-                path
+                path,
             )
         }
         guard type != S_IFREG || metadata.st_nlink == 1 else {

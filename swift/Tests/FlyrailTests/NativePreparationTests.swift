@@ -43,7 +43,7 @@ func nativeIncompletePreparationsRemainEvidenceWithoutInventingRecovery(_ bounda
     let observed = try NativeAdmission.observe(ref)
     #expect(observed.receipt?.claims.first?.version == (boundary == "index-completion-created" ? "2" : "1"))
     #expect(observed.revision.data == Data(
-        (boundary == "receipt-created" || boundary == "index-completion-created" ? "second" : "first").utf8
+        (boundary == "receipt-created" || boundary == "index-completion-created" ? "second" : "first").utf8,
     ))
 }
 
@@ -54,7 +54,9 @@ func nativeRecognizedIndexPreparationRecoveryCanBeInterruptedAfterPromotion() th
     let path = try root.child("document")
     let target = try InstallationTarget(indexRoot: root.child("index"))
     let seam = NativeTransactionSeam {
-        if $0 == "index-pending-prepared" { throw TargetError(code: .ioError, message: "pending interruption") }
+        if $0 == "index-pending-prepared" {
+            throw TargetError(code: .ioError, message: "pending interruption")
+        }
     }
     do {
         _ = try transactionWrite(transactionBundle(), rendered: transactionRendered(path), target: target, seam: seam)
@@ -115,7 +117,9 @@ func nativePartiallyStagedTreeRetainsItsUnjournaledPrefix() throws {
     let seam = NativeTransactionSeam {
         if $0 == "stage-node" {
             staged += 1
-            if staged == 2 { throw TargetError(code: .ioError, message: "partial tree interruption") }
+            if staged == 2 {
+                throw TargetError(code: .ioError, message: "partial tree interruption")
+            }
         }
     }
     #expect(try transactionWrite(transactionBundle(), rendered: rendered, target: target,

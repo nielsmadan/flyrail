@@ -11,7 +11,7 @@ extension Ancestor: StateCodable {
 
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
-            value, tag: "Ancestor", names: ["path", "device", "inode", "mode", "uid", "gid", "security"]
+            value, tag: "Ancestor", names: ["path", "device", "inode", "mode", "uid", "gid", "security"],
         )
         let message = "invalid ancestor metadata"
         return try Self(
@@ -19,7 +19,7 @@ extension Ancestor: StateCodable {
             device: fields.count("device", message: message),
             inode: fields.count("inode", message: message), mode: fields.count("mode", message: message),
             uid: fields.count("uid", message: message), gid: fields.count("gid", message: message),
-            security: fields.bytes("security")
+            security: fields.bytes("security"),
         )
     }
 }
@@ -36,14 +36,14 @@ extension Node: StateCodable {
 
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
-            value, tag: "Node", names: ["path", "data", "mode", "uid", "gid", "device", "inode", "security"]
+            value, tag: "Node", names: ["path", "data", "mode", "uid", "gid", "device", "inode", "security"],
         )
         let message = "invalid revision metadata"
         return try Self(
             path: fields.text("path"), data: fields.optionalBytes("data"), mode: fields.count("mode", message: message),
             uid: fields.count("uid", message: message), gid: fields.count("gid", message: message),
             device: fields.count("device", message: message), inode: fields.count("inode", message: message),
-            security: fields.bytes("security")
+            security: fields.bytes("security"),
         )
     }
 }
@@ -68,13 +68,13 @@ extension ResourceRef: StateCodable {
 
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
-            value, tag: "ResourceRef", names: ["destination", "kind", "state_root", "schema_version"]
+            value, tag: "ResourceRef", names: ["destination", "kind", "state_root", "schema_version"],
         )
         return try Self(
             destination: fields.path("destination", message: "expected an absolute concrete path"),
             kind: fields.decode("kind"),
             stateRoot: fields.path("state_root", message: "resource state path disagrees with destination"),
-            schemaVersion: fields.schema("authority schema must be 2")
+            schemaVersion: fields.schema("authority schema must be 2"),
         )
     }
 }
@@ -120,7 +120,7 @@ extension OwnedClaim: StateCodable {
             installed: fields.optional("installed"), disposition: fields.decode("disposition"),
             baseline: fields.optional("baseline"), requirements: fields.sequence("requirements"),
             stableRequirements: fields.sequence("stable_requirements"),
-            schemaRequirements: fields.sequence("schema_requirements")
+            schemaRequirements: fields.sequence("schema_requirements"),
         )
     }
 }
@@ -143,7 +143,7 @@ extension Receipt: StateCodable {
             resource: fields.decode("resource"), transactionID: fields.text("transaction_id"),
             claims: fields.sequence("claims"), provenance: fields.decode("provenance"),
             createdDirectories: fields.sequence("created_directories"),
-            schemaVersion: fields.schema("receipt schema must be 2")
+            schemaVersion: fields.schema("receipt schema must be 2"),
         )
     }
 }
@@ -166,7 +166,7 @@ extension GenerationMember: StateCodable {
         guard case let .array(ids) = items[1] else { throw FlyrailValueError("invalid state record") }
         return try Self(
             resource: ResourceRef.fromState(items[0]),
-            claimIDs: ids.map { try stateText($0, message: "invalid hexadecimal identity") }
+            claimIDs: ids.map { try stateText($0, message: "invalid hexadecimal identity") },
         )
     }
 }
@@ -188,7 +188,7 @@ extension Generation: StateCodable {
             version: fields.text("version"),
             bundleDigest: fields.text("bundle_digest", message: "invalid hexadecimal identity"),
             renderDigest: fields.text("render_digest", message: "invalid hexadecimal identity"),
-            membership: fields.sequence("membership")
+            membership: fields.sequence("membership"),
         )
     }
 }
@@ -211,7 +211,7 @@ extension Index: StateCodable {
             bundleID: fields.text("bundle_id"), contextDigest: fields.text("context_digest"),
             current: fields.optional("current"), pending: fields.optional("pending"),
             previous: fields.optional("previous"),
-            residual: fields.sequence("residual"), schemaVersion: fields.schema("index schema must be 2")
+            residual: fields.sequence("residual"), schemaVersion: fields.schema("index schema must be 2"),
         )
     }
 }
@@ -235,7 +235,7 @@ extension Journal: StateCodable {
             receipt: fields.decode("receipt"),
             before: fields.decode("before"), staged: fields.decode("staged"), published: fields.decode("published"),
             backup: fields.decode("backup"), ancestors: fields.sequence("ancestors"),
-            schemaVersion: fields.schema("journal schema must be 2")
+            schemaVersion: fields.schema("journal schema must be 2"),
         )
     }
 }

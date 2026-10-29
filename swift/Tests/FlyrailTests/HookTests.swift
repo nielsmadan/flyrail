@@ -20,19 +20,19 @@ func hookTextPreservesUnpairedUTF16Surrogates() throws {
 @Test
 func hookRequestsAndResponsesAreClosedAndCanonical() throws {
     let request = try HookRequest(data: Data(
-        #"{"version":1,"event":"before-tool","tool":"Bash","input":{"command":"pwd"},"context":{}}"#.utf8
+        #"{"version":1,"event":"before-tool","tool":"Bash","input":{"command":"pwd"},"context":{}}"#.utf8,
     ))
     #expect(String(decoding: request.data, as: UTF8.self) ==
         #"{"version":1,"event":"before-tool","context":{},"tool":"Bash","input":{"command":"pwd"}}"#)
     #expect(throws: HookFailure.self) {
         try HookRequest(data: Data(
-            #"{"version":1,"event":"stop","context":{},"extra":true}"#.utf8
+            #"{"version":1,"event":"stop","context":{},"extra":true}"#.utf8,
         ))
     }
     let response = try HookResponse(
         data: Data(#"{"version":1,"outcome":"block","reason":"stop"}"#.utf8),
         event: .beforeTool,
-        declared: [.continue, .block]
+        declared: [.continue, .block],
     )
     #expect(response.outcome == .block)
     #expect(response.data == Data(#"{"version":1,"outcome":"block","reason":"stop"}"#.utf8))
@@ -100,7 +100,7 @@ func hookConfigSortsHandlersAndBoundsEvents() throws {
         cwd: cwd,
         timeoutMilliseconds: 10000,
         outcomes: [.continue],
-        tools: []
+        tools: [],
     )
     let config = try HookConfig(host: "claude", handlers: [handler])
     #expect(String(decoding: config.data, as: UTF8.self).contains(#""host":"claude""#))
@@ -120,7 +120,7 @@ func hookHandlerToolNamesUseExactUTF8Identity() throws {
             cwd: ResourcePath("/tmp/project"),
             timeoutMilliseconds: 10000,
             outcomes: [.continue],
-            tools: tools
+            tools: tools,
         )
     }
 
@@ -145,16 +145,16 @@ func hookFixtureWireRecordsParse() throws {
     let url = try #require(Bundle.module.url(
         forResource: "hooks",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     ))
     let fixture = try #require(
-        JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
     )
     for item in fixture["cases"] as? [[String: Any]] ?? [] {
         let eventName = try #require(item["event"] as? String)
         let event = try #require(HookEvent(rawValue: eventName))
         let response = try JSONSerialization.data(
-            withJSONObject: #require(item["response"] as? [String: Any])
+            withJSONObject: #require(item["response"] as? [String: Any]),
         )
         _ = try HookResponse(data: response, event: event, declared: HookOutcome.allCases)
 

@@ -103,7 +103,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
             components: root,
             installedPath: spec.name,
             sourceRelativePath: "",
-            state: &state
+            state: &state,
         )
         budget = state.budget
         return state.entries
@@ -126,7 +126,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
             components: root,
             installedPath: "content",
             sourceRelativePath: "",
-            state: &state
+            state: &state,
         )
         return try state.entries.compactMap { entry in
             if exactTextEqual(entry.path, "content") {
@@ -138,7 +138,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
             return try BundleEntry(
                 path: String(entry.path.dropFirst("content/".count)),
                 data: entry.data,
-                executable: entry.executable
+                executable: entry.executable,
             )
         }
     }
@@ -196,7 +196,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
         components: [[UInt8]],
         installedPath: String,
         sourceRelativePath: String,
-        state: inout DirectoryWalkState
+        state: inout DirectoryWalkState,
     ) throws {
         _ = try observe(components, descriptor: descriptor)
         let directory = try BundleEntry(path: installedPath)
@@ -222,7 +222,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
                     components: childComponents,
                     installedPath: installedChild,
                     sourceRelativePath: sourceChild,
-                    state: &state
+                    state: &state,
                 )
             } else if signature.isRegular {
                 guard signature.size >= 0 else {
@@ -233,7 +233,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
                 try state.entries.append(BundleEntry(
                     path: installedChild,
                     data: data,
-                    executable: state.executables.contains(where: { exactTextEqual($0, sourceChild) })
+                    executable: state.executables.contains(where: { exactTextEqual($0, sourceChild) }),
                 ))
             } else {
                 throw unsupported(display(childComponents))
@@ -374,7 +374,7 @@ package final class DirectoryBundleSource: BundleSource, @unchecked Sendable {
 
 package func snapshotArchiveFile(
     _ path: ResourcePath,
-    limit: UInt64
+    limit: UInt64,
 ) throws -> (data: Data, canonicalPath: ResourcePath) {
     let before = try lstatPath(path.platformBytes)
     try validateOrdinary(before, display: path.displayString)

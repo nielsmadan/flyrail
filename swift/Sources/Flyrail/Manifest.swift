@@ -13,14 +13,14 @@ package func readBundleManifest(_ data: Data) throws -> (BundleIdentity, [SkillS
     let manifest = try manifestObject(
         raw,
         required: ["schema_version", "id", "version", "skills"],
-        optional: []
+        optional: [],
     )
     guard manifestValue(manifest, named: "schema_version") == .number("1") else {
         throw FlyrailValueError("schema_version must be the integer 1")
     }
     let identity = try BundleIdentity(
         id: manifestString(manifestValue(manifest, named: "id"), label: "bundle id"),
-        version: manifestString(manifestValue(manifest, named: "version"), label: "version")
+        version: manifestString(manifestValue(manifest, named: "version"), label: "version"),
     )
     guard case let .array(records)? = manifestValue(manifest, named: "skills"), !records.isEmpty else {
         throw FlyrailValueError("skills must be a nonempty JSON array")
@@ -58,7 +58,7 @@ package func readBundleManifest(_ data: Data) throws -> (BundleIdentity, [SkillS
 private func manifestObject(
     _ value: JSONValue,
     required: [String],
-    optional: [String]
+    optional: [String],
 ) throws -> [(String, JSONValue)] {
     guard case let .object(items) = value else {
         throw FlyrailValueError("manifest and skill records must be JSON objects")
@@ -72,7 +72,7 @@ private func manifestObject(
     }
     guard !unknown, !missing else {
         throw FlyrailValueError(
-            "expected fields \(fieldList(required)); optional fields \(fieldList(optional))"
+            "expected fields \(fieldList(required)); optional fields \(fieldList(optional))",
         )
     }
     return items
@@ -80,7 +80,7 @@ private func manifestObject(
 
 private func manifestValue(
     _ items: [(String, JSONValue)],
-    named name: String
+    named name: String,
 ) -> JSONValue? {
     items.first(where: { exactTextEqual($0.0, name) })?.1
 }

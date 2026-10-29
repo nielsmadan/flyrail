@@ -20,18 +20,18 @@ func destinationMatrixAndDroidRefusalMatchContract() throws {
     for (agent, instruction, mcp) in expected {
         let context = try RenderContext(
             target: Target.project(agent: agent, root: renderingRoot()),
-            platform: .linux
+            platform: .linux,
         )
         #expect(try instructionDestination(for: context).displayString == "/fixture/project/\(instruction)")
         #expect(try mcpDestination(for: context).displayString == "/fixture/project/\(mcp)")
     }
     let droid = try RenderContext(
         target: Target.project(agent: .droid, root: renderingRoot()),
-        platform: .linux
+        platform: .linux,
     )
     let bundle = try FlyrailBundle(
         identity: BundleIdentity(id: "demo", version: "1"),
-        artifacts: [.instruction(InstructionArtifact(id: "guide", text: "Hello"))]
+        artifacts: [.instruction(InstructionArtifact(id: "guide", text: "Hello"))],
     )
     let rendered = try render(bundle, for: droid)
     #expect(!rendered.supported)
@@ -43,7 +43,7 @@ func destinationMatrixAndDroidRefusalMatchContract() throws {
 func renderRoutesRejectParentsAndPreservePlatformBytes() throws {
     let ambiguous = try Target.project(
         agent: .codex,
-        root: ResourcePath("/fixture/safe/../victim")
+        root: ResourcePath("/fixture/safe/../victim"),
     )
     #expect(throws: FlyrailValueError.self) {
         try RenderContext(target: ambiguous, platform: .linux)
@@ -83,14 +83,14 @@ func droidSelectsNoticesByAudienceAndKeepsFullRoutes() throws {
         family: .instructions,
         audience: Audience(agent: .claude, scope: .project),
         destination: "CLAUDE.local.md",
-        content: .file(FileContent(data: Data("Claude".utf8)))
+        content: .file(FileContent(data: Data("Claude".utf8))),
     )
     let droidOnly = try NativeArtifact(
         id: "droid-only",
         family: .instructions,
         audience: Audience(agent: .droid, scope: .project, platform: .linux),
         destination: "DROID.md",
-        content: .file(FileContent(data: Data("Droid".utf8)))
+        content: .file(FileContent(data: Data("Droid".utf8))),
     )
     let bundle = try FlyrailBundle(
         identity: BundleIdentity(id: "droid-selection", version: "1"),
@@ -98,11 +98,11 @@ func droidSelectsNoticesByAudienceAndKeepsFullRoutes() throws {
             .native(claudeOnly),
             .native(droidOnly),
             .instruction(InstructionArtifact(id: "guide", text: "Portable")),
-        ]
+        ],
     )
     let context = try RenderContext(
         target: Target.project(agent: .droid, root: root),
-        platform: .linux
+        platform: .linux,
     )
     .executionRoot(appendPath(root, "execution"))
     .assetRoot(appendPath(root, "assets"))
@@ -116,7 +116,7 @@ func droidSelectsNoticesByAudienceAndKeepsFullRoutes() throws {
 
     let claude = try RenderContext(
         target: Target.project(agent: .claude, root: root),
-        platform: .linux
+        platform: .linux,
     )
     let mixed = try renderMany(bundle, for: [claude, context])
     #expect(!mixed.supported)
@@ -131,18 +131,18 @@ func renderingDigestsMatchSharedVectors() throws {
         id: "guide",
         family: .instructions,
         destination: ResourcePath("/fixture/project/AGENTS.md"),
-        content: .section(SectionContent(marker: "guide", text: "Hello"))
+        content: .section(SectionContent(marker: "guide", text: "Hello")),
     )
     #expect(
         try RenderedBundle(artifacts: [instruction]).renderDigest ==
-            "249a091ac4a021ebbd33997ba8e3b49d34765516a1d2fdfab2f28f195329838b"
+            "249a091ac4a021ebbd33997ba8e3b49d34765516a1d2fdfab2f28f195329838b",
     )
 
     let launcher = try RenderedArtifact(
         id: "launcher",
         family: .hooks,
         destination: ResourcePath("/fixture/project/launcher"),
-        content: .file(FileContent(data: Data("run\n".utf8)))
+        content: .file(FileContent(data: Data("run\n".utf8))),
     )
     let member = try Member(identity: .scalar(.text("review")), key: ["name"])
     let hook = try RenderedArtifact(
@@ -155,20 +155,20 @@ func renderingDigestsMatchSharedVectors() throws {
             value: SemanticValue(object: [
                 ("command", .scalar(.text("/fixture/project/launcher"))),
                 ("name", .scalar(.text("review"))),
-            ])
+            ]),
         )),
         schemaRequirements: [
             DocumentSchema(format: .json, key: "version", value: .integer(1)),
-        ]
+        ],
     )
     let edge = try Dependency(
         dependent: "review-hook",
         required: "launcher",
-        mode: .stableReference
+        mode: .stableReference,
     )
     #expect(
         try RenderedBundle(artifacts: [launcher, hook], dependencies: [edge]).renderDigest ==
-            "60273a81e48d315630e0112cad12b5fe9c6e5ae642d84f0370f07c1b5553702c"
+            "60273a81e48d315630e0112cad12b5fe9c6e5ae642d84f0370f07c1b5553702c",
     )
 }
 
@@ -177,7 +177,7 @@ func sharedAssetManifestPreservesDependenciesAndRenderingPurity() throws {
     let data = try Data(contentsOf: #require(Bundle.module.url(
         forResource: "translations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     )))
     let document = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let manifest = try #require(document["asset_manifest"] as? [String: Any])
@@ -186,16 +186,16 @@ func sharedAssetManifestPreservesDependenciesAndRenderingPurity() throws {
         entries: [
             BundleEntry(path: "runtime/server.js", data: Data("console.log(\"MCP\");".utf8)),
             BundleEntry(path: "runtime/data"),
-        ]
+        ],
     )
     let absentRoot = try ResourcePath(
         FileManager.default.temporaryDirectory
             .appending(path: "flyrail-render-purity-\(UUID().uuidString)")
-            .path
+            .path,
     )
     let context = try RenderContext(
         target: Target.project(agent: .codex, root: absentRoot),
-        platform: .linux
+        platform: .linux,
     ).assetRoot(appendPath(absentRoot, "assets"))
     #expect(!FileManager.default.fileExists(atPath: absentRoot.displayString))
     let first = try render(bundle, for: context)
@@ -230,7 +230,7 @@ func selectedDependenciesRespectNativeAudiencesAndRelocations() throws {
         family: .mcp,
         audience: Audience(agent: .claude, scope: .project),
         destination: "native.json",
-        content: .file(FileContent(data: Data("{}".utf8)))
+        content: .file(FileContent(data: Data("{}".utf8))),
     )
     let bundle = try FlyrailBundle(
         identity: BundleIdentity(id: "dependency", version: "1"),
@@ -238,11 +238,11 @@ func selectedDependenciesRespectNativeAudiencesAndRelocations() throws {
             .instruction(InstructionArtifact(id: "guide", text: "Use it.")),
             .native(native),
         ],
-        dependencies: [Dependency(dependent: "guide", required: "native")]
+        dependencies: [Dependency(dependent: "guide", required: "native")],
     )
     let codex = try RenderContext(
         target: Target.project(agent: .codex, root: root),
-        platform: .linux
+        platform: .linux,
     )
     let blocked = try render(bundle, for: codex)
     #expect(blocked.notices.filter { $0.kind == .unsupported }.map(\.code) == ["dependency-audience"])
@@ -255,9 +255,9 @@ func selectedDependenciesRespectNativeAudiencesAndRelocations() throws {
             environment: [
                 "XDG_CONFIG_HOME": "~/configuration",
                 "OPENCODE_CONFIG": "~/selected/opencode.jsonc",
-            ]
+            ],
         ),
-        platform: .linux
+        platform: .linux,
     )
     #expect(try user.skills == appendPath(root, "configuration/opencode/skills"))
     #expect(try instructionDestination(for: user) == appendPath(root, "configuration/opencode/AGENTS.md"))
@@ -269,12 +269,12 @@ func selectedDependenciesRespectNativeAudiencesAndRelocations() throws {
 func instructionMarkerAndMCPTranslationRemainCompatible() throws {
     let context = try RenderContext(
         target: Target.project(agent: .codex, root: renderingRoot()),
-        platform: .linux
+        platform: .linux,
     )
     let instruction = try translateInstructionArtifact(
         bundleID: "translation-demo",
         artifact: InstructionArtifact(id: "guide", text: "Run the checks.\n"),
-        context: context
+        context: context,
     )
     guard case let .section(section)? = instruction.artifact?.content else {
         Issue.record("expected instruction section")
@@ -285,7 +285,7 @@ func instructionMarkerAndMCPTranslationRemainCompatible() throws {
         translations: [instruction],
         dependencies: [],
         contexts: [context],
-        routingContext: context.routingContext
+        routingContext: context.routingContext,
     )
     #expect(assembled.renderDigest == "51ff0633093b74dd5486198a0145530c3883c3f68c30f8140805a66f536f6f8b")
 
@@ -295,10 +295,10 @@ func instructionMarkerAndMCPTranslationRemainCompatible() throws {
             name: "tools",
             transport: .stdio(Command(
                 argv: [.text("server"), .text("--label"), .text("a b;\"quoted\"")],
-                env: [EnvironmentEntry(name: "MODE", value: .text("local"))]
-            ))
+                env: [EnvironmentEntry(name: "MODE", value: .text("local"))],
+            )),
         ),
-        context: context
+        context: context,
     )
     guard case let .structured(content)? = mcp.artifact?.content else {
         Issue.record("expected structured MCP content")
@@ -313,7 +313,7 @@ func packagedTranslationFixtureMatchesRoot() throws {
     let packaged = try Data(contentsOf: #require(Bundle.module.url(
         forResource: "translations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     )))
     #expect(try packaged == Data(contentsOf: repositoryFile("spec/fixtures/translations.json")))
 }
@@ -323,7 +323,7 @@ func sharedTranslationVectorsRenderExpectedContent() throws {
     let data = try Data(contentsOf: #require(Bundle.module.url(
         forResource: "translations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     )))
     let document = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let cases = try #require(document["cases"] as? [[String: Any]])
@@ -339,7 +339,7 @@ func sharedTranslationVectorsRenderExpectedContent() throws {
         ]
         let bundle = try FlyrailBundle(
             manifest: JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]),
-            entries: []
+            entries: [],
         )
         let context = try translationContext(item)
         let rendered = try render(bundle, for: context)
@@ -382,7 +382,7 @@ func sharedCombinedTranslationVectorsPreserveCollisionSemantics() throws {
     let data = try Data(contentsOf: #require(Bundle.module.url(
         forResource: "translations",
         withExtension: "json",
-        subdirectory: "Fixtures"
+        subdirectory: "Fixtures",
     )))
     let document = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let cases = try #require(document["combined_cases"] as? [[String: Any]])
@@ -397,13 +397,13 @@ func sharedCombinedTranslationVectorsPreserveCollisionSemantics() throws {
         ]
         let bundle = try FlyrailBundle(
             manifest: JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]),
-            entries: []
+            entries: [],
         )
         let contexts = try #require(item["contexts"] as? [[String: Any]]).map { context in
             let agent = try fixtureAgent(#require(context["agent"] as? String))
             return try RenderContext(
                 target: Target.project(agent: agent, root: renderingRoot()),
-                platform: .linux
+                platform: .linux,
             )
         }
         let forward = try renderMany(bundle, for: contexts)
@@ -426,28 +426,32 @@ func sharedCombinedTranslationVectorsPreserveCollisionSemantics() throws {
 func hookRenderingEmitsRuntimeBridgeAndBlocksUnsupportedOutcomes() throws {
     let runtime = try HookRuntime(
         node: ResourcePath("/opt/node/bin/node"),
-        shell: .posix
+        shell: .posix,
     )
     let command = try Command(argv: [.text("/bin/echo")])
     let hook = try HookArtifact(
         id: "start",
         event: .sessionStart,
-        command: command
+        command: command,
     )
     let bundle = try FlyrailBundle(
         identity: BundleIdentity(id: "hook-matrix", version: "same"),
-        artifacts: [.hook(hook)]
+        artifacts: [.hook(hook)],
     )
     for agent in [Agent.claude, .codex, .cursor, .copilot, .opencode, .pi] {
         let context = try RenderContext(
             target: Target.project(agent: agent, root: renderingRoot()),
-            platform: .linux
+            platform: .linux,
         ).hookRuntime(runtime)
         let rendered = try render(bundle, for: context)
         #expect(rendered.supported)
         #expect(rendered.notices.map(\.code) == ["hook-runtime-prerequisite", "hook-activation"])
         #expect(rendered.artifacts.contains {
-            if case .tree = $0.content { true } else { false }
+            if case .tree = $0.content {
+                true
+            } else {
+                false
+            }
         })
         #expect(rendered.artifacts.first { $0.id == "start" } != nil)
     }
@@ -459,12 +463,12 @@ func hookRenderingEmitsRuntimeBridgeAndBlocksUnsupportedOutcomes() throws {
             event: .beforeTool,
             command: command,
             outcomes: [.modifyInput],
-            tools: ["Read"]
-        ))]
+            tools: ["Read"],
+        ))],
     )
     let codex = try RenderContext(
         target: Target.project(agent: .codex, root: renderingRoot()),
-        platform: .linux
+        platform: .linux,
     ).hookRuntime(runtime)
     let blocked = try render(unsupported, for: codex)
     #expect(!blocked.supported)
@@ -477,7 +481,7 @@ func renderManyUsesPythonCompatibleUnicodeRoutes() throws {
     let root = try ResourcePath("/fixture/space ü😀")
     let bundle = try FlyrailBundle(
         identity: BundleIdentity(id: "unicode", version: "same"),
-        artifacts: [.instruction(InstructionArtifact(id: "guide", text: "Hello"))]
+        artifacts: [.instruction(InstructionArtifact(id: "guide", text: "Hello"))],
     )
     let contexts = try [Agent.claude, .codex].map {
         try RenderContext(target: Target.project(agent: $0, root: root), platform: .linux)
@@ -518,12 +522,18 @@ private func fixtureSurface(_ value: String) throws -> Surface {
 }
 
 private func fixtureSemanticValue(_ value: Any) throws -> SemanticValue {
-    if value is NSNull { return .scalar(.null) }
+    if value is NSNull {
+        return .scalar(.null)
+    }
     if let value = value as? NSNumber {
-        if CFGetTypeID(value) == CFBooleanGetTypeID() { return .scalar(.boolean(value.boolValue)) }
+        if CFGetTypeID(value) == CFBooleanGetTypeID() {
+            return .scalar(.boolean(value.boolValue))
+        }
         return .scalar(.integer(value.int64Value))
     }
-    if let value = value as? String { return .scalar(.text(value)) }
+    if let value = value as? String {
+        return .scalar(.text(value))
+    }
     if let value = value as? [Any] {
         return try .array(value.map(fixtureSemanticValue))
     }

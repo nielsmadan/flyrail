@@ -16,13 +16,15 @@ public struct Notice: Sendable, Hashable {
         artifactID: String,
         kind: NoticeKind,
         message: String,
-        code: String = ""
+        code: String = "",
     ) throws {
         try validateIdentifier(artifactID, label: "notice artifact id")
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw FlyrailValueError("notice message must be nonblank")
         }
-        if !code.isEmpty { try validateIdentifier(code, label: "notice code") }
+        if !code.isEmpty {
+            try validateIdentifier(code, label: "notice code")
+        }
         self.artifactID = artifactID
         self.kind = kind
         self.message = message
@@ -60,7 +62,7 @@ public struct RenderedArtifact: Sendable, Hashable {
         content: Content,
         subtree: String? = nil,
         requireExisting: Bool = false,
-        schemaRequirements: [DocumentSchema] = []
+        schemaRequirements: [DocumentSchema] = [],
     ) throws {
         try validateIdentifier(id, label: "rendered artifact id")
         _ = try validateRoute(destination)
@@ -103,7 +105,7 @@ public struct RenderedArtifact: Sendable, Hashable {
                 ("require_existing", .scalar(.boolean(requireExisting))),
                 ("schema_requirements", .array(schemaRequirements.map { try $0.modelValue() })),
                 ("subtree", subtree.map { .scalar(.text($0)) } ?? .scalar(.null)),
-            ]
+            ],
         )
     }
 }
@@ -123,7 +125,7 @@ public struct RenderedBundle: Sendable, Hashable {
         artifacts: [RenderedArtifact],
         dependencies: [Dependency] = [],
         notices: [Notice] = [],
-        routingContext: [(String, String)] = []
+        routingContext: [(String, String)] = [],
     ) throws {
         guard Set(artifacts.map(\.id)).count == artifacts.count else {
             throw FlyrailValueError("rendered artifact ids must be unique")
@@ -158,7 +160,7 @@ public struct RenderedBundle: Sendable, Hashable {
             values: [
                 .array(self.artifacts.map { try $0.modelValue() }),
                 .array(self.dependencies.map { try $0.modelValue() }),
-            ]
+            ],
         )
     }
 
@@ -188,7 +190,7 @@ public struct RenderedBundle: Sendable, Hashable {
 
 public func dependencyOrder(
     artifacts: [RenderedArtifact],
-    dependencies: [Dependency]
+    dependencies: [Dependency],
 ) throws -> [RenderedArtifact] {
     let names = artifacts.map(\.id)
     guard Set(names).count == names.count else {

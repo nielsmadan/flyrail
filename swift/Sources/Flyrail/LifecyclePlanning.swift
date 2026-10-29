@@ -11,7 +11,7 @@ package enum LifecyclePlanning {
             previous: observation.current?.previous,
             residual: Set((observation.current?.resources ?? []) + prepared.resources).sorted {
                 $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes)
-            }
+            },
         )
     }
 
@@ -48,7 +48,8 @@ package enum LifecyclePlanning {
                 for artifact in rendered.artifacts where group.byID[artifact.id] == resource {
                     let output = try artifact.subtree.map { try appendPath(resource.destination, $0) }
                         ?? resource.destination
-                    if try overlaps(source, output) { throw FlyrailValueError("resource output overlaps bundle source")
+                    if try overlaps(source, output) {
+                        throw FlyrailValueError("resource output overlaps bundle source")
                     }
                 }
             }
@@ -71,7 +72,7 @@ package enum LifecyclePlanning {
                 resource, observation: observation, bundleID: bundleID, bundle: bundle, rendered: rendered,
                 artifacts: (group.artifacts[resource] ?? []).sorted { utf8Less($0.id, $1.id) },
                 acquisition: acquisition, replaceModified: replaceModified,
-                requirements: group.requirements, stableRequirements: group.stableRequirements
+                requirements: group.requirements, stableRequirements: group.stableRequirements,
             )
             if try observation.receipt == nil &&
                 NativeIndexRecovery.expectsReceipt(observed.current, prepared: observed.prepared, resource: resource)
@@ -98,7 +99,7 @@ package enum LifecyclePlanning {
             replaceModified: replaceModified, index: index, indexRevision: revision,
             indexAncestors: NativeObservation.ancestors(appendPath(target.indexRoot, "index.json")),
             generation: NativeTransactionPlanning.generation(bundle, rendered: rendered, group: group),
-            resources: plans, error: error, artifactsByResource: group.artifacts
+            resources: plans, error: error, artifactsByResource: group.artifacts,
         )
     }
 
@@ -141,7 +142,9 @@ package enum LifecyclePlanning {
         let parts = try NativeFilesystem.components(path)
         for ancestor in created where !approved.contains(ancestor) {
             let prefix = try NativeFilesystem.components(ancestor.path)
-            if prefix.count < parts.count, parts.starts(with: prefix) { approved.append(ancestor) }
+            if prefix.count < parts.count, parts.starts(with: prefix) {
+                approved.append(ancestor)
+            }
         }
         approved.sort { $0.path.platformBytes.count < $1.path.platformBytes.count }
         guard try NativeObservation.ancestors(path) == approved else {
@@ -170,7 +173,7 @@ package enum LifecyclePlanning {
             bundleID: preview.bundleID, bundle: preview.bundle, rendered: preview.rendered, target: preview.target,
             acquisition: preview.acquisition, replaceModified: preview.replaceModified, index: preview.index,
             indexRevision: revision, indexAncestors: ancestors, generation: preview.generation,
-            resources: plans, error: preview.error, artifactsByResource: preview.artifactsByResource
+            resources: plans, error: preview.error, artifactsByResource: preview.artifactsByResource,
         )
     }
 }

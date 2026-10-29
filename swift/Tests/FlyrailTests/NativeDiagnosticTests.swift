@@ -47,7 +47,7 @@ private func nativePythonError(_ path: ResourcePath, operation: String) throws -
     let reference = try JSONDecoder().decode(NativeReferenceError.self, from: data)
     return try TargetError(
         code: #require(ErrorCode(rawValue: reference.code)), message: reference.message,
-        path: ResourcePath(reference.path), errno: reference.errno
+        path: ResourcePath(reference.path), errno: reference.errno,
     )
 }
 
@@ -89,7 +89,7 @@ func nativeSecurityDiagnosticsMatchCompletePythonErrors() throws {
         }
         #expect(fremovexattr(raw, "flyrail.diagnostics", 0) == 0)
         let acl = try #require(acl_from_text(
-            "!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:allow:read\n"
+            "!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:allow:read\n",
         ))
         defer { acl_free(UnsafeMutableRawPointer(acl)) }
         #expect(acl_set_fd_np(raw, acl, ACL_TYPE_EXTENDED) == 0)

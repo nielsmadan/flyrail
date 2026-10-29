@@ -5,26 +5,36 @@ package struct NativeTransactionOutcome {
     package let error: TargetError?
 
     package var status: OperationStatus {
-        if error == nil { return .applied }
-        if resources.contains(where: { $0.status == .applied }) { return .partial }
+        if error == nil {
+            return .applied
+        }
+        if resources.contains(where: { $0.status == .applied }) {
+            return .partial
+        }
         return resources.contains(where: { $0.status == .incomplete }) ? .incomplete : .failed
     }
 }
 
 package enum NativeTransactionExecution {
     package static func detail(_ error: Error) -> TargetError {
-        if let error = error as? TargetError { return error }
-        if let error = error as? FlyrailValueError { return TargetError(code: .invalidState, message: error.message) }
+        if let error = error as? TargetError {
+            return error
+        }
+        if let error = error as? FlyrailValueError {
+            return TargetError(code: .invalidState, message: error.message)
+        }
         return TargetError(code: .ioError, message: String(describing: error))
     }
 
     private static func preflight(_ plan: ResourcePlan, lock: NativeDirectoryLock) throws {
-        if let error = plan.error { throw error }
+        if let error = plan.error {
+            throw error
+        }
         guard plan.recoveryPaths.isEmpty else {
             throw nativeFailure(
                 .recoveryNeeded,
                 "preview requires recovery and re-observation",
-                plan.resource.stateRoot
+                plan.resource.stateRoot,
             )
         }
         try lock.validate()
@@ -32,7 +42,7 @@ package enum NativeTransactionExecution {
         guard current.revision == plan.before, current.receipt == plan.previous,
               current.state.revision == plan.stateRevision, current.recovery == plan.recoveryPaths,
               try NativeObservation.ancestors(
-                  appendPath(plan.resource.stateRoot, "transaction.json")
+                  appendPath(plan.resource.stateRoot, "transaction.json"),
               ) == plan.ancestors
         else {
             throw nativeFailure(.concurrentChange, "complete resource preconditions changed", plan.resource.destination)
@@ -41,7 +51,7 @@ package enum NativeTransactionExecution {
 
     package static func publishIndex(
         _ value: Index, locks: NativeTransactionLocks, expected: NativeResourceSnapshot,
-        phase: String, seam: NativeTransactionSeam, beforePublication: () throws -> Void = {}
+        phase: String, seam: NativeTransactionSeam, beforePublication: () throws -> Void = {},
     ) throws -> NativeResourceSnapshot {
         try locks.validate()
         try NativeObservation.require(locks.target.indexRoot, expected)
@@ -51,14 +61,14 @@ package enum NativeTransactionExecution {
             beforePublication: {
                 try locks.validate()
                 try beforePublication()
-            }
+            },
         )
         return try NativeObservation.snapshot(locks.target.indexRoot, privateStorage: true)
     }
 
     package static func execute(
         _ locks: NativeTransactionLocks, plans: [ResourcePlan], pending: Index, completed: Index,
-        indexSnapshot: NativeResourceSnapshot, seam: NativeTransactionSeam = .none
+        indexSnapshot: NativeResourceSnapshot, seam: NativeTransactionSeam = .none,
     ) throws -> NativeTransactionOutcome {
         guard try NativeIndexRecovery.completion(pending) == completed,
               plans.count == locks.resources.count, Set(plans.map(\.resource)) == Set(locks.resources),
@@ -83,7 +93,7 @@ package enum NativeTransactionExecution {
             try NativeTransactionBudget.validate(plan)
         }
         let pendingSnapshot = try publishIndex(
-            pending, locks: locks, expected: indexSnapshot, phase: "index-pending", seam: seam
+            pending, locks: locks, expected: indexSnapshot, phase: "index-pending", seam: seam,
         )
         var results: [ResourceResult] = []
         for plan in plans {
@@ -113,7 +123,7 @@ package enum NativeTransactionExecution {
                 var failure = detail(error)
                 if !committed, let journal {
                     committed = (try? NativeObservation.read(
-                        appendPath(plan.resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt"
+                        appendPath(plan.resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt",
                     )) == journal.receipt
                 }
                 do {
@@ -121,13 +131,13 @@ package enum NativeTransactionExecution {
                 } catch {
                     failure = TargetError(
                         code: failure.code, message: failure.message + "; recovery: " + detail(error).message,
-                        path: failure.path, errno: failure.errno
+                        path: failure.path, errno: failure.errno,
                     )
                 }
                 let paths = (try? NativeAdmission.validateState(plan.resource).1) ?? [plan.resource.stateRoot]
                 try results.append(ResourceResult(
                     resource: plan.resource, status: committed ? .applied : (paths.isEmpty ? .failed : .incomplete),
-                    error: failure, recoveryPaths: paths
+                    error: failure, recoveryPaths: paths,
                 ))
                 return NativeTransactionOutcome(resources: results, error: failure)
             }
@@ -135,7 +145,7 @@ package enum NativeTransactionExecution {
         do {
             try seam("index-completion")
             _ = try publishIndex(
-                completed, locks: locks, expected: pendingSnapshot, phase: "index-completion", seam: seam
+                completed, locks: locks, expected: pendingSnapshot, phase: "index-completion", seam: seam,
             ) {
                 try requireCompleted(plans)
             }
@@ -167,7 +177,7 @@ package enum NativeTransactionExecution {
             let resource = plan.resource
             let (_, recovery) = try NativeAdmission.validateState(resource)
             let current = try NativeObservation.read(
-                appendPath(resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt"
+                appendPath(resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt",
             )
             guard recovery.isEmpty, let current, current.resource == resource,
                   current.transactionID == plan.receipt.transactionID,

@@ -23,7 +23,7 @@ public struct Target: Sendable, Hashable {
             anchor: root,
             suffix: projectSuffix(agent),
             agent: agent,
-            scope: .project
+            scope: .project,
         )
     }
 
@@ -44,7 +44,7 @@ public struct Target: Sendable, Hashable {
     public static func user(
         agent: Agent,
         home: ResourcePath,
-        environment: [String: String]
+        environment: [String: String],
     ) throws -> Self {
         try requireAbsoluteTarget(home)
         let relocation = relocation(agent).flatMap { variable, suffix in
@@ -67,7 +67,7 @@ public struct Target: Sendable, Hashable {
             suffix: suffix,
             agent: agent,
             scope: .user,
-            routing: Routing(home: home, environment: retained)
+            routing: Routing(home: home, environment: retained),
         )
     }
 
@@ -86,7 +86,7 @@ public struct Target: Sendable, Hashable {
         suffix: [String],
         agent: Agent?,
         scope: TargetScope,
-        routing: Routing = Routing(home: nil, environment: [])
+        routing: Routing = Routing(home: nil, environment: []),
     ) throws -> Self {
         try requireAbsoluteTarget(anchor)
         let root = try appendPath(anchor, components: suffix)
@@ -99,7 +99,7 @@ public struct Target: Sendable, Hashable {
             scope: scope,
             home: routing.home,
             anchor: anchor,
-            environment: routing.environment
+            environment: routing.environment,
         )
     }
 
@@ -190,7 +190,9 @@ package func validateRoute(_ path: ResourcePath) throws -> ResourcePath {
 }
 
 package func relocatedPath(_ value: String, home: ResourcePath) throws -> ResourcePath {
-    if value == "~" { return home }
+    if value == "~" {
+        return home
+    }
     if value.hasPrefix("~/") {
         return try appendPath(home, String(value.dropFirst(2)))
     }

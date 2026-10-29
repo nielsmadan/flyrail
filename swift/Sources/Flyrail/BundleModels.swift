@@ -85,7 +85,7 @@ public struct TreeContent: Sendable, Hashable {
             type: "TreeContent",
             fields: [
                 ("entries", .array(entries.map { try $0.modelValue() })),
-            ]
+            ],
         )
     }
 }
@@ -127,7 +127,7 @@ public struct SkillArtifact: Sendable, Hashable {
                 ("content", content.modelValue()),
                 ("id", .scalar(.text(id))),
                 ("name", .scalar(.text(name))),
-            ]
+            ],
         )
     }
 }
@@ -180,7 +180,7 @@ public struct FlyrailBundle: Sendable, Hashable {
         identity: BundleIdentity,
         skills: [SkillSpec],
         entries: [BundleEntry],
-        sourceRoots: [ResourcePath]
+        sourceRoots: [ResourcePath],
     ) throws {
         self.identity = identity
         self.skills = skills
@@ -196,7 +196,7 @@ public struct FlyrailBundle: Sendable, Hashable {
                 return try BundleEntry(
                     path: String(decoding: bytes.dropFirst(prefix.count), as: UTF8.self),
                     data: entry.data,
-                    executable: entry.executable
+                    executable: entry.executable,
                 )
             })
             return try .skill(SkillArtifact(id: spec.name, name: spec.name, content: content))
@@ -212,12 +212,12 @@ public struct FlyrailBundle: Sendable, Hashable {
         artifacts: [Artifact],
         assets: [SupportAsset],
         dependencies: [Dependency],
-        sourceRoots: [ResourcePath]
+        sourceRoots: [ResourcePath],
     ) throws {
         let validated = try validateConfiguration(
             artifacts: artifacts,
             assets: assets,
-            dependencies: dependencies
+            dependencies: dependencies,
         )
         self.identity = identity
         self.artifacts = validated.artifacts
@@ -230,7 +230,7 @@ public struct FlyrailBundle: Sendable, Hashable {
             return try SkillSpec(
                 name: skill.name,
                 path: skill.name,
-                executables: skill.content.entries.filter(\.executable).map(\.path)
+                executables: skill.content.entries.filter(\.executable).map(\.path),
             )
         }
         var selected: [BundleEntry] = []
@@ -241,7 +241,7 @@ public struct FlyrailBundle: Sendable, Hashable {
                 try selected.append(BundleEntry(
                     path: "\(skill.name)/\(entry.path)",
                     data: entry.data,
-                    executable: entry.executable
+                    executable: entry.executable,
                 ))
             }
         }
@@ -252,7 +252,7 @@ public struct FlyrailBundle: Sendable, Hashable {
                 .array(self.artifacts.map { try $0.modelValue() }),
                 .array(self.assets.map { try $0.modelValue() }),
                 .array(self.dependencies.map { try $0.modelValue() }),
-            ]
+            ],
         )
     }
 
@@ -268,7 +268,7 @@ public struct FlyrailBundle: Sendable, Hashable {
 private func validateConfiguration(
     artifacts: [Artifact],
     assets: [SupportAsset],
-    dependencies: [Dependency]
+    dependencies: [Dependency],
 ) throws -> (artifacts: [Artifact], assets: [SupportAsset], dependencies: [Dependency]) {
     guard !artifacts.isEmpty else {
         throw FlyrailValueError("a configuration bundle requires at least one artifact")
@@ -280,7 +280,11 @@ private func validateConfiguration(
         }
     }
     let skillNames = artifacts.compactMap {
-        if case let .skill(skill) = $0 { skill.name } else { nil }
+        if case let .skill(skill) = $0 {
+            skill.name
+        } else {
+            nil
+        }
     }
     guard Set(skillNames).count == skillNames.count else {
         throw FlyrailValueError("duplicate skill name")
@@ -297,7 +301,7 @@ private func validateConfiguration(
                 artifactID: artifact.id,
                 reference: reference,
                 assets: assets,
-                dependencies: dependencies
+                dependencies: dependencies,
             )
             if index == 0, entry?.isDirectory != false {
                 throw FlyrailValueError("asset command must reference a file")
@@ -308,7 +312,7 @@ private func validateConfiguration(
                 artifactID: artifact.id,
                 reference: reference,
                 assets: assets,
-                dependencies: dependencies
+                dependencies: dependencies,
             )
             if let entry, !entry.isDirectory {
                 throw FlyrailValueError("asset cwd must reference a directory")
@@ -322,7 +326,7 @@ private func validateConfiguration(
             exactTextEqual($0.dependent, $1.dependent)
                 ? utf8Less($0.required, $1.required)
                 : utf8Less($0.dependent, $1.dependent)
-        }
+        },
     )
 }
 
@@ -355,7 +359,11 @@ private func artifactCommand(_ artifact: Artifact) -> Command? {
     case let .hook(value):
         value.command
     case let .mcp(value):
-        if case let .stdio(command) = value.transport { command } else { nil }
+        if case let .stdio(command) = value.transport {
+            command
+        } else {
+            nil
+        }
     default:
         nil
     }
@@ -365,7 +373,7 @@ private func validateAssetReference(
     artifactID: String,
     reference: AssetRef,
     assets: [SupportAsset],
-    dependencies: [Dependency]
+    dependencies: [Dependency],
 ) throws -> BundleEntry? {
     guard let asset = assets.first(where: { exactTextEqual($0.id, reference.assetID) }) else {
         throw FlyrailValueError("asset reference names an unknown support asset")
@@ -398,7 +406,7 @@ package struct BundleLimits: Sendable, Hashable {
         maximumMemberBytes: 64 * 1024 * 1024,
         maximumTotalBytes: 512 * 1024 * 1024,
         maximumNameBytes: 65535,
-        maximumExpansionRatio: 1000
+        maximumExpansionRatio: 1000,
     )
 }
 
@@ -515,7 +523,7 @@ private extension BundleEntry {
                 ("data", encodedData),
                 ("executable", .scalar(.boolean(executable))),
                 ("path", .scalar(.text(path))),
-            ]
+            ],
         )
     }
 }

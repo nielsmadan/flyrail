@@ -45,7 +45,10 @@ package struct NativeStamp: Sendable, Equatable {
 
 package final class NativeDescriptor {
     package let raw: Int32
-    package init(_ raw: Int32) { self.raw = raw }
+    package init(_ raw: Int32) {
+        self.raw = raw
+    }
+
     deinit { Darwin.close(raw) }
 }
 
@@ -65,7 +68,7 @@ package struct NativeParent {
 
 package enum NativeFilesystem {
     package static func withName<T>(
-        _ bytes: [UInt8], _ body: (UnsafePointer<CChar>) throws -> T
+        _ bytes: [UInt8], _ body: (UnsafePointer<CChar>) throws -> T,
     ) throws -> T {
         guard !bytes.contains(0) else { throw FlyrailValueError("embedded null byte") }
         let terminated = bytes.map { CChar(bitPattern: $0) } + [0]
@@ -127,7 +130,9 @@ package enum NativeFilesystem {
         let status = try withName(name) { fstatat(descriptor, $0, &result, AT_SYMLINK_NOFOLLOW) }
         if status != 0 {
             let code = errno
-            if code == ENOENT { return nil }
+            if code == ENOENT {
+                return nil
+            }
             throw nativeIO(code, path: path)
         }
         return result
@@ -152,7 +157,7 @@ package enum NativeFilesystem {
 
     package static func open(
         _ descriptor: Int32, name: [UInt8], directory: Bool, path: ResourcePath,
-        flags: Int32 = O_RDONLY
+        flags: Int32 = O_RDONLY,
     ) throws -> NativeDescriptor {
         let options = flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | (directory ? O_DIRECTORY : 0)
         let result = try withName(name) { openat(descriptor, $0, options) }
@@ -162,10 +167,12 @@ package enum NativeFilesystem {
                 throw nativeFailure(
                     .unsafePath,
                     "managed symlinks, reparse points and special files are unsupported",
-                    path
+                    path,
                 )
             }
-            if code == ENOENT { throw nativeFailure(.concurrentChange, "file disappeared while opening", path) }
+            if code == ENOENT {
+                throw nativeFailure(.concurrentChange, "file disappeared while opening", path)
+            }
             throw nativeIO(code, path: path)
         }
         let opened = NativeDescriptor(result)
@@ -174,7 +181,7 @@ package enum NativeFilesystem {
     }
 
     package static func identity(
-        _ parent: Int32, name: [UInt8], descriptor: NativeDescriptor, path: ResourcePath
+        _ parent: Int32, name: [UInt8], descriptor: NativeDescriptor, path: ResourcePath,
     ) throws -> Bool {
         guard let named = try metadata(parent, name: name, path: path) else { return false }
         let opened = try stat(descriptor, path: path)
@@ -205,7 +212,9 @@ package enum NativeFilesystem {
         errno = 0
         while let entry = readdir(directory) {
             let bytes = withUnsafeBytes(of: entry.pointee.d_name) { Array($0.prefix(while: { $0 != 0 })) }
-            if bytes != [46], bytes != [46, 46] { names.append(bytes) }
+            if bytes != [46], bytes != [46, 46] {
+                names.append(bytes)
+            }
             guard names.count <= NativeLimits.default.maximumNodes else {
                 throw nativeIO(ENOTSUP, message: "resource exceeds the node limit", path: path)
             }
@@ -241,7 +250,7 @@ package enum NativeFilesystem {
     }
 
     package static func read(
-        _ descriptor: NativeDescriptor, path: ResourcePath, maximumBytes: Int
+        _ descriptor: NativeDescriptor, path: ResourcePath, maximumBytes: Int,
     ) throws -> Data {
         let before = try stat(descriptor, path: path)
         guard before.st_size >= 0, before.st_size <= maximumBytes else {
@@ -252,10 +261,14 @@ package enum NativeFilesystem {
         while true {
             let received = buffer.withUnsafeMutableBytes { Darwin.read(descriptor.raw, $0.baseAddress, $0.count) }
             if received < 0 {
-                if errno == EINTR { continue }
+                if errno == EINTR {
+                    continue
+                }
                 throw nativeIO(errno, path: path)
             }
-            if received == 0 { break }
+            if received == 0 {
+                break
+            }
             guard received <= maximumBytes - result.count else {
                 throw nativeIO(ENOTSUP, message: "resource exceeds the byte limit", path: path)
             }
@@ -293,7 +306,7 @@ package enum NativeFilesystem {
         return try Ancestor(
             path: path, device: Count(UInt64(UInt32(bitPattern: before.st_dev))),
             inode: Count(before.st_ino), mode: Count(UInt64(before.st_mode & 0o7777)),
-            uid: Count(UInt64(before.st_uid)), gid: Count(UInt64(before.st_gid)), security: security
+            uid: Count(UInt64(before.st_uid)), gid: Count(UInt64(before.st_gid)), security: security,
         )
     }
 }
@@ -309,6 +322,6 @@ package func nativeIO(_ code: Int32, message: String? = nil, path: ResourcePath)
     let framed = message == nil ? filename : "PosixPath(\(filename))"
     return TargetError(
         code: unsupported ? .unsupported : .ioError,
-        message: "[Errno \(code)] \(detail): \(framed)", path: path, errno: code
+        message: "[Errno \(code)] \(detail): \(framed)", path: path, errno: code,
     )
 }

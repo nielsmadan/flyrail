@@ -48,7 +48,7 @@ public struct Member: Sendable, Hashable {
             fields: [
                 ("identity", identity.modelValue()),
                 ("key", .array(key.map { .scalar(.text($0)) })),
-            ]
+            ],
         )
     }
 }
@@ -78,7 +78,7 @@ public struct Selector: Sendable, Hashable {
     package func modelValue() throws -> SemanticValue {
         try ModelEncoding.record(
             type: "Selector",
-            fields: [("parts", .array(parts.map { try $0.modelValue() }))]
+            fields: [("parts", .array(parts.map { try $0.modelValue() }))],
         )
     }
 }
@@ -109,7 +109,7 @@ public struct Placement: Sendable, Hashable {
             fields: [
                 ("anchor", anchor.map { try $0.modelValue() } ?? .scalar(.null)),
                 ("position", .scalar(.text(position.rawValue))),
-            ]
+            ],
         )
     }
 }
@@ -129,7 +129,7 @@ public struct FileContent: Sendable, Hashable {
             fields: [
                 ("data", ModelEncoding.bytes(data)),
                 ("mode", .scalar(.text(mode.rawValue))),
-            ]
+            ],
         )
     }
 }
@@ -155,7 +155,7 @@ public struct SectionBoundaries: Sendable, Hashable {
         try validateIdentifier(marker, label: "section marker")
         try self.init(
             start: "<!-- flyrail:\(marker):start -->",
-            end: "<!-- flyrail:\(marker):end -->"
+            end: "<!-- flyrail:\(marker):end -->",
         )
     }
 
@@ -165,7 +165,7 @@ public struct SectionBoundaries: Sendable, Hashable {
             fields: [
                 ("end", .scalar(.text(end))),
                 ("start", .scalar(.text(start))),
-            ]
+            ],
         )
     }
 }
@@ -206,7 +206,7 @@ public struct SectionContent: Sendable, Hashable {
                 ("boundaries", boundaries.map { try $0.modelValue() } ?? .scalar(.null)),
                 ("marker", .scalar(.text(marker))),
                 ("text", .scalar(.text(text))),
-            ]
+            ],
         )
     }
 }
@@ -221,7 +221,7 @@ public struct StructuredContent: Sendable, Hashable {
         format: DocumentFormat,
         selector: Selector,
         value: SemanticValue,
-        placement: Placement? = nil
+        placement: Placement? = nil,
     ) throws {
         if let placement {
             guard case let .member(member) = selector.parts.last else {
@@ -245,7 +245,7 @@ public struct StructuredContent: Sendable, Hashable {
                 ("placement", placement.map { try $0.modelValue() } ?? .scalar(.null)),
                 ("selector", selector.modelValue()),
                 ("value", value.modelValue()),
-            ]
+            ],
         )
     }
 }
@@ -270,7 +270,7 @@ public struct DocumentSchema: Sendable, Hashable {
             try StructuredContent(
                 format: format,
                 selector: Selector(parts: [.key(Key(key))]),
-                value: .scalar(value)
+                value: .scalar(value),
             )
         }
     }
@@ -282,7 +282,7 @@ public struct DocumentSchema: Sendable, Hashable {
                 ("format", .scalar(.text(format.rawValue))),
                 ("key", .scalar(.text(key))),
                 ("value", SemanticValue.scalar(value).modelValue()),
-            ]
+            ],
         )
     }
 }

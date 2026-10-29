@@ -60,18 +60,18 @@ package enum InteropDifferential {
         let first = try RenderedArtifact(
             id: "base-\(suffix)", family: .instructions,
             destination: ResourcePath(caseRoot.appending(path: row.filename).path),
-            content: .file(FileContent(data: row.data, mode: .readable))
+            content: .file(FileContent(data: row.data, mode: .readable)),
         )
         let second = try RenderedArtifact(
             id: "section-\(suffix)", family: .instructions,
             destination: ResourcePath(caseRoot.appending(path: "AGENTS.md").path),
-            content: .section(SectionContent(marker: "section-\(suffix)", text: "value-\(row.value)\n"))
+            content: .section(SectionContent(marker: "section-\(suffix)", text: "value-\(row.value)\n")),
         )
         let context = [("alpha", "Straße"), ("zeta", row.value)]
         let rendered = try RenderedBundle(
             artifacts: row.fileFirst ? [first, second] : [second, first],
             dependencies: [Dependency(dependent: second.id, required: first.id)],
-            routingContext: row.alphaFirst ? context : context.reversed()
+            routingContext: row.alphaFirst ? context : context.reversed(),
         )
         let canonical = try SemanticValue.array([
             .array(rendered.artifacts.map { try $0.modelValue() }),

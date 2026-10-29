@@ -5,7 +5,7 @@ package enum NativeTransactionDriver {
     package static func write(
         bundle: FlyrailBundle?, bundleID: String, rendered: RenderedBundle,
         target: InstallationTarget, acquisition: Acquisition, replaceModified: Bool,
-        timeout: Duration, seam: NativeTransactionSeam = .none
+        timeout: Duration, seam: NativeTransactionSeam = .none,
     ) throws -> InstallationResult {
         let group = try NativeTransactionPlanning.group(rendered)
         let locks = try NativeTransactionLocks(target: target, bundleID: bundleID,
@@ -17,7 +17,7 @@ package enum NativeTransactionDriver {
                 resource, observation: NativeAdmission.observe(resource, lock: locks.guardFor(resource)),
                 bundleID: bundleID, bundle: bundle, rendered: rendered,
                 artifacts: group.artifacts[resource] ?? [], acquisition: acquisition, replaceModified: replaceModified,
-                requirements: group.requirements, stableRequirements: group.stableRequirements
+                requirements: group.requirements, stableRequirements: group.stableRequirements,
             )
         }
         if let error = plans.compactMap(\.error).first {
@@ -33,12 +33,12 @@ package enum NativeTransactionDriver {
         }
         let pending = try Index(
             bundleID: bundleID, contextDigest: target.contextDigest, current: index.current?.current,
-            pending: generation, previous: index.current?.current, residual: locks.resources
+            pending: generation, previous: index.current?.current, residual: locks.resources,
         )
         let ordered = try NativeTransactionPlanning.order(plans, rendered: rendered, byID: group.byID)
         let outcome = try NativeTransactionExecution.execute(
             locks, plans: ordered, pending: pending, completed: NativeIndexRecovery.completion(pending),
-            indexSnapshot: index.snapshot, seam: seam
+            indexSnapshot: index.snapshot, seam: seam,
         )
         return try InstallationResult(status: outcome.status, observation: observe(bundleID, target: target),
                                       resources: outcome.resources, error: outcome.error)
@@ -46,7 +46,7 @@ package enum NativeTransactionDriver {
 
     package static func recover(
         _ bundleID: String, target: InstallationTarget, timeout: Duration,
-        seam: NativeTransactionSeam = .none
+        seam: NativeTransactionSeam = .none,
     ) throws -> InstallationResult {
         let initial = try NativeAdmission.observeIndex(target, bundleID: bundleID)
         if initial.current == nil, initial.prepared == nil {
@@ -73,7 +73,7 @@ package enum NativeTransactionDriver {
                     claims: observation.receipt.map {
                         try NativeResourcePlanner.claimObservations($0, revision: observation.revision)
                     } ?? [],
-                    revisionDigest: observation.revision.contentDigest, recoveryPaths: observation.recovery
+                    revisionDigest: observation.revision.contentDigest, recoveryPaths: observation.recovery,
                 )
             } catch {
                 return try ResourceObservation(destination: resource.destination, stateRoot: resource.stateRoot,
@@ -101,7 +101,7 @@ package enum NativeTransactionDriver {
         return try InstallationObservation(
             bundleID: bundleID, target: target, resources: resources,
             isCurrent: current != nil && !pending && intact && Set(actual) == Set(expected), pending: pending,
-            version: current?.version, bundleDigest: current?.bundleDigest, renderDigest: current?.renderDigest
+            version: current?.version, bundleDigest: current?.bundleDigest, renderDigest: current?.renderDigest,
         )
     }
 
@@ -111,7 +111,7 @@ package enum NativeTransactionDriver {
         } catch {
             return try InstallationObservation(
                 bundleID: bundleID, target: target, resources: [], isCurrent: false, pending: false,
-                error: NativeTransactionExecution.detail(error)
+                error: NativeTransactionExecution.detail(error),
             )
         }
     }
@@ -123,5 +123,7 @@ package enum NativeTransactionDriver {
 }
 
 private extension String {
-    var mapUTF8: [UInt8] { Array(utf8) }
+    var mapUTF8: [UInt8] {
+        Array(utf8)
+    }
 }

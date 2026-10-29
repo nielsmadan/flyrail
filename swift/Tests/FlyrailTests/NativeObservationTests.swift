@@ -70,7 +70,11 @@ func nativeResourceSecurityRefusesForeignXattrsAndCapturesAncestorEvidence() thr
     try Data("bytes".utf8).write(to: root.url.appending(path: "resource"))
     let descriptor = open(path.displayString, O_RDONLY | O_NOFOLLOW)
     #expect(descriptor >= 0)
-    defer { if descriptor >= 0 { close(descriptor) } }
+    defer {
+        if descriptor >= 0 {
+            close(descriptor)
+        }
+    }
     let payload = Data("opaque".utf8)
     let result = payload.withUnsafeBytes { bytes in
         fsetxattr(descriptor, "flyrail.security-test", bytes.baseAddress, bytes.count, 0, 0)
@@ -94,7 +98,11 @@ func nativeResourceSecurityRejectsACLsFlagsAndSpecialModes() throws {
     try Data("bytes".utf8).write(to: root.url.appending(path: "resource"))
     let descriptor = open(path.displayString, O_RDONLY | O_NOFOLLOW)
     #expect(descriptor >= 0)
-    defer { if descriptor >= 0 { close(descriptor) } }
+    defer {
+        if descriptor >= 0 {
+            close(descriptor)
+        }
+    }
     #expect(fchmod(descriptor, 0o4600) == 0)
     expectNativeError(.unsafePath) { try NativeFilesystem.resourceMode(0o4600, path: path) }
     if try (NativeFilesystem.metadata(path)?.st_mode ?? 0) & 0o7000 != 0 {
@@ -126,7 +134,9 @@ func nativeObservationRejectsNonUTF8AndPortableSiblingCollisions() throws {
     let invalid = try ResourcePath(platformBytes: root.path.platformBytes + [47, 255])
     let created = try NativeFilesystem.withName(invalid.platformBytes) { name in
         let descriptor = open(name, O_WRONLY | O_CREAT | O_EXCL, 0o600)
-        if descriptor >= 0 { close(descriptor); return true }
+        if descriptor >= 0 {
+            close(descriptor); return true
+        }
         #expect([EILSEQ, EINVAL, EPERM].contains(errno))
         return false
     }

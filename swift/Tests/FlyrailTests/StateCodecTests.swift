@@ -129,7 +129,7 @@ func stateIndexesUnionAndValidateAllGenerations() throws {
     let generation = try stateTestGeneration([a, b])
     let index = try Index(
         bundleID: "team", contextDigest: String(repeating: "d", count: 64),
-        current: generation, pending: stateTestGeneration([b, c]), previous: generation, residual: [c]
+        current: generation, pending: stateTestGeneration([b, c]), previous: generation, residual: [c],
     )
     let expected = [a, b, c].sorted {
         $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes)
@@ -140,7 +140,7 @@ func stateIndexesUnionAndValidateAllGenerations() throws {
     #expect(throws: FlyrailValueError.self) {
         try GenerationMember(
             resource: a,
-            claimIDs: [String(repeating: "a", count: 64), String(repeating: "a", count: 64)]
+            claimIDs: [String(repeating: "a", count: 64), String(repeating: "a", count: 64)],
         )
     }
     let tree = try ResourceRef(destination: a.destination, kind: .tree, stateRoot: a.stateRoot)
@@ -149,7 +149,7 @@ func stateIndexesUnionAndValidateAllGenerations() throws {
             bundleID: "team",
             contextDigest: String(repeating: "d", count: 64),
             current: generation,
-            residual: [tree]
+            residual: [tree],
         )
     }
 }
@@ -169,7 +169,7 @@ func stateTestOwned(_ resource: ResourceRef, version: String = "1", inode: Count
         claim: claim, claimID: claim.identity(destination: resource.destination), bundleID: "team", artifactID: "guide",
         version: version, bundleDigest: String(repeating: "a", count: 64),
         renderDigest: String(repeating: "b", count: 64),
-        installed: Revision(nodes: [stateTestNode("", Data("é \0 日本語\n".utf8), inode: inode)])
+        installed: Revision(nodes: [stateTestNode("", Data("é \0 日本語\n".utf8), inode: inode)]),
     )
 }
 
@@ -177,7 +177,7 @@ func stateTestGeneration(_ refs: [ResourceRef]) throws -> Generation {
     try Generation(
         version: "opaque é \0", bundleDigest: String(repeating: "a", count: 64),
         renderDigest: String(repeating: "b", count: 64),
-        membership: refs.map { try GenerationMember(resource: $0, claimIDs: [String(repeating: "c", count: 64)]) }
+        membership: refs.map { try GenerationMember(resource: $0, claimIDs: [String(repeating: "c", count: 64)]) },
     )
 }
 

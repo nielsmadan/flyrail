@@ -26,7 +26,7 @@ public extension FlyrailBundle {
     init(
         manifest: Data,
         entries: [BundleEntry],
-        sourceRoots: [ResourcePath] = []
+        sourceRoots: [ResourcePath] = [],
     ) throws {
         let source = try MemoryBundleSource(manifest: manifest, entries: entries)
         self = try Self.load(source: source, sourceRoots: sourceRoots)
@@ -36,20 +36,20 @@ public extension FlyrailBundle {
         identity: BundleIdentity,
         artifacts: [Artifact],
         assets: [SupportAsset] = [],
-        dependencies: [Dependency] = []
+        dependencies: [Dependency] = [],
     ) throws {
         try self.init(
             identity: identity,
             artifacts: artifacts,
             assets: assets,
             dependencies: dependencies,
-            sourceRoots: []
+            sourceRoots: [],
         )
     }
 
     private static func load(
         source: some BundleSource,
-        sourceRoots: [ResourcePath]
+        sourceRoots: [ResourcePath],
     ) throws -> Self {
         let manifest = try source.manifest()
         let raw = try JSONParser.parse(manifest)
@@ -64,7 +64,7 @@ public extension FlyrailBundle {
                 artifacts: parsed.artifacts,
                 assets: parsed.assets,
                 dependencies: parsed.dependencies,
-                sourceRoots: sourceRoots
+                sourceRoots: sourceRoots,
             )
         }
         let (identity, specs) = try readBundleManifest(manifest)
@@ -89,7 +89,7 @@ public extension FlyrailBundle {
             identity: identity,
             skills: specs,
             entries: entries,
-            sourceRoots: sourceRoots
+            sourceRoots: sourceRoots,
         )
     }
 }
@@ -137,11 +137,11 @@ package struct MemoryBundleSource: BundleSource {
             let installed = try BundleEntry(
                 path: "\(spec.name)/\(relative)",
                 data: entry.data,
-                executable: spec.executables.contains(where: { exactTextEqual($0, relative) })
+                executable: spec.executables.contains(where: { exactTextEqual($0, relative) }),
             )
             try budget.reserve(
                 path: installed.path,
-                dataBytes: installed.data.map { UInt64($0.count) }
+                dataBytes: installed.data.map { UInt64($0.count) },
             )
             result.append(installed)
         }
@@ -168,7 +168,7 @@ package struct MemoryBundleSource: BundleSource {
             try result.append(BundleEntry(
                 path: relative,
                 data: entry.data,
-                executable: executables.contains(where: { exactTextEqual($0, relative) })
+                executable: executables.contains(where: { exactTextEqual($0, relative) }),
             ))
         }
         return try snapshotEntries(result)

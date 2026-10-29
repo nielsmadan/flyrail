@@ -122,7 +122,7 @@ package struct TOMLScanner {
             if byte < 32 && byte != 9 || byte == 127 {
                 throw error(String(
                     format: "Control characters (codes less than 0x1f and 0x7f) are not allowed in comments, use \\u%04x instead",
-                    byte
+                    byte,
                 ))
             }
             position += 1
@@ -131,23 +131,31 @@ package struct TOMLScanner {
 
     mutating func trail() throws {
         spaces()
-        if current() == 35 { try comment() }
+        if current() == 35 {
+            try comment()
+        }
         if current() == 13 {
             guard current(1) == 10 else {
                 throw error(
                     "Control characters (codes less than 0x1f and 0x7f) are not allowed in comments, use \\u000d instead",
-                    at: 0
+                    at: 0,
                 )
             }
             position += 1
         }
-        if current() == 10 { position += 1 } else if current() != nil { throw unexpected() }
+        if current() == 10 {
+            position += 1
+        } else if current() != nil {
+            throw unexpected()
+        }
     }
 
     mutating func key() throws -> [(String, String)] {
         var parts: [(String, String)] = []
         repeat {
-            if !parts.isEmpty { position += 1 }
+            if !parts.isEmpty {
+                position += 1
+            }
             guard parts.count < 100 else { throw error("TOML key nested more than 100 levels deep") }
             let start = position
             spaces()
@@ -185,7 +193,9 @@ package struct TOMLScanner {
         var result: [UInt8] = []
         while let byte = current() {
             if byte == quote {
-                if !multiline { position += 1; return String(decoding: result, as: UTF8.self) }
+                if !multiline {
+                    position += 1; return String(decoding: result, as: UTF8.self)
+                }
                 var count = 0
                 while current() == quote, count < 5 {
                     position += 1; count += 1
@@ -211,13 +221,17 @@ package struct TOMLScanner {
                 continue
             }
             if byte < 32 && byte != 9 && !(multiline && (byte == 10 || byte == 13)) || byte == 127 {
-                if byte == 10 { throw unexpected() }
+                if byte == 10 {
+                    throw unexpected()
+                }
                 throw error(String(
                     format: "Control characters (codes less than 0x1f and 0x7f) are not allowed in strings, use \\u%04x instead",
-                    byte
+                    byte,
                 ))
             }
-            if multiline, byte == 13, current(1) == 10 { position += 1; continue }
+            if multiline, byte == 13, current(1) == 10 {
+                position += 1; continue
+            }
             result.append(byte)
             position += 1
             guard result.count <= JSONLimits.default.maximumStringBytes else {
@@ -239,7 +253,9 @@ package struct TOMLScanner {
         case 92: 92
         default: nil
         }
-        if let mapped { position += 1; return [mapped] }
+        if let mapped {
+            position += 1; return [mapped]
+        }
         if escape == 117 || escape == 85 {
             let escapeStart = position
             position += 1
@@ -274,7 +290,9 @@ package struct TOMLScanner {
                 guard current() != nil else { throw error("Unexpected end of file") }
                 try node.items.append(value(depth: depth + 1))
                 try arraySpace()
-                if current() == 93 { break }
+                if current() == 93 {
+                    break
+                }
                 guard current() == 44 else { throw unexpected() }
                 node.commas.append(position)
                 position += 1
@@ -295,9 +313,13 @@ package struct TOMLScanner {
                 spaces()
                 let child = try value(depth: depth + names.count)
                 try assign(node, keys: names.map(\.0), value: child, at: start)
-                if names.count == 1 { node.inlineKeys.append((names[0].0, keyStart)) }
+                if names.count == 1 {
+                    node.inlineKeys.append((names[0].0, keyStart))
+                }
                 spaces()
-                if current() == 125 { break }
+                if current() == 125 {
+                    break
+                }
                 guard current() == 44 else { throw unexpected() }
                 node.commas.append(position)
                 position += 1
@@ -400,10 +422,18 @@ package struct TOMLScanner {
         while position < bytes.count {
             let start = position
             spaces()
-            if current() == 35 { try comment(); try trail(); continue }
-            if current() == 10 { position += 1; continue }
-            if current() == 13 { try trail(); continue }
-            if current() == nil { break }
+            if current() == 35 {
+                try comment(); try trail(); continue
+            }
+            if current() == 10 {
+                position += 1; continue
+            }
+            if current() == 13 {
+                try trail(); continue
+            }
+            if current() == nil {
+                break
+            }
             try token()
             if current() == 91 {
                 let aot = current(1) == 91
@@ -423,7 +453,7 @@ package struct TOMLScanner {
                 statements.append(.init(
                     path: context, start: start, end: position,
                     keyStart: keyStart, keyEnd: keyEnd, valueStart: start, valueEnd: valueEnd,
-                    header: true, aot: aot, spelling: text(keyStart, keyEnd), keyParts: parts
+                    header: true, aot: aot, spelling: text(keyStart, keyEnd), keyParts: parts,
                 ))
             } else {
                 let keyStart = position
@@ -441,7 +471,7 @@ package struct TOMLScanner {
                 statements.append(.init(
                     path: context + parts.map { .key($0.0) }, start: start, end: position,
                     keyStart: keyStart, keyEnd: keyEnd, valueStart: valueStart, valueEnd: valueEnd,
-                    header: false, aot: false, spelling: text(keyStart, keyEnd), keyParts: parts
+                    header: false, aot: false, spelling: text(keyStart, keyEnd), keyParts: parts,
                 ))
             }
         }
@@ -504,7 +534,9 @@ package struct TOMLScanner {
                 node.fields.append((key, child))
                 node = child
             }
-            if last { node.explicit = true }
+            if last {
+                node.explicit = true
+            }
         }
         return path
     }
@@ -540,7 +572,9 @@ private func validNumberUnderscores(_ raw: String) -> Bool {
 }
 
 private func tomlTemporal(_ raw: String) throws -> ScalarValue {
-    if raw.utf8.count == 10 { return try .date(CalendarDate(raw)) }
+    if raw.utf8.count == 10 {
+        return try .date(CalendarDate(raw))
+    }
     let text = nativeTemporalPrecision(raw).replacingOccurrences(of: "t", with: "T")
         .replacingOccurrences(of: " ", with: "T")
         .replacingOccurrences(of: "z", with: "Z")
@@ -553,7 +587,7 @@ private func tomlTemporal(_ raw: String) throws -> ScalarValue {
 private func nativeTemporalGrammar(_ raw: String) -> Bool {
     raw.range(
         of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[Tt ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})?)?$"#,
-        options: .regularExpression
+        options: .regularExpression,
     ) != nil
 }
 

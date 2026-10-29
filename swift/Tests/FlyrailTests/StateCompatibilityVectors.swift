@@ -13,12 +13,12 @@ func stateCodecPreservesRustPythonCompatibilityDiagnostics() throws {
     for vector in try stateCompatibilityVectors() + stateExtendingPathFailures() {
         if vector.message.isEmpty {
             #expect(try StateCodec.transcode(vector.input) == StateCodec.encodeRecord(JSONParser.parse(
-                vector.input.starts(with: [0xEF, 0xBB, 0xBF]) ? Data(vector.input.dropFirst(3)) : vector.input
+                vector.input.starts(with: [0xEF, 0xBB, 0xBF]) ? Data(vector.input.dropFirst(3)) : vector.input,
             )))
         } else {
             #expect(
                 throws: FlyrailValueError(vector.message),
-                "\(vector.tag): \(String(decoding: vector.input, as: UTF8.self))"
+                "\(vector.tag): \(String(decoding: vector.input, as: UTF8.self))",
             ) {
                 try StateCodec.transcode(vector.input)
             }
@@ -62,7 +62,7 @@ private func stateCompatibilityBases() -> [String: [(String, JSONValue)]] {
             ("destination", .object([("path", .string("/pin/AGENTS.md"))])),
             ("kind", StateCodec.enumeration("ResourceKind", "document")), ("schema_version", .number("2")),
             ("state_root", .object([("path", .string(
-                "/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
+                "/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state",
             ))])),
         ],
         "Index": [
@@ -80,7 +80,7 @@ func stateCompatibilityVectors() throws -> [StateCompatibilityVector] {
     func append(_ tag: String, _ field: String, _ value: JSONValue, _ message: String) throws {
         let fields = try #require(bases[tag]).map { ($0.0, $0.0 == field ? value : $0.1) }
         try vectors.append(StateCompatibilityVector(
-            tag: tag, input: JSONWriter.canonicalData(StateCodec.record(tag, fields)), message: message
+            tag: tag, input: JSONWriter.canonicalData(StateCodec.record(tag, fields)), message: message,
         ))
     }
     let invalid = "invalid state record"
@@ -91,7 +91,7 @@ func stateCompatibilityVectors() throws -> [StateCompatibilityVector] {
     try append("Node", "mode", .number("511"), "")
     try append("Node", "inode", .number(huge), "")
     try vectors.append(StateCompatibilityVector(
-        tag: "Key", input: Data([0xEF, 0xBB, 0xBF]) + JSONWriter.canonicalData(key), message: ""
+        tag: "Key", input: Data([0xEF, 0xBB, 0xBF]) + JSONWriter.canonicalData(key), message: "",
     ))
     try append("Key", "name", .number("5"), invalid)
     try append("Key", "name", .number("1.5"), "invalid state scalar")
@@ -105,11 +105,11 @@ func stateCompatibilityVectors() throws -> [StateCompatibilityVector] {
     try append("DocumentProvenance", "empty_document", .number("5"), invalid)
     try append(
         "DocumentProvenance", "schema_empty_document", .number("5"),
-        "schema empty-document evidence must be whitespace bytes"
+        "schema empty-document evidence must be whitespace bytes",
     )
     try append(
         "DocumentProvenance", "trailing_separators", .array([.number("5")]),
-        "separator evidence must be SHA-256 digests"
+        "separator evidence must be SHA-256 digests",
     )
     try append("CreatedContainer", "empty_syntax", .number("5"), invalid)
     try append("Ancestor", "path", .string("/a"), "ancestor path must be absolute")
@@ -136,7 +136,7 @@ func stateCompatibilityVectors() throws -> [StateCompatibilityVector] {
         input: JSONWriter.canonicalData(StateCodec.record("Ancestor", #require(bases["Ancestor"]).filter {
             $0.0 != "security"
         })),
-        message: "state record fields do not match schema"
+        message: "state record fields do not match schema",
     ))
     return try vectors + stateCompatibilityNodeAndEnumVectors()
 }
@@ -152,7 +152,7 @@ private func stateCompatibilityNodeAndEnumVectors() throws -> [StateCompatibilit
     func append(_ tag: String, _ field: String, _ value: JSONValue, _ message: String) throws {
         let fields = try #require(bases[tag]).map { ($0.0, $0.0 == field ? value : $0.1) }
         try vectors.append(StateCompatibilityVector(
-            tag: tag, input: JSONWriter.canonicalData(StateCodec.record(tag, fields)), message: message
+            tag: tag, input: JSONWriter.canonicalData(StateCodec.record(tag, fields)), message: message,
         ))
     }
     try append("Node", "path", .number("5"), invalid)
@@ -167,7 +167,7 @@ private func stateCompatibilityNodeAndEnumVectors() throws -> [StateCompatibilit
     ] {
         try append(
             "Claim", "kind", .object([("enum", .string("Ownership")), ("value", value)]),
-            "\(repr) is not a valid Ownership"
+            "\(repr) is not a valid Ownership",
         )
     }
     try append("Claim", "kind", .string("file"), invalid)
@@ -177,7 +177,7 @@ private func stateCompatibilityNodeAndEnumVectors() throws -> [StateCompatibilit
     try vectors.append(StateCompatibilityVector(
         tag: "Claim", input: JSONWriter.canonicalData(StateCodec.record("Claim", [
             ("kind", StateCodec.enumeration("Ownership", "structured")), ("selector", .number("5")),
-        ])), message: invalid
+        ])), message: invalid,
     ))
     try append("ResourceRef", "schema_version", .number("3"), "authority schema must be 2")
     try append("ResourceRef", "schema_version", .boolean(true), "authority schema must be 2")
@@ -188,18 +188,18 @@ private func stateCompatibilityNodeAndEnumVectors() throws -> [StateCompatibilit
     try append("Index", "current", .number("5"), invalid)
     try append("Index", "schema_version", .number("3"), "index schema must be 2")
     let nodeText = try String(decoding: JSONWriter.canonicalData(StateCodec.record(
-        "Node", #require(bases["Node"])
+        "Node", #require(bases["Node"]),
     )), as: UTF8.self)
     for constant in ["NaN", "Infinity", "-Infinity"] {
         vectors.append(StateCompatibilityVector(
             tag: "Node",
             input: Data(nodeText.replacingOccurrences(of: "\"mode\":0", with: "\"mode\":\(constant)").utf8),
-            message: "non-JSON numeric constant: \(constant)"
+            message: "non-JSON numeric constant: \(constant)",
         ))
     }
     vectors.append(StateCompatibilityVector(
         tag: "Key", input: Data(#"{"fields":{"name":"a"},"type":"Key","type":"Key"}"#.utf8),
-        message: "duplicate JSON field: type"
+        message: "duplicate JSON field: type",
     ))
     let resource = try StateCodec.record("ResourceRef", #require(bases["ResourceRef"]))
     let digest = JSONValue.string(String(repeating: "0", count: 64))
@@ -219,7 +219,7 @@ private func stateCompatibilityNodeAndEnumVectors() throws -> [StateCompatibilit
             tag: "Generation",
             input: JSONWriter.canonicalData(StateCodec.record("Generation", generation.map {
                 ($0.0, $0.0 == field ? value : $0.1)
-            })), message: message
+            })), message: message,
         ))
     }
     return vectors

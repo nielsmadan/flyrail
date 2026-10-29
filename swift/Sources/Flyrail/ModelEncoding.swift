@@ -4,7 +4,7 @@ import Foundation
 package enum ModelEncoding {
     package static func record(
         type: String,
-        fields: [(String, SemanticValue)]
+        fields: [(String, SemanticValue)],
     ) throws -> SemanticValue {
         try SemanticValue(object: [
             ("type", .scalar(.text(type))),
@@ -20,7 +20,7 @@ package enum ModelEncoding {
 
     package static func digest(
         domain: String,
-        values: [SemanticValue]
+        values: [SemanticValue],
     ) throws -> String {
         var framed = Data(domain.utf8)
         framed.append(0)
@@ -37,7 +37,7 @@ package extension SemanticValue {
         case let .array(values):
             try ModelEncoding.record(
                 type: "ArrayValue",
-                fields: [("items", .array(values.map { try $0.modelValue() }))]
+                fields: [("items", .array(values.map { try $0.modelValue() }))],
             )
         case let .object(items):
             try ModelEncoding.record(
@@ -46,7 +46,7 @@ package extension SemanticValue {
                     ("items", .array(items.sorted { utf8Less($0.0, $1.0) }.map {
                         try .array([.scalar(.text($0.0)), $0.1.modelValue()])
                     })),
-                ]
+                ],
             )
         }
     }

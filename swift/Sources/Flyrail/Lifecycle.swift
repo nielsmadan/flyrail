@@ -62,7 +62,7 @@ public func sync(bundle: FlyrailBundle, rendered: RenderedBundle, target: Instal
             bundle.identity.id,
             target: target,
             error: error,
-            notices: rendered.notices
+            notices: rendered.notices,
         )
     }
     return LifecycleExecution.synchronize(
@@ -72,7 +72,7 @@ public func sync(bundle: FlyrailBundle, rendered: RenderedBundle, target: Instal
         target: target,
         acquisition: acquisition,
         replaceModified: replaceModified,
-        lockTimeout: lockTimeout
+        lockTimeout: lockTimeout,
     )
 }
 
@@ -109,7 +109,7 @@ public func recoverInstallation(bundleID: String, target: InstallationTarget,
             return try InstallationResult(status: .unchanged,
                                           observation: InstallationInspection.observe(
                                               bundleID: bundleID,
-                                              target: target
+                                              target: target,
                                           ))
         }
         let locks = try LifecycleExecution.locks(bundleID: bundleID, target: target, observed: observed,

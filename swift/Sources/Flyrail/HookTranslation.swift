@@ -11,7 +11,7 @@ package struct HookTranslation {
 
 package func supportAssetArtifacts(
     bundle: FlyrailBundle,
-    context: RenderContext
+    context: RenderContext,
 ) throws -> ([RenderedArtifact], [String: ResourcePath]) {
     let root = try context.selectedAssetRoot ?? appendPath(context.root, ".flyrail-assets")
     var artifacts: [RenderedArtifact] = []
@@ -25,7 +25,7 @@ package func supportAssetArtifacts(
             id: asset.id,
             family: asset.family,
             destination: destination,
-            content: .tree(asset.content)
+            content: .tree(asset.content),
         ))
     }
     return (artifacts, destinations)
@@ -33,7 +33,7 @@ package func supportAssetArtifacts(
 
 package func translateNativeArtifact(
     _ artifact: NativeArtifact,
-    context: RenderContext
+    context: RenderContext,
 ) throws -> RenderedArtifact? {
     let audience = artifact.audience
     guard audience.agent == context.audience.agent,
@@ -47,7 +47,7 @@ package func translateNativeArtifact(
         id: artifact.id,
         family: artifact.family,
         destination: appendPath(context.selectedNativeRoot ?? context.root, artifact.destination),
-        content: artifact.content
+        content: artifact.content,
     )
 }
 
@@ -55,7 +55,7 @@ private func supportedHook(_ artifact: HookArtifact, context: RenderContext) thr
     guard isTranslatable(context.audience.agent) else {
         throw UnsupportedTranslation(
             code: "agent-unsupported",
-            message: untranslatableMessage(context.audience.agent)
+            message: untranslatableMessage(context.audience.agent),
         )
     }
     guard context.surface != .vscode else {
@@ -68,33 +68,49 @@ private func supportedHook(_ artifact: HookArtifact, context: RenderContext) thr
     {
         throw UnsupportedTranslation(
             code: "hook-modification-approval",
-            message: "This host has no verified argument-replacement channel preserving normal approval flow."
+            message: "This host has no verified argument-replacement channel preserving normal approval flow.",
         )
     }
     var outcomes: Set<HookOutcome> = [.continue]
     switch artifact.event {
     case .beforeTool:
         outcomes.formUnion([.block, .modifyInput])
-        if agent == .claude || agent == .copilot { outcomes.insert(.ask) }
-        if agent == .claude || agent == .codex { outcomes.insert(.context) }
+        if agent == .claude || agent == .copilot {
+            outcomes.insert(.ask)
+        }
+        if agent == .claude || agent == .codex {
+            outcomes.insert(.context)
+        }
     case .afterTool:
         outcomes.insert(.context)
     case .sessionStart:
-        if agent != .opencode, agent != .pi { outcomes.insert(.context) }
+        if agent != .opencode, agent != .pi {
+            outcomes.insert(.context)
+        }
     case .prompt:
-        if agent == .opencode { outcomes.removeAll() }
-        if agent == .claude || agent == .codex || agent == .cursor { outcomes.insert(.block) }
-        if agent == .claude || agent == .codex { outcomes.insert(.context) }
-        if agent == .pi { outcomes.insert(.modifyInput) }
+        if agent == .opencode {
+            outcomes.removeAll()
+        }
+        if agent == .claude || agent == .codex || agent == .cursor {
+            outcomes.insert(.block)
+        }
+        if agent == .claude || agent == .codex {
+            outcomes.insert(.context)
+        }
+        if agent == .pi {
+            outcomes.insert(.modifyInput)
+        }
     case .stop:
-        if agent == .opencode { outcomes.removeAll() }
+        if agent == .opencode {
+            outcomes.removeAll()
+        }
     }
     let unavailable = artifact.outcomes.filter { !outcomes.contains($0) }
     guard unavailable.isEmpty else {
         throw UnsupportedTranslation(
             code: "hook-outcome",
             message: "\(agent.rawValue) cannot preserve the declared \(artifact.event.rawValue) outcomes: " +
-                unavailable.map(\.rawValue).joined(separator: ", ")
+                unavailable.map(\.rawValue).joined(separator: ", "),
         )
     }
     if context.platform == .windows {
@@ -102,7 +118,7 @@ private func supportedHook(_ artifact: HookArtifact, context: RenderContext) thr
         guard Set(names).count == names.count else {
             throw UnsupportedTranslation(
                 code: "windows-env-collision",
-                message: "Hook environment names collide on Windows."
+                message: "Hook environment names collide on Windows.",
             )
         }
     }
@@ -112,20 +128,20 @@ private func shell(_ argv: [String], context: RenderContext) throws -> String {
     guard let runtime = context.selectedHookRuntime else {
         throw UnsupportedTranslation(
             code: "hook-runtime",
-            message: "Native hooks require an explicit Node 24+ executable."
+            message: "Native hooks require an explicit Node 24+ executable.",
         )
     }
     if context.platform == .windows {
         guard context.audience.agent != .cursor else {
             throw UnsupportedTranslation(
                 code: "cursor-windows-shell",
-                message: "Cursor Windows hook shell selection is unverified; use native content."
+                message: "Cursor Windows hook shell selection is unverified; use native content.",
             )
         }
         guard runtime.shell == .cmd else {
             throw UnsupportedTranslation(
                 code: "hook-shell",
-                message: "Windows Codex requires a caller-confirmed cmd.exe /C hook shell."
+                message: "Windows Codex requires a caller-confirmed cmd.exe /C hook shell.",
             )
         }
         guard !argv.contains(where: { value in
@@ -133,7 +149,7 @@ private func shell(_ argv: [String], context: RenderContext) throws -> String {
         }) else {
             throw UnsupportedTranslation(
                 code: "hook-shell-literal",
-                message: "These native launcher paths cannot be represented by the cmd hook bridge."
+                message: "These native launcher paths cannot be represented by the cmd hook bridge.",
             )
         }
         return argv.map { "\"\($0)\"" }.joined(separator: " ")
@@ -141,7 +157,7 @@ private func shell(_ argv: [String], context: RenderContext) throws -> String {
     guard runtime.shell == .posix else {
         throw UnsupportedTranslation(
             code: "hook-shell",
-            message: "This native hook requires a caller-confirmed POSIX-compatible hook shell."
+            message: "This native hook requires a caller-confirmed POSIX-compatible hook shell.",
         )
     }
     return argv.map(posixQuote).joined(separator: " ")
@@ -182,7 +198,9 @@ private func generatedID(_ values: [String]) -> String {
 
 private func fileURL(_ path: ResourcePath, platform: Platform) throws -> String {
     var text = path.displayString
-    if platform == .windows { text = text.replacingOccurrences(of: "\\", with: "/") }
+    if platform == .windows {
+        text = text.replacingOccurrences(of: "\\", with: "/")
+    }
     let prefix: String
     if platform == .windows, text.hasPrefix("//") {
         prefix = "file:"
@@ -212,10 +230,14 @@ private func fileURL(_ path: ResourcePath, platform: Platform) throws -> String 
 package func hookArtifacts(
     bundle: FlyrailBundle,
     context: RenderContext,
-    assets: [String: ResourcePath]
+    assets: [String: ResourcePath],
 ) throws -> HookTranslation {
     let hooks = bundle.artifacts.compactMap { artifact -> HookArtifact? in
-        if case let .hook(hook) = artifact { hook } else { nil }
+        if case let .hook(hook) = artifact {
+            hook
+        } else {
+            nil
+        }
     }
     guard !hooks.isEmpty else { return HookTranslation(artifacts: [], dependencies: [], notices: []) }
     for hook in hooks {
@@ -228,7 +250,7 @@ package func hookArtifacts(
         else {
             throw UnsupportedTranslation(
                 code: "hook-event-budget",
-                message: "Each event permits at most 64 handlers and 300000 ms total declared timeout."
+                message: "Each event permits at most 64 handlers and 300000 ms total declared timeout.",
             )
         }
     }
@@ -237,7 +259,7 @@ package func hookArtifacts(
     guard let runtime = context.selectedHookRuntime, embedded || runtime.node != nil else {
         throw UnsupportedTranslation(
             code: "hook-runtime",
-            message: "Native hooks require an explicit Node 24+ executable."
+            message: "Native hooks require an explicit Node 24+ executable.",
         )
     }
     let nativeDirectory: ResourcePath
@@ -258,14 +280,14 @@ package func hookArtifacts(
     }
     let base = try appendPath(
         context.selectedAssetRoot ?? appendPath(context.root, ".flyrail-assets"),
-        "\(bundle.identity.id)/.hooks/\(agent.rawValue)"
+        "\(bundle.identity.id)/.hooks/\(agent.rawValue)",
     )
     guard !base.displayString.split(separator: "/").contains(where: {
         $0.lowercased() == "node_modules"
     }) else {
         throw UnsupportedTranslation(
             code: "hook-node-modules",
-            message: "Node cannot load stripped TypeScript from a node_modules asset root."
+            message: "Node cannot load stripped TypeScript from a node_modules asset root.",
         )
     }
     let handlers = try hooks.map { hook in
@@ -292,7 +314,7 @@ package func hookArtifacts(
             cwd: cwd,
             timeoutMilliseconds: hook.timeoutMilliseconds,
             outcomes: hook.outcomes,
-            tools: hook.tools
+            tools: hook.tools,
         )
     }
     let config = try HookConfig(host: agent.rawValue, handlers: handlers)
@@ -312,14 +334,14 @@ package func hookArtifacts(
     guard ![runtimeID, launcherID, versionID].contains(where: authored.contains) else {
         throw UnsupportedTranslation(
             code: "hook-generated-id",
-            message: "An authored identifier collides with a generated hook identifier."
+            message: "An authored identifier collides with a generated hook identifier.",
         )
     }
     var artifacts = [try RenderedArtifact(
         id: runtimeID,
         family: .hooks,
         destination: revision,
-        content: .tree(TreeContent(entries: entries))
+        content: .tree(TreeContent(entries: entries)),
     )]
     let hookIDs = Set(hooks.map(\.id))
     var dependencies = try bundle.dependencies
@@ -330,7 +352,7 @@ package func hookArtifacts(
     if embedded {
         let launcher = try appendPath(
             nativeDirectory,
-            "\(agent == .opencode ? "plugins" : "extensions")/flyrail-\(generatedID([bundle.identity.id])).ts"
+            "\(agent == .opencode ? "plugins" : "extensions")/flyrail-\(generatedID([bundle.identity.id])).ts",
         )
         let code = if agent == .opencode {
             "import { openCode, type OpenCodeInput } from \(bridge);\n" +
@@ -346,7 +368,7 @@ package func hookArtifacts(
                 id: hook.id,
                 family: .hooks,
                 destination: launcher,
-                content: .file(FileContent(data: Data(code.utf8)))
+                content: .file(FileContent(data: Data(code.utf8))),
             ))
             try dependencies.append(Dependency(dependent: hook.id, required: runtimeID))
         }
@@ -360,14 +382,14 @@ package func hookArtifacts(
             id: launcherID,
             family: .hooks,
             destination: launcher,
-            content: .file(FileContent(data: Data(code.utf8)))
+            content: .file(FileContent(data: Data(code.utf8))),
         ))
         try dependencies.append(Dependency(dependent: launcherID, required: runtimeID))
         let node = runtime.node?.displayString ?? ""
         if agent == .claude, node.contains("${") || launcher.displayString.contains("${") {
             throw UnsupportedTranslation(
                 code: "hook-literal-interpolation",
-                message: "Claude launcher paths cannot contain host placeholder syntax."
+                message: "Claude launcher paths cannot contain host placeholder syntax.",
             )
         }
         if context.platform == .windows,
@@ -375,7 +397,7 @@ package func hookArtifacts(
         {
             throw UnsupportedTranslation(
                 code: "hook-executable",
-                message: "Native hooks require a real executable, not a Windows command shim."
+                message: "Native hooks require a real executable, not a Windows command shim.",
             )
         }
         let events = Set(hooks.map(\.event)).sorted { utf8Less($0.rawValue, $1.rawValue) }
@@ -422,7 +444,7 @@ package func hookArtifacts(
             if agent == .copilot {
                 destination = try appendPath(
                     nativeDirectory,
-                    "hooks/flyrail-\(generatedID([bundle.identity.id])).json"
+                    "hooks/flyrail-\(generatedID([bundle.identity.id])).json",
                 )
                 let body = copilotHookJSON(events: events, node: node, launcher: launcher)
                 content = .file(FileContent(data: Data((body + "\n").utf8)))
@@ -445,11 +467,11 @@ package func hookArtifacts(
                         .key(Key(hookEventName(agent, hook.event))),
                         .member(member),
                     ]),
-                    value: value
+                    value: value,
                 ))
                 destination = try appendPath(
                     nativeDirectory,
-                    agent == .claude ? "settings.json" : "hooks.json"
+                    agent == .claude ? "settings.json" : "hooks.json",
                 )
                 schemas = agent == .cursor
                     ? [try DocumentSchema(format: .json, key: "version", value: .integer(1))]
@@ -460,12 +482,12 @@ package func hookArtifacts(
                 family: .hooks,
                 destination: destination,
                 content: content,
-                schemaRequirements: schemas
+                schemaRequirements: schemas,
             ))
             try dependencies.append(Dependency(
                 dependent: hook.id,
                 required: launcherID,
-                mode: .stableReference
+                mode: .stableReference,
             ))
         }
     }
@@ -483,15 +505,15 @@ package func hookArtifacts(
                 artifactID: noticeID,
                 kind: .prerequisite,
                 message: "Requires Node 24+ for native/Pi bridges, Bun 1.4.2+ for OpenCode; host APIs documented in the hook protocol.",
-                code: "hook-runtime-prerequisite"
+                code: "hook-runtime-prerequisite",
             ),
             Notice(
                 artifactID: noticeID,
                 kind: .activation,
                 message: "Installation only writes assets/configuration. Host trust, reload and actual activation remain host-controlled.",
-                code: "hook-activation"
+                code: "hook-activation",
             ),
-        ]
+        ],
     )
 }
 
@@ -512,8 +534,12 @@ private func copilotHookJSON(events: [HookEvent], node: String, launcher: Resour
 private func asciiJSON(_ data: Data) -> String {
     let text = String(decoding: data, as: UTF8.self)
     return text.unicodeScalars.map { scalar -> String in
-        if scalar.value < 128 { return String(scalar) }
-        if scalar.value <= 0xFFFF { return String(format: "\\u%04x", scalar.value) }
+        if scalar.value < 128 {
+            return String(scalar)
+        }
+        if scalar.value <= 0xFFFF {
+            return String(format: "\\u%04x", scalar.value)
+        }
         let value = scalar.value - 0x10000
         return String(format: "\\u%04x\\u%04x", 0xD800 + value >> 10, 0xDC00 + value & 0x3FF)
     }.joined()

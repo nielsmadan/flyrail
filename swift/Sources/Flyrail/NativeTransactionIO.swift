@@ -4,9 +4,17 @@ import Foundation
 package struct NativeTransactionSeam {
     private let action: (String) throws -> Void
 
-    package init(_ action: @escaping (String) throws -> Void = { _ in }) { self.action = action }
-    package func callAsFunction(_ boundary: String) throws { try action(boundary) }
-    package static var none: NativeTransactionSeam { NativeTransactionSeam() }
+    package init(_ action: @escaping (String) throws -> Void = { _ in }) {
+        self.action = action
+    }
+
+    package func callAsFunction(_ boundary: String) throws {
+        try action(boundary)
+    }
+
+    package static var none: NativeTransactionSeam {
+        NativeTransactionSeam()
+    }
 }
 
 package enum NativeTransactionIO {
@@ -24,7 +32,9 @@ package enum NativeTransactionIO {
             while offset < bytes.count {
                 let size = Darwin.write(raw, bytes.baseAddress?.advanced(by: offset), bytes.count - offset)
                 if size < 0 {
-                    if errno == EINTR { continue }
+                    if errno == EINTR {
+                        continue
+                    }
                     throw nativeIO(errno, path: path)
                 }
                 guard size > 0 else { throw nativeIO(EIO, path: path) }
@@ -32,7 +42,7 @@ package enum NativeTransactionIO {
             }
         }
         guard try NativeFilesystem.identity(
-            parent.descriptor.raw, name: parent.name, descriptor: descriptor, path: path
+            parent.descriptor.raw, name: parent.name, descriptor: descriptor, path: path,
         ) else { throw nativeFailure(.concurrentChange, "metadata staging changed", path) }
         try NativeSecurity.ensurePrivate(descriptor, path: path)
         try parent.validate()
@@ -42,7 +52,7 @@ package enum NativeTransactionIO {
         _ path: ResourcePath, value: some StateCodable, expected: Revision? = nil,
         exclusive: Bool = false, phase: String,
         seam: NativeTransactionSeam = .none, beforePublication: () throws -> Void = {},
-        committed: () throws -> Void = {}
+        committed: () throws -> Void = {},
     ) throws {
         let before = try NativeObservation.snapshot(path, privateStorage: true)
         if let expected, before.revision != expected {
@@ -105,7 +115,7 @@ package enum NativeTransactionIO {
 
     package static func destroy(
         _ path: ResourcePath, revision: Revision, seam: NativeTransactionSeam = .none,
-        beforeRemoval: () throws -> Void = {}
+        beforeRemoval: () throws -> Void = {},
     ) throws {
         for count in stride(from: revision.nodes.count, through: 1, by: -1) {
             try beforeRemoval()
@@ -124,7 +134,7 @@ package enum NativeTransactionIO {
     }
 
     package static func writeRevision(
-        _ path: ResourcePath, revision: Revision, seam: NativeTransactionSeam = .none
+        _ path: ResourcePath, revision: Revision, seam: NativeTransactionSeam = .none,
     ) throws -> Revision {
         try NativeTransactionBudget.validateRevision(revision, destination: path)
         for node in revision.nodes {
@@ -141,7 +151,7 @@ package enum NativeTransactionIO {
             }
             guard let parent = try NativeFilesystem.parent(selected) else { throw nativeIO(ENOENT, path: selected) }
             let descriptor = try NativeFilesystem.open(
-                parent.descriptor.raw, name: parent.name, directory: node.data == nil, path: selected
+                parent.descriptor.raw, name: parent.name, directory: node.data == nil, path: selected,
             )
             let metadata = try NativeFilesystem.stat(descriptor, path: selected)
             guard let uid = node.uid.uint32, let gid = node.gid.uint32, let mode = node.mode.uint32 else {
@@ -152,7 +162,7 @@ package enum NativeTransactionIO {
             }
             guard fchmod(descriptor.raw, mode_t(mode)) == 0 else { throw nativeIO(errno, path: selected) }
             guard try NativeFilesystem.identity(
-                parent.descriptor.raw, name: parent.name, descriptor: descriptor, path: selected
+                parent.descriptor.raw, name: parent.name, descriptor: descriptor, path: selected,
             ) else { throw nativeFailure(.concurrentChange, "staged resource changed", selected) }
             try parent.validate()
             try seam("stage-node")

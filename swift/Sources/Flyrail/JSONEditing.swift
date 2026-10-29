@@ -68,7 +68,7 @@ package final class JSONEditingDocument {
     package func put(
         _ path: [DocumentPathPart],
         value: SemanticValue,
-        syntax: Data? = nil
+        syntax: Data? = nil,
     ) throws {
         let raw = try syntax ?? encodeJSONValue(value)
         guard let last = path.last else {
@@ -98,7 +98,7 @@ package final class JSONEditingDocument {
         index: Int,
         value: SemanticValue,
         syntax: Data? = nil,
-        prefix: Data? = nil
+        prefix: Data? = nil,
     ) throws {
         try insertRaw(path, index: index, raw: syntax ?? encodeJSONValue(value), prefix: prefix)
     }
@@ -135,7 +135,7 @@ package final class JSONEditingDocument {
         index: Int,
         value: SemanticValue,
         syntax: Data? = nil,
-        prefix: Data? = nil
+        prefix: Data? = nil,
     ) throws {
         let parent = Array(path.dropLast())
         try delete(path)
@@ -167,7 +167,7 @@ package final class JSONEditingDocument {
         _ parentPath: [DocumentPathPart],
         index: Int,
         raw: Data,
-        prefix: Data?
+        prefix: Data?,
     ) throws {
         let parent = try node(parentPath)
         guard index >= 0, index <= parent.children.count else {
@@ -261,7 +261,7 @@ private struct JSONEditingFrame {
             end: end,
             value: value,
             children: children,
-            commas: commas
+            commas: commas,
         )
     }
 }
@@ -354,7 +354,7 @@ private struct JSONEditingScanner {
                     current = JSONEditingFrame(
                         opening: valueByte,
                         start: valueStart,
-                        depth: current.depth + 1
+                        depth: current.depth + 1,
                     )
                     continue
                 }
@@ -364,7 +364,7 @@ private struct JSONEditingScanner {
                     end: position,
                     value: value,
                     children: [],
-                    commas: []
+                    commas: [],
                 ))
                 phase = .separator
             case .separator:
@@ -513,7 +513,9 @@ private struct JSONEditingScanner {
 
     private mutating func parseNumber() throws -> SemanticValue {
         let start = position
-        if peek == 45 { position += 1 }
+        if peek == 45 {
+            position += 1
+        }
         if peek == 48 {
             position += 1
         } else if let byte = peek, (49 ... 57).contains(byte) {
@@ -533,7 +535,9 @@ private struct JSONEditingScanner {
         }
         if peek == 101 || peek == 69 {
             var end = position + 1
-            if byteAt(end) == 43 || byteAt(end) == 45 { end += 1 }
+            if byteAt(end) == 43 || byteAt(end) == 45 {
+                end += 1
+            }
             if let byte = byteAt(end), (48 ... 57).contains(byte) {
                 floating = true
                 position = end
@@ -556,7 +560,9 @@ private struct JSONEditingScanner {
     }
 
     private mutating func scanKey(depth: Int) throws -> String {
-        if peek == 34 { return try scanString() }
+        if peek == 34 {
+            return try scanString()
+        }
         if peek == 91 || peek == 123 {
             _ = try parseNode(depth: depth)
         } else {

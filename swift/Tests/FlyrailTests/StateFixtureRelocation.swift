@@ -11,7 +11,7 @@ func stateRelocatedFixture(_ value: JSONValue) throws -> JSONValue {
             let path = try ResourcePath("/pin/\(basename)")
             if basename.hasPrefix(".flyrail-") {
                 return try StateCodec.path(statePath(for: ResourcePath(
-                    original.contains("config.json") ? "/pin/config.json" : "/pin/AGENTS.md"
+                    original.contains("config.json") ? "/pin/config.json" : "/pin/AGENTS.md",
                 )))
             }
             return try StateCodec.path(path)
@@ -23,7 +23,7 @@ func stateRelocatedFixture(_ value: JSONValue) throws -> JSONValue {
             let destination = try StateCodec.decodePath(stateField(fields, "destination"))
             return try stateReplacingField(
                 relocated, "fields",
-                stateReplacingField(fields, "state_root", StateCodec.path(statePath(for: destination)))
+                stateReplacingField(fields, "state_root", StateCodec.path(statePath(for: destination))),
             )
         case "Receipt":
             let fields = try stateField(relocated, "fields")
@@ -35,7 +35,7 @@ func stateRelocatedFixture(_ value: JSONValue) throws -> JSONValue {
                 return try stateReplacingField(
                     claim,
                     "fields",
-                    stateReplacingField(fields, "claim_id", .string(identity))
+                    stateReplacingField(fields, "claim_id", .string(identity)),
                 )
             }
             return try stateReplacingField(relocated, "fields", stateReplacingField(fields, "claims", .array(claims)))

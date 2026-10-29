@@ -21,7 +21,7 @@ package final class NativeDirectoryLock {
             parent.descriptor.raw,
             name: parent.name,
             directory: true,
-            path: stateRoot
+            path: stateRoot,
         )
         try NativeSecurity.ensurePrivate(directory, path: stateRoot)
         stateEvidence = try NativeFilesystem.ancestor(directory, path: stateRoot)
@@ -35,9 +35,11 @@ package final class NativeDirectoryLock {
                 name: Array("lock".utf8),
                 directory: false,
                 path: path,
-                flags: O_RDWR
+                flags: O_RDWR,
             )
-        } else { throw nativeIO(errno, path: path) }
+        } else {
+            throw nativeIO(errno, path: path)
+        }
         try NativeSecurity.ensureCoordinationLock(descriptor, path: path)
         let metadata = try NativeFilesystem.stat(descriptor, path: path)
         guard metadata.st_mode & S_IFMT == S_IFREG else {
@@ -54,7 +56,7 @@ package final class NativeDirectoryLock {
             let remaining = clock.now.duration(to: deadline)
             let seconds = min(
                 0.02,
-                Double(remaining.components.seconds) + Double(remaining.components.attoseconds) / 1e18
+                Double(remaining.components.seconds) + Double(remaining.components.attoseconds) / 1e18,
             )
             Thread.sleep(forTimeInterval: max(0, seconds))
         }
@@ -66,14 +68,14 @@ package final class NativeDirectoryLock {
     package func validate() throws {
         try parent.validate()
         guard try NativeFilesystem.identity(
-            parent.descriptor.raw, name: parent.name, descriptor: directory, path: stateRoot
+            parent.descriptor.raw, name: parent.name, descriptor: directory, path: stateRoot,
         ), try NativeFilesystem.ancestor(directory, path: stateRoot) == stateEvidence else {
             throw nativeFailure(.concurrentChange, "resource ancestor changed", stateRoot)
         }
         try NativeSecurity.ensurePrivate(directory, path: stateRoot)
         let path = try appendPath(stateRoot, "lock")
         guard try NativeFilesystem.identity(
-            directory.raw, name: Array("lock".utf8), descriptor: descriptor, path: path
+            directory.raw, name: Array("lock".utf8), descriptor: descriptor, path: path,
         ), try NativeStamp(NativeFilesystem.stat(descriptor, path: path)) == lockStamp,
         try NativeSecurity.capture(descriptor.raw, path: path) == lockSecurity else {
             throw nativeFailure(.concurrentChange, "lock file changed", path)
@@ -122,13 +124,15 @@ package enum NativeAdmission {
         guard let parent = try NativeFilesystem.parent(path) else { throw nativeIO(ENOENT, path: path) }
         if try NativeFilesystem.metadata(parent.descriptor.raw, name: parent.name, path: path) == nil {
             let result = try NativeFilesystem.withName(parent.name) { mkdirat(parent.descriptor.raw, $0, 0o700) }
-            if result != 0, errno != EEXIST { throw nativeIO(errno, path: path) }
+            if result != 0, errno != EEXIST {
+                throw nativeIO(errno, path: path)
+            }
             if result == 0 {
                 let directory = try NativeFilesystem.open(
                     parent.descriptor.raw,
                     name: parent.name,
                     directory: true,
-                    path: path
+                    path: path,
                 )
                 try NativeSecurity.ensurePrivate(directory, path: path)
                 try created.append(NativeFilesystem.ancestor(directory, path: path))
@@ -152,7 +156,7 @@ package enum NativeAdmission {
     package static func validateState(_ resource: ResourceRef) throws -> (NativeResourceSnapshot, [ResourcePath]) {
         try NativeAuthority.managedSpelling(resource.stateRoot)
         let snapshot = try NativeObservation.snapshot(
-            resource.stateRoot, privateStorage: true, resourcePayloads: true
+            resource.stateRoot, privateStorage: true, resourcePayloads: true,
         )
         var recovery: [ResourcePath] = []
         for node in snapshot.revision.nodes.dropFirst() where !node.path.contains("/") {
@@ -170,7 +174,9 @@ package enum NativeAdmission {
                     throw nativeFailure(.invalidState, "metadata must be a regular file", child)
                 }
             }
-            if node.path == "transaction.json" || node.path.hasSuffix(".next") { recovery.append(child) }
+            if node.path == "transaction.json" || node.path.hasSuffix(".next") {
+                recovery.append(child)
+            }
         }
         let header = try appendPath(resource.stateRoot, "authority.json")
         if let recorded = try NativeObservation.read(header, as: ResourceRef.self, tag: "ResourceRef"),
@@ -205,14 +211,16 @@ package enum NativeAdmission {
     private static func initializeHeader(
         _ resource: ResourceRef,
         lock: NativeDirectoryLock,
-        allowRecovery: Bool
+        allowRecovery: Bool,
     ) throws {
         let header = try appendPath(resource.stateRoot, "authority.json")
         let prepared = try appendPath(resource.stateRoot, "authority.json.next")
         if !allowRecovery, try NativeFilesystem.metadata(prepared) != nil {
             throw nativeFailure(.recoveryNeeded, "preview requires recovery and re-observation", prepared)
         }
-        if try NativeObservation.read(header, as: ResourceRef.self, tag: "ResourceRef") != nil { return }
+        if try NativeObservation.read(header, as: ResourceRef.self, tag: "ResourceRef") != nil {
+            return
+        }
         if let recorded = try NativeObservation.read(prepared, as: ResourceRef.self, tag: "ResourceRef") {
             guard allowRecovery else {
                 throw nativeFailure(.recoveryNeeded, "preview requires recovery and re-observation", prepared)
@@ -226,11 +234,14 @@ package enum NativeAdmission {
                 lock.directory.raw,
                 "authority.json.next",
                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-                0o600
+                0o600,
             )
             guard raw >= 0 else {
                 if errno ==
-                    EEXIST { throw nativeFailure(.recoveryNeeded, "unrecognized metadata preparation", prepared) }
+                    EEXIST
+                {
+                    throw nativeFailure(.recoveryNeeded, "unrecognized metadata preparation", prepared)
+                }
                 throw nativeIO(errno, path: prepared)
             }
             let descriptor = NativeDescriptor(raw)
@@ -240,7 +251,9 @@ package enum NativeAdmission {
                 while offset < bytes.count {
                     let written = Darwin.write(raw, bytes.baseAddress?.advanced(by: offset), bytes.count - offset)
                     if written < 0 {
-                        if errno == EINTR { continue }
+                        if errno == EINTR {
+                            continue
+                        }
                         throw nativeIO(errno, path: prepared)
                     }
                     guard written > 0 else { throw nativeIO(EIO, path: prepared) }
@@ -248,7 +261,7 @@ package enum NativeAdmission {
                 }
             }
             guard try NativeFilesystem.identity(
-                lock.directory.raw, name: Array("authority.json.next".utf8), descriptor: descriptor, path: prepared
+                lock.directory.raw, name: Array("authority.json.next".utf8), descriptor: descriptor, path: prepared,
             ) else { throw nativeFailure(.concurrentChange, "metadata staging changed", prepared) }
             try NativeSecurity.ensurePrivate(descriptor, path: prepared)
         }
@@ -263,7 +276,7 @@ package enum NativeAdmission {
             "authority.json.next",
             lock.directory.raw,
             "authority.json",
-            UInt32(RENAME_EXCL)
+            UInt32(RENAME_EXCL),
         ) == 0 else {
             throw nativeIO(errno, path: header)
         }
@@ -272,7 +285,7 @@ package enum NativeAdmission {
     }
 
     package static func observe(
-        _ resource: ResourceRef, lock: NativeDirectoryLock? = nil
+        _ resource: ResourceRef, lock: NativeDirectoryLock? = nil,
     ) throws -> NativeResourceObservation {
         if let lock {
             guard lock.stateRoot == resource.stateRoot else {
@@ -288,7 +301,7 @@ package enum NativeAdmission {
         let (state, recovery) = try validateState(resource)
         let snapshot = try NativeObservation.snapshot(resource.destination)
         let receipt = try NativeObservation.read(
-            appendPath(resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt"
+            appendPath(resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt",
         )
         if let receipt, receipt.resource != resource {
             throw nativeFailure(.invalidState, "receipt resource disagrees", resource.stateRoot)
@@ -301,7 +314,7 @@ package enum NativeAdmission {
         try lock?.validate()
         return NativeResourceObservation(
             revision: snapshot.revision, snapshot: snapshot, state: state, receipt: receipt,
-            recovery: recovery, ancestors: ancestors
+            recovery: recovery, ancestors: ancestors,
         )
     }
 
@@ -319,14 +332,14 @@ package enum NativeAdmission {
         let current = try NativeObservation.read(
             appendPath(target.indexRoot, "index.json"),
             as: Index.self,
-            tag: "Index"
+            tag: "Index",
         )
         let prepared = try NativeObservation.read(
             appendPath(target.indexRoot, "index.json.next"),
             as: Index.self,
-            tag: "Index"
+            tag: "Index",
         )
-        for index in [current, prepared].compactMap({ $0 }) {
+        for index in [current, prepared].compactMap(\.self) {
             guard index.bundleID == bundleID, try index.contextDigest == target.contextDigest else {
                 throw nativeFailure(.invalidState, "installation index context disagrees", target.indexRoot)
             }

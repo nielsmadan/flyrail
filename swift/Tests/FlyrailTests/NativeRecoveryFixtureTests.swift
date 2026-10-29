@@ -33,7 +33,7 @@ func nativeSharedTransactionFixturesDriveGuardedRecovery() throws {
         let plan = try ResourcePlan(
             resource: ref, before: snapshot.revision, after: after, previous: previous, receipt: next,
             ancestors: NativeObservation.ancestors(appendPath(ref.stateRoot, "transaction.json")),
-            stateRevision: snapshot.state.revision, recoveryPaths: []
+            stateRevision: snapshot.state.revision, recoveryPaths: [],
         )
         let journal = try NativeTransaction.prepare(plan, lock: lock)
         let observed = try stateField(item, "observed")
@@ -41,14 +41,14 @@ func nativeSharedTransactionFixturesDriveGuardedRecovery() throws {
             try NativeTransactionIO.move(
                 path,
                 to: appendPath(ref.stateRoot, "backup/resource"),
-                revision: journal.before
+                revision: journal.before,
             )
         }
         if try stateField(observed, "staged") == .null, journalName != "adopt-section" {
             try NativeTransactionIO.move(
                 appendPath(ref.stateRoot, "staging/resource"),
                 to: path,
-                revision: journal.staged
+                revision: journal.staged,
             )
         }
         if name == "foreign-edit-before-commit" || name == "committed-foreign-edit" {
@@ -105,7 +105,7 @@ func nativeRecoveryItselfCanBeInterruptedRepeatedly(_ boundary: String) throws {
         resource: ref, before: observed.revision, after: after, previous: nil,
         receipt: Receipt(resource: ref, transactionID: String(repeating: "a", count: 32)),
         ancestors: NativeObservation.ancestors(appendPath(ref.stateRoot, "transaction.json")),
-        stateRevision: observed.state.revision, recoveryPaths: []
+        stateRevision: observed.state.revision, recoveryPaths: [],
     )
     let journal = try NativeTransaction.prepare(plan, lock: lock)
     try NativeTransactionIO.move(path, to: appendPath(ref.stateRoot, "backup/resource"), revision: journal.before)
@@ -142,7 +142,7 @@ func nativeRecoveryRefusesMatchingContentWithLaterModificationTime() throws {
     try NativeTransactionIO.move(
         appendPath(ref.stateRoot, "staging/resource"),
         to: ref.destination,
-        revision: journal.staged
+        revision: journal.staged,
     )
     let metadata = try #require(try NativeFilesystem.metadata(appendPath(ref.stateRoot, "transaction.json")))
     var times = [metadata.st_atimespec, timespec(tv_sec: metadata.st_mtimespec.tv_sec + 60, tv_nsec: 0)]

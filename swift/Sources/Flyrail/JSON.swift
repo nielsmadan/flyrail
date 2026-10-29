@@ -10,14 +10,14 @@ package struct JSONLimits: Sendable, Hashable {
         maximumInputBytes: 16 * 1024 * 1024,
         maximumDepth: 512,
         maximumTokens: 1_000_000,
-        maximumStringBytes: 8 * 1024 * 1024
+        maximumStringBytes: 8 * 1024 * 1024,
     )
 
     package init(
         maximumInputBytes: Int,
         maximumDepth: Int,
         maximumTokens: Int,
-        maximumStringBytes: Int
+        maximumStringBytes: Int,
     ) {
         self.maximumInputBytes = maximumInputBytes
         self.maximumDepth = maximumDepth
@@ -103,7 +103,7 @@ package enum JSONValue: Sendable, Hashable {
 package enum JSONParser {
     package static func parse(
         _ data: Data,
-        limits: JSONLimits = .default
+        limits: JSONLimits = .default,
     ) throws -> JSONValue {
         guard data.count <= limits.maximumInputBytes else {
             throw FlyrailValueError("JSON input exceeds the byte limit")
@@ -169,14 +169,17 @@ package enum JSONParser {
                     if peek == 44 {
                         position += 1
                         skipWhitespace()
-                        if frame.key != nil { frame.key = try parseKey() }
+                        if frame.key != nil {
+                            frame.key = try parseKey()
+                        }
                         frames.append(frame)
                         continue reading
                     }
                     guard peek == (frame.key == nil ? 93 : 125) else {
                         throw FlyrailValueError(
                             frame
-                                .key == nil ? "JSON array is missing a separator" : "JSON object is missing a separator"
+                                .key == nil ? "JSON array is missing a separator" :
+                                "JSON object is missing a separator",
                         )
                     }
                     position += 1
@@ -424,7 +427,9 @@ package enum JSONWriter {
             pending.append(.byte(93))
             for (index, item) in values.enumerated().reversed() {
                 pending.append(.value(item))
-                if index > 0 { pending.append(.byte(44)) }
+                if index > 0 {
+                    pending.append(.byte(44))
+                }
             }
         case let .object(items):
             let sorted = items.sorted { utf8Less($0.0, $1.0) }
@@ -437,7 +442,9 @@ package enum JSONWriter {
                 pending.append(.value(item.1))
                 pending.append(.byte(58))
                 pending.append(.string(item.0))
-                if index > 0 { pending.append(.byte(44)) }
+                if index > 0 {
+                    pending.append(.byte(44))
+                }
             }
         }
     }

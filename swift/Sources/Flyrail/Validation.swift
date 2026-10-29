@@ -66,7 +66,7 @@ package func validateRelativePath(_ value: String, label: String) throws {
             throw FlyrailValueError("\(label) contains a component ending in a dot or space")
         }
         let stem = String(String.UnicodeScalarView(
-            part.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)[0]
+            part.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)[0],
         ))
         if reservedWindowsNames.contains(fullCaseFold(stem).trimmingSuffix(while: { $0 == " " })) {
             throw FlyrailValueError("\(label) contains a reserved Windows name")

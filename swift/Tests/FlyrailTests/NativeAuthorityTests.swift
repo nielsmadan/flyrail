@@ -13,8 +13,13 @@ struct NativeTestRoot {
         path = try ResourcePath(url.path)
     }
 
-    func child(_ name: String) throws -> ResourcePath { try appendPath(path, name) }
-    func cleanup() throws { try FileManager.default.removeItem(at: url) }
+    func child(_ name: String) throws -> ResourcePath {
+        try appendPath(path, name)
+    }
+
+    func cleanup() throws {
+        try FileManager.default.removeItem(at: url)
+    }
 }
 
 func expectNativeError(_ code: ErrorCode, _ body: () throws -> Void) {
@@ -128,7 +133,7 @@ func nativeAdmissionRefusesUnsafeStateWithoutRepairingIt() throws {
     let ref = try NativeAuthority.reference(root.child("rules.md"), kind: .document)
     try FileManager.default.createDirectory(
         atPath: ref.stateRoot.displayString, withIntermediateDirectories: false,
-        attributes: [.posixPermissions: 0o750]
+        attributes: [.posixPermissions: 0o750],
     )
     expectNativeError(.unsupported) { _ = try NativeAdmission.reserve(ref, timeout: .zero) }
     #expect(try (NativeFilesystem.metadata(ref.stateRoot)?.st_mode ?? 0) & 0o777 == 0o750)
@@ -150,7 +155,9 @@ func nativeHeaderAndLockReplacementAreRejected() throws {
     #expect(unlink(lockPath.displayString) == 0)
     let replacement = open(lockPath.displayString, O_WRONLY | O_CREAT | O_EXCL, 0o600)
     #expect(replacement >= 0)
-    if replacement >= 0 { close(replacement) }
+    if replacement >= 0 {
+        close(replacement)
+    }
     expectNativeError(.concurrentChange) { try lock.validate() }
 }
 

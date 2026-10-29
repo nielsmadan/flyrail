@@ -16,7 +16,7 @@ package protocol StructuredEditingDocument: AnyObject {
         value: SemanticValue,
         syntax: Data?,
         prefix: Data?,
-        layout: Data
+        layout: Data,
     ) throws
     func delete(_ path: [DocumentPathPart]) throws
     // swiftlint:disable:next function_parameter_count
@@ -26,7 +26,7 @@ package protocol StructuredEditingDocument: AnyObject {
         value: SemanticValue,
         syntax: Data?,
         prefix: Data?,
-        layout: Data
+        layout: Data,
     ) throws
 }
 
@@ -37,23 +37,32 @@ package extension StructuredEditingDocument {
 
     func insert(
         _ path: [DocumentPathPart], index: Int, value: SemanticValue,
-        syntax: Data? = nil, prefix: Data? = nil, layout: Data = Data()
+        syntax: Data? = nil, prefix: Data? = nil, layout: Data = Data(),
     ) throws {
         try insert(path, index: index, value: value, syntax: syntax, prefix: prefix, layout: layout)
     }
 
     func relocate(
         _ path: [DocumentPathPart], index: Int, value: SemanticValue,
-        syntax: Data? = nil, prefix: Data? = nil, layout: Data = Data()
+        syntax: Data? = nil, prefix: Data? = nil, layout: Data = Data(),
     ) throws {
         try relocate(path, index: index, value: value, syntax: syntax, prefix: prefix, layout: layout)
     }
 }
 
 extension JSONEditingDocument: StructuredEditingDocument {
-    package func ownedSyntax(_ path: [DocumentPathPart]) throws -> Data { try syntax(path) }
-    package func emptySyntax(_ path: [DocumentPathPart]) throws -> Data { try syntax(path) }
-    package func layout(_: [DocumentPathPart]) -> Data { Data() }
+    package func ownedSyntax(_ path: [DocumentPathPart]) throws -> Data {
+        try syntax(path)
+    }
+
+    package func emptySyntax(_ path: [DocumentPathPart]) throws -> Data {
+        try syntax(path)
+    }
+
+    package func layout(_: [DocumentPathPart]) -> Data {
+        Data()
+    }
+
     package func put(_ path: [DocumentPathPart], value: SemanticValue, syntax: Data?, layout _: Data) throws {
         try put(path, value: value, syntax: syntax)
     }
@@ -61,7 +70,7 @@ extension JSONEditingDocument: StructuredEditingDocument {
     // swiftlint:disable:next function_parameter_count
     package func insert(
         _ path: [DocumentPathPart], index: Int, value: SemanticValue,
-        syntax: Data?, prefix: Data?, layout _: Data
+        syntax: Data?, prefix: Data?, layout _: Data,
     ) throws {
         try insert(path, index: index, value: value, syntax: syntax, prefix: prefix)
     }
@@ -69,13 +78,15 @@ extension JSONEditingDocument: StructuredEditingDocument {
     // swiftlint:disable:next function_parameter_count
     package func relocate(
         _ path: [DocumentPathPart], index: Int, value: SemanticValue,
-        syntax: Data?, prefix: Data?, layout _: Data
+        syntax: Data?, prefix: Data?, layout _: Data,
     ) throws {
         try relocate(path, index: index, value: value, syntax: syntax, prefix: prefix)
     }
 }
 
 package func editingBackend(data: Data, format: DocumentFormat) throws -> any StructuredEditingDocument {
-    if format == .toml { return try TOMLEditingDocument(data: data) }
+    if format == .toml {
+        return try TOMLEditingDocument(data: data)
+    }
     return try JSONEditingDocument(data: data, comments: format == .jsonc)
 }

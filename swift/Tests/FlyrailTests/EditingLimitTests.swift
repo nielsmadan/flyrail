@@ -56,7 +56,7 @@ func editorSourceContainerBoundariesMatchReference() throws {
         #expect(throws: FlyrailValueError("document nesting is too deep")) {
             try editDocument(
                 source: Data("{\"x\":1,\"unselected\":\(shape.syntax(985))}".utf8),
-                requests: [request]
+                requests: [request],
             )
         }
     }
@@ -66,7 +66,7 @@ func editorSourceContainerBoundariesMatchReference() throws {
         #expect(throws: FlyrailValueError("document nesting is too deep")) {
             try JSONEditingDocument(
                 data: Data((String(repeating: "[", count: 986) + String(repeating: "]", count: 986)).utf8),
-                comments: comments
+                comments: comments,
             )
         }
     }
@@ -94,7 +94,7 @@ func selectedAndGeneratedValuesEnforceSnapshotFrameBoundaries() throws {
             #expect(throws: FlyrailValueError("document nesting is too deep")) {
                 try editDocument(
                     source: Data("{\"x\":\(shape.syntax(depth + 1))}".utf8),
-                    requests: [request]
+                    requests: [request],
                 )
             }
             let tooDeep = try shape.value(depth + 1)
@@ -102,13 +102,13 @@ func selectedAndGeneratedValuesEnforceSnapshotFrameBoundaries() throws {
                 #expect(throws: FlyrailValueError("document nesting is too deep")) {
                     try editDocument(
                         source: source,
-                        requests: [keyRequest(tooDeep, format: format, acquisition: .takeover)]
+                        requests: [keyRequest(tooDeep, format: format, acquisition: .takeover)],
                     )
                 }
             }
             let conflict = try editDocument(
                 source: Data("{\"x\":1}".utf8),
-                requests: [keyRequest(tooDeep, format: format)]
+                requests: [keyRequest(tooDeep, format: format)],
             )
             #expect(conflict.observations.map(\.status) == [.conflict])
             #expect(conflict.observations.map(\.message) == [""])
@@ -183,12 +183,12 @@ func generatedEncoderAndPublishedSourceDepthErrorsAreNotConflicts() throws {
 private func keyRequest(
     _ value: SemanticValue,
     format: DocumentFormat = .json,
-    acquisition: Acquisition = .conflict
+    acquisition: Acquisition = .conflict,
 ) throws -> DocumentRequest {
     try .set(.structured(StructuredContent(
         format: format,
         selector: Flyrail.Selector(parts: [.key(Key("x"))]),
-        value: value
+        value: value,
     )), acquisition: acquisition)
 }
 
@@ -201,6 +201,6 @@ private func memberRequest(key: [String]) throws -> DocumentRequest {
             .key(Key("hooks")),
             .member(Member(identity: .scalar(.text("b")), key: key)),
         ]),
-        value: value
+        value: value,
     )), acquisition: .takeover)
 }

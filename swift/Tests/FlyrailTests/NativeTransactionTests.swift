@@ -7,7 +7,7 @@ func transactionBundle(_ version: String = "1", owner: String = "team") throws -
     try FlyrailBundle(
         identity: BundleIdentity(id: owner, version: version),
         artifacts: [.instruction(InstructionArtifact(id: "guide", text: "text"))],
-        assets: [], dependencies: []
+        assets: [], dependencies: [],
     )
 }
 
@@ -20,14 +20,14 @@ func transactionRendered(_ path: ResourcePath, _ text: String = "generated\n") t
 
 func transactionPlan(
     _ resource: ResourceRef, lock: NativeDirectoryLock, version: String = "1",
-    text: String = "generated\n", acquisition: Acquisition = .conflict
+    text: String = "generated\n", acquisition: Acquisition = .conflict,
 ) throws -> ResourcePlan {
     let bundle = try transactionBundle(version)
     let rendered = try transactionRendered(resource.destination, text)
     return try NativeResourcePlanner.plan(
         resource, observation: NativeAdmission.observe(resource, lock: lock),
         bundleID: "team", bundle: bundle, rendered: rendered, artifacts: rendered.artifacts,
-        acquisition: acquisition, replaceModified: false
+        acquisition: acquisition, replaceModified: false,
     )
 }
 
@@ -41,7 +41,7 @@ func nativeTransactionPublishesAndRemovesAnExclusiveResource() throws {
     let plan = try transactionPlan(ref, lock: lock)
     let journal = try NativeTransaction.prepare(plan, lock: lock)
     #expect(try NativeObservation.read(
-        appendPath(ref.stateRoot, "transaction.json"), as: Journal.self, tag: "Journal"
+        appendPath(ref.stateRoot, "transaction.json"), as: Journal.self, tag: "Journal",
     ) == journal)
     try NativeTransaction.publish(journal, lock: lock)
     try NativeTransaction.cleanup(journal, lock: lock)
@@ -50,7 +50,7 @@ func nativeTransactionPublishesAndRemovesAnExclusiveResource() throws {
     #expect(try NativeAdmission.observe(ref).recovery.isEmpty)
     let removal = try NativeResourcePlanner.plan(
         ref, observation: NativeAdmission.observe(ref, lock: lock), bundleID: "team",
-        bundle: nil, rendered: .empty, artifacts: [], acquisition: .conflict, replaceModified: false
+        bundle: nil, rendered: .empty, artifacts: [], acquisition: .conflict, replaceModified: false,
     )
     let retirement = try NativeTransaction.prepare(removal, lock: lock)
     try NativeTransaction.publish(retirement, lock: lock)
@@ -71,7 +71,9 @@ func nativeRecoveryRecognizesEveryDocumentPublicationPhase(_ phase: String) thro
     try NativeAdmission.admit(ref, lock: lock)
     let plan = try transactionPlan(ref, lock: lock, acquisition: .takeover)
     let seam = NativeTransactionSeam { boundary in
-        if boundary == phase { throw TargetError(code: .ioError, message: "interrupted") }
+        if boundary == phase {
+            throw TargetError(code: .ioError, message: "interrupted")
+        }
     }
     do {
         let journal = try NativeTransaction.prepare(plan, lock: lock, seam: seam)
@@ -97,12 +99,12 @@ func nativeRecoveryRetainsUnknownReplacementAndCommittedForeignEdits() throws {
     try NativeAdmission.admit(ref, lock: lock)
     let journal = try NativeTransaction.prepare(transactionPlan(ref, lock: lock), lock: lock)
     try NativeTransactionIO.move(
-        appendPath(ref.stateRoot, "staging/resource"), to: ref.destination, revision: journal.staged
+        appendPath(ref.stateRoot, "staging/resource"), to: ref.destination, revision: journal.staged,
     )
     try Data("foreign\n".utf8).write(to: URL(fileURLWithPath: ref.destination.displayString))
     expectNativeError(.recoveryNeeded) { try NativeTransaction.recover(ref, lock: lock) }
     #expect(try NativeObservation.read(
-        appendPath(ref.stateRoot, "transaction.json"), as: Journal.self, tag: "Journal"
+        appendPath(ref.stateRoot, "transaction.json"), as: Journal.self, tag: "Journal",
     ) == journal)
     #expect(try NativeAdmission.observe(ref).revision.data == Data("foreign\n".utf8))
 }

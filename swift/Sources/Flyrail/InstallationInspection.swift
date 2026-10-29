@@ -15,20 +15,22 @@ package enum InstallationInspection {
                 do {
                     let current = try NativeAdmission.observe(resource)
                     if try current.receipt == nil && NativeIndexRecovery.expectsReceipt(
-                        observed.current, prepared: observed.prepared, resource: resource
-                    ) { throw try LifecyclePlanning.missingReceipt(resource) }
+                        observed.current, prepared: observed.prepared, resource: resource,
+                    ) {
+                        throw try LifecyclePlanning.missingReceipt(resource)
+                    }
                     try resources.append(ResourceObservation(
                         destination: resource.destination, stateRoot: resource.stateRoot,
                         claims: current.receipt.map {
                             try NativeResourcePlanner.claimObservations($0, revision: current.revision)
                         } ?? [],
-                        revisionDigest: current.revision.contentDigest, recoveryPaths: current.recovery
+                        revisionDigest: current.revision.contentDigest, recoveryPaths: current.recovery,
                     ))
                 } catch {
                     try resources.append(ResourceObservation(
                         destination: resource.destination,
                         stateRoot: resource.stateRoot,
-                        error: NativeTransactionExecution.detail(error)
+                        error: NativeTransactionExecution.detail(error),
                     ))
                 }
             }

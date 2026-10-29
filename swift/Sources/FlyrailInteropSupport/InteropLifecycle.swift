@@ -143,7 +143,9 @@ extension InteropDifferential {
         ]
     }
 
-    static func optional(_ value: (some Any)?) -> Any { value.map { $0 as Any } ?? NSNull() }
+    static func optional(_ value: (some Any)?) -> Any {
+        value.map { $0 as Any } ?? NSNull()
+    }
 
     private static func relative(_ path: String, root: URL) -> String {
         let prefix = root.path + "/"
@@ -168,7 +170,9 @@ extension InteropDifferential {
     }
 
     private static func normalize(_ value: Any, root: URL) -> Any {
-        if let values = value as? [Any] { return values.map { normalize($0, root: root) } }
+        if let values = value as? [Any] {
+            return values.map { normalize($0, root: root) }
+        }
         guard let fields = value as? [String: Any] else { return value }
         var normalized = fields.mapValues { normalize($0, root: root) }
         if normalized.count == 1, let path = normalized["path"] as? String {

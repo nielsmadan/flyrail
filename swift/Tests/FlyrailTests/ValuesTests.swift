@@ -78,7 +78,7 @@ func semanticRecordsRejectNoncanonicalAndInvalidValues() {
         (#"["time","01:02:03"]"#, "semantic scalar encoding is not canonical"),
         (
             #"["datetime","2026-01-02T05:02:03.000000+05:00"]"#,
-            "time fraction must have 1-6 digits"
+            "time fraction must have 1-6 digits",
         ),
         (#"["object",[["a",["null"]],["a",["null"]]]]"#, "duplicate object key"),
         (#"["array",["integer","1"]]"#, "semantic values must be tagged arrays"),

@@ -67,7 +67,7 @@ func nativeReceiptRereadFailureCannotUndoTheCommitBoundary() throws {
         transactionBundle(),
         rendered: transactionRendered(path),
         target: target,
-        seam: seam
+        seam: seam,
     )
     #expect(result.status == .partial)
     #expect(result.resources.first?.status == .applied)
@@ -121,7 +121,9 @@ func nativePartialResourceCommitRetainsAllIndexReferences() throws {
     let seam = NativeTransactionSeam {
         if $0 == "receipt" {
             receipts += 1
-            if receipts == 2 { throw TargetError(code: .ioError, message: "second receipt failed") }
+            if receipts == 2 {
+                throw TargetError(code: .ioError, message: "second receipt failed")
+            }
         }
     }
     let result = try transactionWrite(transactionBundle(), rendered: rendered, target: target, seam: seam)

@@ -30,7 +30,7 @@ private func hasCopilotEnvironmentSubstitution(_ value: String) -> Bool {
 private func literal(
     _ value: String,
     context: RenderContext,
-    field: String
+    field: String,
 ) throws -> String {
     let agent = context.audience.agent
     let substitution = switch agent {
@@ -45,12 +45,12 @@ private func literal(
             let label = field == "argv" ? "argv" : field
             return try unsupported(
                 "literal-interpolation-unverified",
-                "Literal \(label) substitution-like syntax is unverified for Copilot CLI."
+                "Literal \(label) substitution-like syntax is unverified for Copilot CLI.",
             )
         }
         return try unsupported(
             "literal-interpolation",
-            "\(field) contains host interpolation syntax; use native content."
+            "\(field) contains host interpolation syntax; use native content.",
         )
     }
     return value
@@ -59,23 +59,27 @@ private func literal(
 private func reference(
     _ value: EnvRef,
     context: RenderContext,
-    field: String
+    field: String,
 ) throws -> String {
     let agent = context.audience.agent
     if agent == .claude || (agent == .copilot && context.surface == .cli && field == "env") {
         return "${\(value.name)}"
     }
-    if agent == .opencode { return "{env:\(value.name)}" }
-    if agent == .cursor || context.surface == .vscode { return "${env:\(value.name)}" }
+    if agent == .opencode {
+        return "{env:\(value.name)}"
+    }
+    if agent == .cursor || context.surface == .vscode {
+        return "${env:\(value.name)}"
+    }
     return try unsupported(
         "portable-env-reference-unverified",
-        "This host cannot represent this environment reference."
+        "This host cannot represent this environment reference.",
     )
 }
 
 package func translatedAsset(
     _ value: CommandArgument,
-    assets: [String: ResourcePath]
+    assets: [String: ResourcePath],
 ) throws -> String {
     switch value {
     case let .text(text):
@@ -84,7 +88,9 @@ package func translatedAsset(
         guard let root = assets[reference.assetID] else {
             throw FlyrailValueError("unknown translated asset reference")
         }
-        if let path = reference.path { return try appendPath(root, path).displayString }
+        if let path = reference.path {
+            return try appendPath(root, path).displayString
+        }
         return root.displayString
     }
 }
@@ -92,7 +98,7 @@ package func translatedAsset(
 private func translateStdio(
     _ command: Command,
     context: RenderContext,
-    assets: [String: ResourcePath]
+    assets: [String: ResourcePath],
 ) throws -> SemanticValue {
     let agent = context.audience.agent
     if context.platform == .windows {
@@ -100,7 +106,7 @@ private func translateStdio(
         guard Set(names).count == names.count else {
             return try unsupported(
                 "windows-env-collision",
-                "Environment names collide under Windows case-insensitive lookup."
+                "Environment names collide under Windows case-insensitive lookup.",
             )
         }
     }
@@ -116,17 +122,19 @@ private func translateStdio(
             guard entry.name == value.name else {
                 return try unsupported(
                     "environment-alias",
-                    "Codex env_vars forwards a variable under its own name."
+                    "Codex env_vars forwards a variable under its own name.",
                 )
             }
             forwarded.append(scalar(entry.name))
         case let .reference(value):
             try environment.append((
                 entry.name,
-                scalar(reference(value, context: context, field: "env"))
+                scalar(reference(value, context: context, field: "env")),
             ))
         case let .text(text):
-            if agent != .pi { _ = try literal(text, context: context, field: "env") }
+            if agent != .pi {
+                _ = try literal(text, context: context, field: "env")
+            }
             environment.append((entry.name, scalar(text)))
         }
     }
@@ -189,13 +197,13 @@ private func translateHTTP(_ transport: HttpTransport, context: RenderContext) t
         case .copilot where context.surface == .cli:
             return try unsupported(
                 "portable-auth-env-unverified",
-                "Copilot CLI bearer environment syntax is unverified."
+                "Copilot CLI bearer environment syntax is unverified.",
             )
         default:
             let value = try reference(token, context: context, field: "headers")
             try result.append((
                 "headers",
-                object([("Authorization", scalar("Bearer \(value)"))])
+                object([("Authorization", scalar("Bearer \(value)"))]),
             ))
         }
     }
@@ -206,7 +214,7 @@ package func mcpContent(
     _ artifact: MCPArtifact,
     context: RenderContext,
     path: ResourcePath,
-    assets: [String: ResourcePath]
+    assets: [String: ResourcePath],
 ) throws -> StructuredContent {
     let agent = context.audience.agent
     if agent == .claude, ["workspace", "claude-in-chrome", "computer-use"].contains(artifact.name) {
@@ -235,6 +243,6 @@ package func mcpContent(
     return try StructuredContent(
         format: format,
         selector: Selector(parts: [.key(Key(key)), .key(Key(artifact.name))]),
-        value: value
+        value: value,
     )
 }

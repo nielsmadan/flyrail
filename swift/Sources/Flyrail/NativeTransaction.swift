@@ -20,7 +20,7 @@ package enum NativeTransaction {
             throw nativeFailure(.concurrentChange, "resource ancestor changed", journal.resource.destination)
         }
         let conflicts = try NativeAuthority.hierarchyConflicts(
-            journal.resource.recordedAuthority, wholeTree: journal.resource.kind != .document
+            journal.resource.recordedAuthority, wholeTree: journal.resource.kind != .document,
         )
         if let first = conflicts.first {
             throw nativeFailure(.conflict, "resource hierarchy reservation changed", first)
@@ -48,7 +48,7 @@ package enum NativeTransaction {
     }
 
     package static func prepare(
-        _ plan: ResourcePlan, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none
+        _ plan: ResourcePlan, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none,
     ) throws -> Journal {
         let resource = plan.resource
         guard lock.stateRoot == resource.stateRoot else {
@@ -68,7 +68,7 @@ package enum NativeTransaction {
             throw nativeFailure(.concurrentChange, "required existing resource disappeared", resource.destination)
         }
         guard try NativeObservation.read(
-            path(resource, "receipt.json"), as: Receipt.self, tag: "Receipt"
+            path(resource, "receipt.json"), as: Receipt.self, tag: "Receipt",
         ) == plan.previous else {
             throw nativeFailure(.concurrentChange, "receipt changed during preparation", resource.stateRoot)
         }
@@ -103,16 +103,16 @@ package enum NativeTransaction {
             provenance: plan.receipt.provenance,
             createdDirectories: plan.receipt.createdDirectories.compactMap { marker in
                 staged.nodes.first { exactTextEqual($0.path, marker.path) }
-            }
+            },
         )
         let journal = try Journal(
             resource: resource, previous: plan.previous, receipt: receipt, before: plan.before,
-            staged: staged, published: staged, backup: plan.before, ancestors: captured
+            staged: staged, published: staged, backup: plan.before, ancestors: captured,
         )
         try validate(journal, lock: lock)
         try NativeObservation.requireRevision(resource.destination, plan.before)
         guard try NativeObservation.read(
-            path(resource, "receipt.json"), as: Receipt.self, tag: "Receipt"
+            path(resource, "receipt.json"), as: Receipt.self, tag: "Receipt",
         ) == plan.previous else {
             throw nativeFailure(.concurrentChange, "receipt changed during preparation", resource.stateRoot)
         }
@@ -128,11 +128,11 @@ package enum NativeTransaction {
                                                       plan.after == plan.before ? Revision() : staged)
                 try NativeObservation.requireRevision(path(resource, "backup/resource"), Revision())
                 guard try NativeObservation.read(
-                    path(resource, "receipt.json"), as: Receipt.self, tag: "Receipt"
+                    path(resource, "receipt.json"), as: Receipt.self, tag: "Receipt",
                 ) == plan.previous else {
                     throw nativeFailure(.concurrentChange, "receipt changed during preparation", resource.stateRoot)
                 }
-            }
+            },
         )
         try seam("prepare")
         return journal
@@ -140,7 +140,7 @@ package enum NativeTransaction {
 
     package static func publish(
         _ journal: Journal, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none,
-        committed: () throws -> Void = {}
+        committed: () throws -> Void = {},
     ) throws {
         try requireJournal(journal)
         try validate(journal, lock: lock)
@@ -170,7 +170,7 @@ package enum NativeTransaction {
 
     package static func publishReceipt(
         _ journal: Journal, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none,
-        committed: () throws -> Void = {}
+        committed: () throws -> Void = {},
     ) throws {
         try requireJournal(journal)
         try layout(journal.resource)
@@ -179,7 +179,7 @@ package enum NativeTransaction {
         try NativeObservation.requireRevision(path(resource, "staging/resource"), Revision())
         try NativeObservation.requireRevision(resource.destination, journal.published)
         try NativeObservation.requireRevision(
-            path(resource, "backup/resource"), journal.before == journal.staged ? Revision() : journal.backup
+            path(resource, "backup/resource"), journal.before == journal.staged ? Revision() : journal.backup,
         )
         for name in ["authority.json.next", "transaction.json.next", "receipt.json.next"] {
             let selected = try path(resource, name)
@@ -204,15 +204,15 @@ package enum NativeTransaction {
                 try NativeObservation.requireRevision(resource.destination, journal.published)
                 try NativeObservation.requireRevision(path(resource, "staging/resource"), Revision())
                 try NativeObservation.requireRevision(
-                    path(resource, "backup/resource"), journal.before == journal.staged ? Revision() : journal.backup
+                    path(resource, "backup/resource"), journal.before == journal.staged ? Revision() : journal.backup,
                 )
             },
-            committed: committed
+            committed: committed,
         )
     }
 
     package static func cleanup(
-        _ journal: Journal, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none
+        _ journal: Journal, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none,
     ) throws {
         try requireJournal(journal)
         try layout(journal.resource)
@@ -286,7 +286,7 @@ package enum NativeTransaction {
     }
 
     package static func rollback(
-        _ journal: Journal, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none
+        _ journal: Journal, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none,
     ) throws {
         try requireJournal(journal)
         try layout(journal.resource)
@@ -342,7 +342,7 @@ package enum NativeTransaction {
     }
 
     package static func recover(
-        _ resource: ResourceRef, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none
+        _ resource: ResourceRef, lock: NativeDirectoryLock, seam: NativeTransactionSeam = .none,
     ) throws {
         guard lock.stateRoot == resource.stateRoot else {
             throw nativeFailure(.concurrentChange, "resource lock disagrees", resource.stateRoot)

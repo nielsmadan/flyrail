@@ -6,7 +6,9 @@ public struct InventoryEntry: Sendable, Hashable {
     public let size: UInt64?
     public let sha256: String?
     public let executable: Bool
-    public var isDirectory: Bool { size == nil }
+    public var isDirectory: Bool {
+        size == nil
+    }
 
     public init(path: String, size: UInt64? = nil, sha256: String? = nil, executable: Bool = false) throws {
         try validateRelativePath(path, label: "inventory path")
@@ -69,7 +71,10 @@ public struct Installation: Sendable, Hashable {
         self.entries = entries
     }
 
-    private var textIdentity: [Data] { [bundleID, version, contentDigest, transactionID].map { Data($0.utf8) } }
+    private var textIdentity: [Data] {
+        [bundleID, version, contentDigest, transactionID].map { Data($0.utf8) }
+    }
+
     public static func == (left: Self, right: Self) -> Bool {
         left.textIdentity == right.textIdentity && left.entries == right.entries
     }
@@ -107,7 +112,10 @@ public struct Modification: Sendable, Hashable {
 public struct Conflict: Sendable, Hashable {
     public let path: String
     public let owner: String?
-    public init(path: String, owner: String? = nil) { self.path = path; self.owner = owner }
+    public init(path: String, owner: String? = nil) {
+        self.path = path; self.owner = owner
+    }
+
     public static func == (left: Self, right: Self) -> Bool {
         exactTextEqual(left.path, right.path) && left.owner.map { Data($0.utf8) } == right.owner.map { Data($0.utf8) }
     }
@@ -153,7 +161,9 @@ public struct Observation: Sendable, Hashable {
             modifications.allSatisfy { $0.bundleID != installed?.bundleID }
     }
 
-    package static func unknown(_ error: TargetError) -> Self { Self(state: .unknown, error: error) }
+    package static func unknown(_ error: TargetError) -> Self {
+        Self(state: .unknown, error: error)
+    }
 }
 
 public struct TargetInspection<T: Sendable>: Sendable {

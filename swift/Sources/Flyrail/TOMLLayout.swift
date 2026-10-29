@@ -70,9 +70,17 @@ package func validateTOMLLayout(_ snapshot: SelectionSnapshot, selector: Selecto
         guard case .object = current else { throw FlyrailValueError("TOML restoration header requires an object") }
         if let selector {
             let destination = selector.parts.compactMap { part -> String? in
-                if case let .key(key) = part { key.name } else { nil }
+                if case let .key(key) = part {
+                    key.name
+                } else {
+                    nil
+                }
             } + relative.compactMap { part -> String? in
-                if case let .key(key) = part { key } else { nil }
+                if case let .key(key) = part {
+                    key
+                } else {
+                    nil
+                }
             }
             guard try tomlHeaderPath(name).map({ Data($0.utf8) }) == destination.map({ Data($0.utf8) }) else {
                 throw FlyrailValueError("TOML restoration header does not match its destination")
@@ -84,7 +92,9 @@ package func validateTOMLLayout(_ snapshot: SelectionSnapshot, selector: Selecto
 package func tomlKey(_ name: String) throws -> String {
     if !name.isEmpty, name.utf8.allSatisfy({
         (65 ... 90).contains($0) || (97 ... 122).contains($0) || (48 ... 57).contains($0) || $0 == 95 || $0 == 45
-    }) { return name }
+    }) {
+        return name
+    }
     return try tomlString(name)
 }
 
@@ -133,16 +143,24 @@ private func tomlTime(_ value: LocalTime) -> String {
 }
 
 package func tomlTableValue(_ value: SemanticValue) -> Bool {
-    if case .object = value { return true }
+    if case .object = value {
+        return true
+    }
     if case let .array(items) = value, !items.isEmpty {
-        return items.allSatisfy { if case .object = $0 { true } else { false } }
+        return items.allSatisfy {
+            if case .object = $0 {
+                true
+            } else {
+                false
+            }
+        }
     }
     return false
 }
 
 package func tomlGenerated(
     _ value: SemanticValue, name: String, newline: String,
-    element: Bool = false, forceHeader: Bool = false
+    element: Bool = false, forceHeader: Bool = false,
 ) throws -> String {
     if case let .array(items) = value, tomlTableValue(value) {
         return try items.map { try tomlGenerated($0, name: name, newline: newline, element: true) }.joined()
@@ -155,9 +173,13 @@ package func tomlGenerated(
     let header = element || forceHeader || !direct.isEmpty || fields.isEmpty
     var result = header ? "\(element ? "[[" : "[")\(name)\(element ? "]]" : "]")\(newline)" : ""
     result += try direct.map { try "\(tomlKey($0.0)) = \(tomlInline($0.1))\(newline)" }.joined()
-    if !direct.isEmpty, case .object? = nested.first?.1 { result += newline }
+    if !direct.isEmpty, case .object? = nested.first?.1 {
+        result += newline
+    }
     for (index, field) in nested.enumerated() {
-        if index > 0, !result.hasSuffix(newline + newline) { result += newline }
+        if index > 0, !result.hasSuffix(newline + newline) {
+            result += newline
+        }
         result += try tomlGenerated(field.1, name: name + "." + tomlKey(field.0), newline: newline)
     }
     return result

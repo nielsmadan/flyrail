@@ -16,12 +16,12 @@ package enum NativeTransactionBudget {
             provenance: plan.receipt.provenance,
             createdDirectories: plan.receipt.createdDirectories.compactMap { marker in
                 staged.nodes.first { exactTextEqual($0.path, marker.path) }
-            }
+            },
         )
         let captured = try boundedAncestors(plan)
         let journal = try Journal(
             resource: plan.resource, previous: plan.previous, receipt: receipt,
-            before: plan.before, staged: staged, published: staged, backup: plan.before, ancestors: captured
+            before: plan.before, staged: staged, published: staged, backup: plan.before, ancestors: captured,
         )
         let receiptBytes = try StateCodec.encode(receipt).count
         let journalBytes = try StateCodec.encode(journal).count
@@ -38,14 +38,14 @@ package enum NativeTransactionBudget {
             throw nativeIO(
                 ENOTSUP,
                 message: "transaction storage exceeds the node limit",
-                path: plan.resource.stateRoot
+                path: plan.resource.stateRoot,
             )
         }
         guard total <= NativeLimits.default.maximumTotalBytes else {
             throw nativeIO(
                 ENOTSUP,
                 message: "transaction storage exceeds the byte limit",
-                path: plan.resource.stateRoot
+                path: plan.resource.stateRoot,
             )
         }
     }
@@ -92,7 +92,7 @@ package enum NativeTransactionBudget {
                     security: JSONWriter.canonicalData(.object([
                         ("acl", .string("")), ("flags", .number("0")),
                         ("schema_version", .number("1")), ("xattrs", .array([])),
-                    ]))
+                    ])),
                 ))
             }
         }

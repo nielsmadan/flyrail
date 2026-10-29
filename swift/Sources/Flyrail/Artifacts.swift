@@ -45,7 +45,7 @@ public struct Audience: Sendable, Hashable {
         agent: Agent,
         scope: TargetScope,
         surface: Surface = .cli,
-        platform: Platform? = nil
+        platform: Platform? = nil,
     ) throws {
         guard scope != .directory else {
             throw FlyrailValueError("native audiences require project or user scope")
@@ -70,7 +70,7 @@ public struct Audience: Sendable, Hashable {
                 ("platform", platform.map { .scalar(.text($0.rawValue)) } ?? .scalar(.null)),
                 ("scope", .scalar(.text(scope.rawValue))),
                 ("surface", .scalar(.text(surface.rawValue))),
-            ]
+            ],
         )
     }
 }
@@ -115,7 +115,7 @@ public struct AssetRef: Sendable, Hashable {
             fields: [
                 ("asset_id", .scalar(.text(assetID))),
                 ("path", path.map { .scalar(.text($0)) } ?? .scalar(.null)),
-            ]
+            ],
         )
     }
 }
@@ -162,7 +162,7 @@ public struct Command: Sendable, Hashable {
     public init(
         argv: [CommandArgument],
         env: [EnvironmentEntry] = [],
-        cwd: CommandArgument? = nil
+        cwd: CommandArgument? = nil,
     ) throws {
         guard !argv.isEmpty else {
             throw FlyrailValueError("argv requires a command")
@@ -202,7 +202,7 @@ public struct Command: Sendable, Hashable {
                 ("env", .array(env.map {
                     try .array([.scalar(.text($0.name)), $0.value.modelValue()])
                 })),
-            ]
+            ],
         )
     }
 }
@@ -223,7 +223,7 @@ public struct HttpTransport: Sendable, Hashable {
             fields: [
                 ("bearer_token", bearerToken.map { try $0.modelValue() } ?? .scalar(.null)),
                 ("url", .scalar(.text(url))),
-            ]
+            ],
         )
     }
 }
@@ -256,7 +256,7 @@ public struct InstructionArtifact: Sendable, Hashable {
     package func modelValue() throws -> SemanticValue {
         try ModelEncoding.record(
             type: "InstructionArtifact",
-            fields: [("id", .scalar(.text(id))), ("text", .scalar(.text(text)))]
+            fields: [("id", .scalar(.text(id))), ("text", .scalar(.text(text)))],
         )
     }
 }
@@ -281,7 +281,7 @@ public struct MCPArtifact: Sendable, Hashable {
                 ("id", .scalar(.text(id))),
                 ("name", .scalar(.text(name))),
                 ("transport", transport.modelValue()),
-            ]
+            ],
         )
     }
 }
@@ -317,7 +317,7 @@ public struct HookArtifact: Sendable, Hashable {
         command: Command,
         timeoutMilliseconds: Int = 10000,
         outcomes: [HookOutcome] = [.continue],
-        tools: [String] = []
+        tools: [String] = [],
     ) throws {
         try validateIdentifier(id, label: "artifact id")
         guard (1 ... 300_000).contains(timeoutMilliseconds) else {
@@ -358,7 +358,7 @@ public struct HookArtifact: Sendable, Hashable {
                 ("protocol_version", .scalar(.integer(Int64(protocolVersion)))),
                 ("timeout_ms", .scalar(.integer(Int64(timeoutMilliseconds)))),
                 ("tools", .array(tools.map { .scalar(.text($0)) })),
-            ]
+            ],
         )
     }
 }
@@ -375,7 +375,7 @@ public struct NativeArtifact: Sendable, Hashable {
         family: Family,
         audience: Audience,
         destination: String,
-        content: Content
+        content: Content,
     ) throws {
         try validateIdentifier(id, label: "artifact id")
         try validateRelativePath(destination, label: "native destination")
@@ -395,7 +395,7 @@ public struct NativeArtifact: Sendable, Hashable {
                 ("destination", .scalar(.text(destination))),
                 ("family", .scalar(.text(family.rawValue))),
                 ("id", .scalar(.text(id))),
-            ]
+            ],
         )
     }
 }
@@ -419,7 +419,7 @@ public struct SupportAsset: Sendable, Hashable {
                 ("content", content.modelValue()),
                 ("family", .scalar(.text(family.rawValue))),
                 ("id", .scalar(.text(id))),
-            ]
+            ],
         )
     }
 }
@@ -452,7 +452,7 @@ public struct Dependency: Sendable, Hashable {
                 ("dependent", .scalar(.text(dependent))),
                 ("mode", .scalar(.text(mode.rawValue))),
                 ("required", .scalar(.text(required))),
-            ]
+            ],
         )
     }
 }
@@ -526,7 +526,7 @@ private func validateNetlocNormalization(_ netloc: String) throws {
        normalized.contains(where: { "/?#@:".contains($0) })
     {
         throw FlyrailValueError(
-            "netloc '\(netloc)' contains invalid characters under NFKC normalization"
+            "netloc '\(netloc)' contains invalid characters under NFKC normalization",
         )
     }
 }

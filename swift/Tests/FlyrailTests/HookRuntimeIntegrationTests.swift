@@ -16,7 +16,7 @@ func packagedHookRuntimeExecutesSharedHarnesses() throws {
     var wires: [[String: Any]] = []
     for escaped in [#"\ud800"#, #"\udfff"#, #"\ud83d\ude00"#] {
         let input = Data(
-            #"{"version":1,"event":"prompt","context":{},"input":"\#(escaped)"}"#.utf8
+            #"{"version":1,"event":"prompt","context":{},"input":"\#(escaped)"}"#.utf8,
         )
         let responses = [
             #"{"version":1,"outcome":"modify-input","input":"\#(escaped)"}"#,
@@ -24,7 +24,7 @@ func packagedHookRuntimeExecutesSharedHarnesses() throws {
             #"{"version":1,"outcome":"block","reason":"\#(escaped)"}"#,
         ].map { Data($0.utf8) }
         let effects = Data(
-            #"{"contexts":["\#(escaped)"],"input":"\#(escaped)","decision":"block","reason":"\#(escaped)"}"#.utf8
+            #"{"contexts":["\#(escaped)"],"input":"\#(escaped)","decision":"block","reason":"\#(escaped)"}"#.utf8,
         )
         try wires.append([
             "input": input.base64EncodedString(),

@@ -30,7 +30,7 @@ private func translationID(_ values: [String]) -> String {
 
 private func unsupportedTranslation(
     artifactID: String,
-    error: UnsupportedTranslation
+    error: UnsupportedTranslation,
 ) throws -> ArtifactTranslation {
     try ArtifactTranslation(
         artifact: nil,
@@ -38,15 +38,15 @@ private func unsupportedTranslation(
             artifactID: artifactID,
             kind: .unsupported,
             message: error.message,
-            code: error.code
-        )]
+            code: error.code,
+        )],
     )
 }
 
 private func activationNotices(
     artifactID: String,
     family: Family,
-    context: RenderContext
+    context: RenderContext,
 ) throws -> [Notice] {
     var result: [Notice] = []
     let agent = context.audience.agent
@@ -55,14 +55,14 @@ private func activationNotices(
             artifactID: artifactID,
             kind: .activation,
             message: "Instruction discovery and loading are controlled by the host and current session.",
-            code: "instruction-loading"
+            code: "instruction-loading",
         ))
         if agent == .codex {
             try result.append(Notice(
                 artifactID: artifactID,
                 kind: .activation,
                 message: "AGENTS.override.md takes precedence; instructions default to a 32 KiB limit. Start a new session after changes and check host discovery.",
-                code: "codex-instruction-discovery"
+                code: "codex-instruction-discovery",
             ))
         }
         if context.surface == .vscode, context.target.scope == .user {
@@ -70,7 +70,7 @@ private func activationNotices(
                 artifactID: artifactID,
                 kind: .activation,
                 message: "User instructions target VS Code Agent Host; local extension-host sessions may use different discovery settings.",
-                code: "vscode-agent-host-instructions"
+                code: "vscode-agent-host-instructions",
             ))
         }
     }
@@ -79,14 +79,14 @@ private func activationNotices(
             artifactID: artifactID,
             kind: .activation,
             message: "Registration does not grant trust, approve tools, supply credentials or prove server activation.",
-            code: "mcp-activation"
+            code: "mcp-activation",
         ))
         if agent == .pi {
             try result.append(Notice(
                 artifactID: artifactID,
                 kind: .prerequisite,
                 message: "Requires externally installed pi-mcp-adapter; emitted schema targets v2.32.1.",
-                code: "pi-mcp-adapter-v2-32-1"
+                code: "pi-mcp-adapter-v2-32-1",
             ))
         }
         if context.surface == .vscode {
@@ -94,7 +94,7 @@ private func activationNotices(
                 artifactID: artifactID,
                 kind: .activation,
                 message: "VS Code forwards these servers to Agent Host, which does not read this servers document directly.",
-                code: "vscode-mcp-forwarding"
+                code: "vscode-mcp-forwarding",
             ))
         }
     }
@@ -104,15 +104,15 @@ private func activationNotices(
 public func translateInstructionArtifact(
     bundleID: String,
     artifact: InstructionArtifact,
-    context: RenderContext
+    context: RenderContext,
 ) throws -> ArtifactTranslation {
     guard isTranslatable(context.audience.agent) else {
         return try unsupportedTranslation(
             artifactID: artifact.id,
             error: UnsupportedTranslation(
                 code: "agent-unsupported",
-                message: untranslatableMessage(context.audience.agent)
-            )
+                message: untranslatableMessage(context.audience.agent),
+            ),
         )
     }
     guard var path = try instructionDestinationOptional(for: context) else {
@@ -120,8 +120,8 @@ public func translateInstructionArtifact(
             artifactID: artifact.id,
             error: UnsupportedTranslation(
                 code: "instruction-destination",
-                message: "Cursor user rules have no verified filesystem preset."
-            )
+                message: "Cursor user rules have no verified filesystem preset.",
+            ),
         )
     }
     let marker = translationID([bundleID, artifact.id])
@@ -135,8 +135,8 @@ public func translateInstructionArtifact(
                 artifactID: artifact.id,
                 error: UnsupportedTranslation(
                     code: "instruction-extension",
-                    message: "VS Code user instructions require an .instructions.md file."
-                )
+                    message: "VS Code user instructions require an .instructions.md file.",
+                ),
             )
         }
         content = .file(FileContent(data: Data("---\napplyTo: \"**\"\n---\n\n\(artifact.text)".utf8)))
@@ -146,8 +146,8 @@ public func translateInstructionArtifact(
                 artifactID: artifact.id,
                 error: UnsupportedTranslation(
                     code: "native-instruction-required",
-                    message: "Use native content for authored modular rule metadata."
-                )
+                    message: "Use native content for authored modular rule metadata.",
+                ),
             )
         }
         content = try .section(SectionContent(marker: marker, text: artifact.text))
@@ -157,35 +157,35 @@ public func translateInstructionArtifact(
             id: artifact.id,
             family: .instructions,
             destination: path,
-            content: content
+            content: content,
         ),
-        notices: activationNotices(artifactID: artifact.id, family: .instructions, context: context)
+        notices: activationNotices(artifactID: artifact.id, family: .instructions, context: context),
     )
 }
 
 public func translateMCPArtifact(
     artifact: MCPArtifact,
     context: RenderContext,
-    assetDestinations: [String: ResourcePath] = [:]
+    assetDestinations: [String: ResourcePath] = [:],
 ) throws -> ArtifactTranslation {
     guard isTranslatable(context.audience.agent) else {
         return try unsupportedTranslation(
             artifactID: artifact.id,
             error: UnsupportedTranslation(
                 code: "agent-unsupported",
-                message: untranslatableMessage(context.audience.agent)
-            )
+                message: untranslatableMessage(context.audience.agent),
+            ),
         )
     }
     guard let path = try mcpDestinationOptional(for: context) else {
         let error = context.surface == .vscode
             ? UnsupportedTranslation(
                 code: "mcp-profile-path",
-                message: "VS Code user MCP requires an explicit profile mcp.json path."
+                message: "VS Code user MCP requires an explicit profile mcp.json path.",
             )
             : UnsupportedTranslation(
                 code: "mcp-explicit-path",
-                message: "Relocated Claude user MCP requires an explicit mcp_path."
+                message: "Relocated Claude user MCP requires an explicit mcp_path.",
             )
         return try unsupportedTranslation(artifactID: artifact.id, error: error)
     }
@@ -194,8 +194,8 @@ public func translateMCPArtifact(
             artifactID: artifact.id,
             error: UnsupportedTranslation(
                 code: "mcp-profile-schema",
-                message: "VS Code routes require mcp.json with the servers schema; use the CLI surface for Agent Host native mcpServers files."
-            )
+                message: "VS Code routes require mcp.json with the servers schema; use the CLI surface for Agent Host native mcpServers files.",
+            ),
         )
     }
     do {
@@ -203,16 +203,16 @@ public func translateMCPArtifact(
             artifact,
             context: context,
             path: path,
-            assets: assetDestinations
+            assets: assetDestinations,
         )
         return try ArtifactTranslation(
             artifact: RenderedArtifact(
                 id: artifact.id,
                 family: .mcp,
                 destination: path,
-                content: .structured(payload)
+                content: .structured(payload),
             ),
-            notices: activationNotices(artifactID: artifact.id, family: .mcp, context: context)
+            notices: activationNotices(artifactID: artifact.id, family: .mcp, context: context),
         )
     } catch let error as UnsupportedTranslation {
         return try unsupportedTranslation(artifactID: artifact.id, error: error)
@@ -223,7 +223,7 @@ public func assembleTranslations(
     translations: [ArtifactTranslation],
     dependencies: [Dependency],
     contexts: [RenderContext],
-    routingContext: [(String, String)]
+    routingContext: [(String, String)],
 ) throws -> RenderedBundle {
     let artifacts = translations.compactMap(\.artifact)
     var notices = translations.flatMap(\.notices)
@@ -234,7 +234,7 @@ public func assembleTranslations(
         artifacts: blocked ? [] : artifacts,
         dependencies: blocked ? [] : dependencies,
         notices: notices,
-        routingContext: routingContext
+        routingContext: routingContext,
     )
 }
 
@@ -250,13 +250,13 @@ public func render(_ bundle: FlyrailBundle, for context: RenderContext) throws -
                 artifactID: $0.id,
                 kind: .unsupported,
                 message: untranslatableMessage(context.audience.agent),
-                code: "agent-unsupported"
+                code: "agent-unsupported",
             )
         }
         return try RenderedBundle(
             artifacts: [],
             notices: notices,
-            routingContext: context.routingContext
+            routingContext: context.routingContext,
         )
     }
     let (assetArtifacts, assets) = try supportAssetArtifacts(bundle: bundle, context: context)
@@ -276,7 +276,7 @@ public func render(_ bundle: FlyrailBundle, for context: RenderContext) throws -
                     artifactID: hook.id,
                     kind: .unsupported,
                     message: error.message,
-                    code: error.code
+                    code: error.code,
                 ))
             }
         }
@@ -298,21 +298,21 @@ public func render(_ bundle: FlyrailBundle, for context: RenderContext) throws -
                     family: .skills,
                     destination: context.skills,
                     content: .tree(skill.content),
-                    subtree: skill.name
+                    subtree: skill.name,
                 ),
-                notices: []
+                notices: [],
             )
         case let .instruction(instruction):
             translation = try translateInstructionArtifact(
                 bundleID: bundle.identity.id,
                 artifact: instruction,
-                context: context
+                context: context,
             )
         case let .mcp(mcp):
             translation = try translateMCPArtifact(
                 artifact: mcp,
                 context: context,
-                assetDestinations: assets
+                assetDestinations: assets,
             )
         case .hook:
             continue
@@ -322,11 +322,13 @@ public func render(_ bundle: FlyrailBundle, for context: RenderContext) throws -
                 notices: activationNotices(
                     artifactID: native.id,
                     family: native.family,
-                    context: context
-                )
+                    context: context,
+                ),
             )
         }
-        if let output = translation.artifact { artifacts.append(output) }
+        if let output = translation.artifact {
+            artifacts.append(output)
+        }
         for notice in translation.notices {
             if notice.kind == .unsupported {
                 notices.append(notice)
@@ -352,7 +354,7 @@ public func render(_ bundle: FlyrailBundle, for context: RenderContext) throws -
             artifactID: name,
             kind: .unsupported,
             message: "A selected dependency is unavailable for this audience.",
-            code: "dependency-audience"
+            code: "dependency-audience",
         ))
     }
     notices += translatedNotices
@@ -364,7 +366,7 @@ public func render(_ bundle: FlyrailBundle, for context: RenderContext) throws -
         artifacts: blocked ? [] : artifacts,
         dependencies: blocked ? [] : dependencies,
         notices: notices,
-        routingContext: context.routingContext
+        routingContext: context.routingContext,
     )
 }
 
@@ -377,7 +379,7 @@ private func nativeAudienceMatches(_ audience: Audience, context: RenderContext)
 
 public func renderMany(
     _ bundle: FlyrailBundle,
-    for contexts: [RenderContext]
+    for contexts: [RenderContext],
 ) throws -> RenderedBundle {
     guard !contexts.isEmpty else {
         throw FlyrailValueError("render_many requires at least one explicit context")
@@ -409,7 +411,7 @@ public func renderMany(
                 content: artifact.content,
                 subtree: artifact.subtree,
                 requireExisting: artifact.requireExisting,
-                schemaRequirements: artifact.schemaRequirements
+                schemaRequirements: artifact.schemaRequirements,
             ))
         }
         for edge in rendered.dependencies {
@@ -419,7 +421,7 @@ public func renderMany(
             try dependencies.append(Dependency(
                 dependent: dependent,
                 required: required,
-                mode: edge.mode
+                mode: edge.mode,
             ))
         }
         for notice in rendered.notices {
@@ -427,7 +429,7 @@ public func renderMany(
                 artifactID: translationID([route, notice.artifactID]),
                 kind: notice.kind,
                 message: notice.message,
-                code: notice.code
+                code: notice.code,
             ))
         }
     }
@@ -438,7 +440,7 @@ public func renderMany(
         artifacts: blocked ? [] : artifacts,
         dependencies: blocked ? [] : dependencies,
         notices: notices,
-        routingContext: routes
+        routingContext: routes,
     )
 }
 
@@ -484,7 +486,7 @@ private func collisionNotices(_ artifacts: [RenderedArtifact]) throws -> [Notice
                     artifactID: artifact.id,
                     kind: .unsupported,
                     message: "Incompatible document formats from \(previous.id) and \(artifact.id) at \(artifact.destination.displayString).",
-                    code: "document-format-collision"
+                    code: "document-format-collision",
                 ))
                 continue
             }
@@ -495,7 +497,7 @@ private func collisionNotices(_ artifacts: [RenderedArtifact]) throws -> [Notice
                     artifactID: artifact.id,
                     kind: .unsupported,
                     message: "Incompatible claims from \(previous.id) and \(artifact.id) at \(artifact.destination.displayString).",
-                    code: "destination-collision"
+                    code: "destination-collision",
                 ))
             }
         }
@@ -537,7 +539,7 @@ private func selectorPrefix(_ left: [SelectorPart], _ right: [SelectorPart]) -> 
 
 private func copilotPrecedenceNotices(
     _ artifacts: [RenderedArtifact],
-    contexts: [RenderContext]
+    contexts: [RenderContext],
 ) throws -> [Notice] {
     let roots = Set(contexts.filter {
         $0.audience.agent == .copilot &&
@@ -573,7 +575,7 @@ private func copilotPrecedenceNotices(
                         artifactID: artifact.id,
                         kind: .unsupported,
                         message: "Copilot CLI selects \(previous.destination.displayString) over \(artifact.destination.displayString) for server \(server.name); the selected records disagree.",
-                        code: "copilot-mcp-precedence-collision"
+                        code: "copilot-mcp-precedence-collision",
                     ))
                 }
             }
@@ -584,12 +586,12 @@ private func copilotPrecedenceNotices(
 
 private func precedenceUnverified(
     _ artifact: RenderedArtifact,
-    previous: RenderedArtifact
+    previous: RenderedArtifact,
 ) throws -> Notice {
     try Notice(
         artifactID: artifact.id,
         kind: .activation,
         message: "Copilot CLI gives \(previous.destination.displayString) precedence over \(artifact.destination.displayString); native content requires caller review of the effective server definitions.",
-        code: "copilot-mcp-precedence-unverified"
+        code: "copilot-mcp-precedence-unverified",
     )
 }

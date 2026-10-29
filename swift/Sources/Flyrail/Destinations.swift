@@ -39,7 +39,7 @@ public struct RenderContext: Sendable, Hashable {
         mcpPath: ResourcePath?? = nil,
         nativeRoot: ResourcePath?? = nil,
         assetRoot: ResourcePath?? = nil,
-        hookRuntime: HookRuntime?? = nil
+        hookRuntime: HookRuntime?? = nil,
     ) throws {
         target = value.target
         platform = value.platform
@@ -125,7 +125,7 @@ public struct Capability: Sendable, Hashable {
         portable: Bool,
         native: Bool,
         limitations: [String] = [],
-        prerequisites: [String] = []
+        prerequisites: [String] = [],
     ) throws {
         guard limitations.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
               prerequisites.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
@@ -144,7 +144,7 @@ public struct Capability: Sendable, Hashable {
         portable: Bool,
         native: Bool,
         limitations: [String] = [],
-        prerequisites: [String] = []
+        prerequisites: [String] = [],
     ) {
         self.family = family
         self.portable = portable
@@ -182,21 +182,21 @@ public func capabilities(for context: RenderContext) -> Set<Capability> {
             raw: .instructions,
             portable: (try? instructionDestinationOptional(for: context)) != nil,
             native: true,
-            limitations: ["Discovery, overrides, byte limits and session loading remain host-controlled."]
+            limitations: ["Discovery, overrides, byte limits and session loading remain host-controlled."],
         ),
         Capability(
             raw: .mcp,
             portable: (try? mcpDestinationOptional(for: context)) != nil,
             native: true,
             limitations: ["Transport, interpolation, environment references and cwd are checked per request."],
-            prerequisites: context.audience.agent == .pi ? ["pi-mcp-adapter@2.32.1"] : []
+            prerequisites: context.audience.agent == .pi ? ["pi-mcp-adapter@2.32.1"] : [],
         ),
         Capability(
             raw: .hooks,
             portable: context.surface != .vscode && context.selectedHookRuntime != nil,
             native: true,
             limitations: ["Event/outcome and native shell support are validated for each request."],
-            prerequisites: ["Node 24+; explicit executable for native hosts. See the hook protocol matrix."]
+            prerequisites: ["Node 24+; explicit executable for native hosts. See the hook protocol matrix."],
         ),
     ])
 }
@@ -216,7 +216,9 @@ public func mcpDestination(for context: RenderContext) throws -> ResourcePath {
 }
 
 package func instructionDestinationOptional(for context: RenderContext) throws -> ResourcePath? {
-    if let path = context.selectedInstructionPath { return path }
+    if let path = context.selectedInstructionPath {
+        return path
+    }
     guard isTranslatable(context.audience.agent) else { return nil }
     if context.target.scope == .project {
         let path: String? = switch context.audience.agent {
@@ -245,10 +247,14 @@ package func instructionDestinationOptional(for context: RenderContext) throws -
 }
 
 package func mcpDestinationOptional(for context: RenderContext) throws -> ResourcePath? {
-    if let path = context.selectedMCPPath { return path }
+    if let path = context.selectedMCPPath {
+        return path
+    }
     guard isTranslatable(context.audience.agent) else { return nil }
     if context.target.scope == .project {
-        if context.surface == .vscode { return try appendPath(context.root, ".vscode/mcp.json") }
+        if context.surface == .vscode {
+            return try appendPath(context.root, ".vscode/mcp.json")
+        }
         let path: String? = switch context.audience.agent {
         case .claude, .copilot: ".mcp.json"
         case .codex: ".codex/config.toml"
@@ -260,7 +266,9 @@ package func mcpDestinationOptional(for context: RenderContext) throws -> Resour
         guard let path else { return nil }
         return try appendPath(context.root, path)
     }
-    if context.surface == .vscode { return nil }
+    if context.surface == .vscode {
+        return nil
+    }
     if context.audience.agent == .claude {
         return environmentValue(context, "CLAUDE_CONFIG_DIR") == nil
             ? try appendPath(context.root, ".claude.json")
@@ -299,7 +307,9 @@ package func userDirectory(_ context: RenderContext) throws -> ResourcePath {
     } else {
         try appendPath(context.root, selection.1)
     }
-    if agent == .opencode { root = try appendPath(root, "opencode") }
+    if agent == .opencode {
+        root = try appendPath(root, "opencode")
+    }
     return root
 }
 
@@ -316,7 +326,9 @@ private func environmentValue(_ context: RenderContext, _ key: String) -> String
 }
 
 extension Family: CaseIterable {
-    public static var allCases: [Family] { [.skills, .instructions, .mcp, .hooks] }
+    public static var allCases: [Family] {
+        [.skills, .instructions, .mcp, .hooks]
+    }
 }
 
 private func exactTextsEqual(_ left: [String], _ right: [String]) -> Bool {
