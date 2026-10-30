@@ -24,7 +24,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = ["tomlkit==0.15.1"]
+dependencies = ["tomlkit==0.15.2"]
 
 [project.urls]
 Documentation = "https://github.com/nielsmadan/flyrail/tree/main/python/docs"
@@ -38,7 +38,7 @@ dev = [
   "mypy==2.4.0",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.17.0",
+  "ruff==0.17.3",
 ]
 
 [tool.uv]
