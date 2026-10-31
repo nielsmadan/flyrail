@@ -122,6 +122,7 @@ def main() -> None:
         assert words.stdout.strip() == str(len(manifest.read_text().split())).encode()
 
         notes_target = qa / "notes-target"
+        notes_state = qa / "notes-state"
         run(
             [
                 str(notes_bin),
@@ -131,6 +132,8 @@ def main() -> None:
                 str(notes / "bundle"),
                 "--target",
                 str(notes_target),
+                "--state",
+                str(notes_state),
             ],
             cwd=qa,
         )
@@ -144,12 +147,19 @@ def main() -> None:
                 "example-notes",
                 "--target",
                 str(notes_target),
+                "--state",
+                str(notes_state),
             ],
             cwd=qa,
         )
 
         checksum_target = qa / "checksum-target"
-        run([str(checksum_bin), "ai", "install", "--target", str(checksum_target)], cwd=qa)
+        checksum_state = ["--state", str(qa / "checksum-state")]
+        run(
+            [str(checksum_bin), "ai", "install", "--target", str(checksum_target)]
+            + checksum_state,
+            cwd=qa,
+        )
         sample = checksum_target / "checksum-review/assets/sample.bin"
         script = checksum_target / "checksum-review/scripts/verify_checksum.py"
         assert sample.read_bytes() == b"\x00\x01\x02\n\r\x7f\x80\xfe\xffFLYRAIL\x00"
@@ -159,7 +169,11 @@ def main() -> None:
         if os.name != "nt":
             assert script.stat().st_mode & 0o111
         shutil.rmtree(checksum / "resources")
-        run([str(checksum_bin), "ai", "uninstall", "--target", str(checksum_target)], cwd=qa)
+        run(
+            [str(checksum_bin), "ai", "uninstall", "--target", str(checksum_target)]
+            + checksum_state,
+            cwd=qa,
+        )
         print("Extracted package QA passed for flyrail and both example crate archives.")
     finally:
         shutil.rmtree(qa, ignore_errors=True)
