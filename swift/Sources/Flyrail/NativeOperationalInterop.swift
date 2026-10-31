@@ -3,13 +3,20 @@ import Foundation
 
 extension NativeInterop {
     package static func operate(_ command: InteropCommand, options: [String: String], output: FileHandle) throws {
-        guard let indexPath = options["--index"] else { throw FlyrailValueError("missing required argument: --index") }
-        let target = try InstallationTarget(indexRoot: ResourcePath(indexPath))
+        let writes = [InteropCommand.write, .install, .update].contains(command)
+        if writes, options["--source"] != nil,
+           let option = ["--mode", "--large", "--kind", "--section", "--payload", "--version"]
+               .first(where: { options[$0] != nil })
+        {
+            throw FlyrailValueError("\(option) cannot be combined with --source")
+        }
+        guard let state = options["--state"] else { throw FlyrailValueError("missing required argument: --state") }
+        let target = try InstallationTarget(store: DirectoryStore(ResourcePath(state)))
         let owner = options["--bundle-id"] ?? "team"
         try validateIdentifier(owner, label: "bundle id")
         let timeout = try duration(options["--lock-timeout"] ?? "0")
         let seam = try seam(options)
-        let prepared = try command == .write ? prepareWrite(options: options, owner: owner) : nil
+        let prepared = try writes ? prepareWrite(options: options, owner: owner) : nil
         if command == .inspect {
             try output.write(contentsOf: StateCodec.encodeRecord(observationValue(
                 inspectInstallation(bundleID: owner, target: target),
@@ -20,22 +27,26 @@ extension NativeInterop {
         do {
             switch command {
             case .recover:
-                let observed = try NativeAdmission.observeIndex(target, bundleID: owner)
-                if observed.current == nil, observed.prepared == nil {
-                    result = recoverInstallation(bundleID: owner, target: target, lockTimeout: timeout)
-                } else {
-                    let locks = try LifecycleExecution.locks(bundleID: owner, target: target, observed: observed,
-                                                             resources: [], timeout: timeout)
+                if let index = try InstallationIndex.read(bundleID: owner, target: target) {
+                    let references = try LifecyclePlanning.references(
+                        .empty, index: index, target: target, bundle: nil,
+                        group: NativeTransactionPlanning.group(.empty),
+                    )
+                    let locks = try LifecycleExecution.locks(bundleID: owner, target: target, expected: index,
+                                                             resources: references, timeout: timeout)
+                    defer { locks.release() }
                     result = try LifecycleExecution.recover(bundleID: owner, target: target, locks: locks, seam: seam)
+                } else {
+                    result = recoverInstallation(bundleID: owner, target: target, lockTimeout: timeout)
                 }
             case .remove:
                 result = remove(bundleID: owner, target: target, replaceModified: options["--replace-modified"] != nil,
                                 lockTimeout: timeout)
-            case .write:
+            case .write, .install, .update:
                 guard let (bundle, rendered, acquisition) = prepared else {
                     throw FlyrailValueError("missing write arguments")
                 }
-                result = LifecycleExecution.synchronize(
+                result = try LifecycleExecution.synchronize(
                     bundleID: owner, bundle: bundle, rendered: rendered, target: target,
                     acquisition: acquisition, replaceModified: options["--replace-modified"] != nil,
                     lockTimeout: timeout, seam: seam,
@@ -69,11 +80,6 @@ extension NativeInterop {
             )
             return try (bundle, rendered(options, destination: ResourcePath(destination)), acquisition)
         }
-        if let option = ["--mode", "--large", "--kind", "--section", "--payload", "--version"]
-            .first(where: { options[$0] != nil })
-        {
-            throw FlyrailValueError("\(option) cannot be combined with --source")
-        }
         guard let agent = Agent(rawValue: options["--agent"] ?? "codex") else {
             throw FlyrailValueError("invalid agent")
         }
@@ -101,8 +107,10 @@ extension NativeInterop {
         }
         let payload: Data
         if let size = options["--large"] {
-            guard let size = Int(size), (0 ... 1024 * 1024).contains(size) else {
-                throw FlyrailValueError("large payload size must be between 0 and 1048576")
+            guard let size = Int(size) else { throw FlyrailValueError("invalid --large") }
+            guard size >= 0 else { throw FlyrailValueError("large payload size must be nonnegative") }
+            guard size <= 1024 * 1024 else {
+                throw FlyrailValueError("large payload size must not exceed 1048576")
             }
             let pattern = Array("flyrail-interop-payload\n".utf8)
             payload = Data((0 ..< size).lazy.map { pattern[$0 % pattern.count] })
@@ -145,16 +153,7 @@ extension NativeInterop {
         let phase = options["--barrier-phase"]
         let ready = options["--barrier-ready"]
         let release = options["--barrier-release"]
-        let boundaries: Set = [
-            "stage-node", "index-pending-created", "journal-created", "receipt-created", "index-completion-created",
-            "index-pending-prepared", "index-pending-reread", "index-pending-committed",
-            "resource-precondition", "index-require", "index-ancestor", "guard-lookup",
-            "journal-prepared", "journal-reread", "journal-committed", "prepare", "rename", "backup",
-            "staging", "publish", "receipt", "receipt-prepared", "receipt-reread", "receipt-committed",
-            "cleanup-node", "cleanup-metadata", "cleanup", "index-completion", "index-completion-prepared",
-            "index-completion-reread", "index-completion-committed", "rollback-stage", "rollback-backup",
-            "rollback", "recover-journal", "recover-index",
-        ]
+        let boundaries = Set(ResourceTransaction.boundaries)
         guard [fault, phase].compactMap(\.self).allSatisfy(boundaries.contains) else {
             throw FlyrailValueError("unknown transaction seam")
         }
@@ -208,7 +207,6 @@ extension NativeInterop {
             ("resources", .array(observation.resources.map { resource in
                 .object([
                     ("destination", .string(resource.destination.displayString)),
-                    ("state_root", .string(resource.stateRoot.displayString)),
                     ("claims", .array(resource.claims.map {
                         .object([("artifact_id", .string($0.artifactID)), ("disposition", .string($0.status.rawValue))])
                     })),

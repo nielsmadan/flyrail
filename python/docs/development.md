@@ -58,10 +58,10 @@ uv run --no-sync mypy --platform linux
 | Command | Work performed |
 | --- | --- |
 | `just check` | Locked sync, Ruff format/lint/security checks, interpreter verification, strict mypy, and the unit test tier. Runs in seconds; this is the git-hook and local release gate. |
-| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 95% gate, and package/consumer checks. Needs Node, npm and Bun. |
+| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 95% gate, and package/consumer checks. Needs Node, npm and Bun. Also runs the Rust and Swift integration tiers. |
 | `just audit-dependencies` | Audit every locked registry package/version with pip-audit. |
 | `just check-workflow` | Validate all repository workflows with actionlint. |
-| `just check-package` | Build and verify distributions and installed example applications. |
+| `just check-package` | Build and verify distributions and installed example applications, then the Rust and Swift package checks. |
 | `just build` | Build the wheel and source archive into `python/dist/`. |
 | `just format` | Format Python code with Ruff. |
 | `just sync` | Synchronize `python/.venv` to the locked environment. |
@@ -145,11 +145,12 @@ job are the source of truth:
 Pull requests listing 3000 or more files run every job, because the pull request
 files API stops there. The `CI result` job passes when every selected job passed
 or was skipped; make it the single required status check. The Swift job runs on
-macOS 26 with pinned SwiftFormat and SwiftLint, and stays outside `CI result`
-until Swift adopts the app-supplied state store. The integration matrix runs on
-the nightly schedule and on workflow dispatch, and the release workflow runs both
-tiers on every supported platform, so no release publishes without integration
-results.
+macOS 26 with pinned SwiftFormat and SwiftLint and counts toward `CI result`.
+The integration matrix and the Swift integration job (macOS 26: differential and
+interop scripts, packaged hook runtime and package QA) run on the nightly
+schedule and on workflow dispatch, and `CI result` requires them too. The
+release workflow runs both tiers on every supported platform, so no release
+publishes without integration results.
 
 Workflows use pinned action commits, pinned uv, checksum-pinned actionlint,
 SwiftFormat and SwiftLint archives, and read-only repository permissions.

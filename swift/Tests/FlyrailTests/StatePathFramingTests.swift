@@ -12,8 +12,8 @@ func statePathsPreserveTheCanonicalDoubleSlashRoot() throws {
     #expect(try StateCodec.decodePath(encoded) == path)
     #expect(try StateCodec.transcode(Data(#"{"path":"//"}"#.utf8)) == Data("{\"path\":\"//\"}\n".utf8))
     let authority = try ResourceAuthority(recordedDestination: path)
-    #expect(try statePathText(authority.stateRoot).hasPrefix("//fixture/"))
-    #expect(try statePathText(authority.lockPath).hasPrefix("//fixture/"))
+    #expect(authority.destination == path)
+    #expect(try statePathText(authority.destination).hasPrefix("//fixture/"))
     let bytes = Array("//fixture/é.md".utf8)
     #expect(try ResourcePath(platformBytes: bytes) == path)
 }

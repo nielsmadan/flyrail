@@ -6,6 +6,8 @@ package enum InteropCommand: String, Sendable {
     case encode
     case decode
     case write
+    case install
+    case update
     case inspect
     case remove
     case recover
@@ -19,19 +21,19 @@ package enum NativeInterop {
     package static func run(_ command: InteropCommand, arguments: [String], output: FileHandle) throws {
         let allowed: Set<String>
         switch command {
-        case .hold: allowed = ["--destination", "--kind", "--barrier", "--lock-timeout", "--wait-timeout"]
+        case .hold: allowed = ["--state", "--destination", "--kind", "--barrier", "--lock-timeout", "--wait-timeout"]
         case .observe: allowed = ["--destination", "--kind", "--repeat"]
-        case .records: allowed = ["--index", "--destination"]
-        case .write:
-            allowed = ["--index", "--bundle-id", "--lock-timeout", "--destination", "--version",
+        case .records: allowed = ["--state"]
+        case .write, .install, .update:
+            allowed = ["--state", "--bundle-id", "--lock-timeout", "--destination", "--version",
                        "--payload", "--large", "--mode", "--acquisition", "--replace-modified",
                        "--fail-index-completion", "--barrier-phase", "--barrier-ready", "--barrier-release",
                        "--barrier-timeout", "--fault-phase", "--kind", "--section", "--source", "--agent", "--node"]
-        case .inspect: allowed = ["--index", "--bundle-id", "--lock-timeout"]
+        case .inspect: allowed = ["--state", "--bundle-id", "--lock-timeout"]
         case .recover:
-            allowed = ["--index", "--bundle-id", "--lock-timeout", "--barrier-phase", "--barrier-ready",
+            allowed = ["--state", "--bundle-id", "--lock-timeout", "--barrier-phase", "--barrier-ready",
                        "--barrier-release", "--barrier-timeout", "--fault-phase"]
-        case .remove: allowed = ["--index", "--bundle-id", "--lock-timeout", "--replace-modified"]
+        case .remove: allowed = ["--state", "--bundle-id", "--lock-timeout", "--replace-modified"]
         default: throw FlyrailValueError("unsupported native interop command")
         }
         let options = try options(arguments, allowed: allowed)
@@ -49,7 +51,8 @@ package enum NativeInterop {
                 }
             }
         case .records: try records(options, output: output)
-        case .write, .inspect, .remove, .recover: try operate(command, options: options, output: output)
+        case .write, .install, .update, .inspect, .remove, .recover:
+            try operate(command, options: options, output: output)
         default: throw FlyrailValueError("unsupported native interop command")
         }
     }
@@ -109,11 +112,13 @@ package enum NativeInterop {
     }
 
     private static func hold(_ options: [String: String], output: FileHandle) throws {
+        let store = try DirectoryStore(ResourcePath(required(options, "--state")))
         let reference = try resource(options)
         let barrier = try NativeAuthority.absolute(ResourcePath(required(options, "--barrier")))
         let timeout = try timeout(options, "--lock-timeout", default: 0)
         let wait = try self.timeout(options, "--wait-timeout", default: 30)
-        let lock = try NativeAdmission.reserve(reference, timeout: timeout)
+        let lock = try StateRecords.lock(store, name: StateKey.resourceLock(reference.destination), timeout: timeout)
+        defer { lock.release() }
         try emit(.object([("status", .string("reserved"))]), output: output)
         let deadline = ContinuousClock.now.advanced(by: wait)
         while try NativeFilesystem.metadata(barrier) == nil {
@@ -121,7 +126,7 @@ package enum NativeInterop {
             Thread.sleep(forTimeInterval: 0.005)
         }
         do {
-            try NativeAdmission.admit(reference, lock: lock)
+            try ResourceAdmission.admit(reference, store: store)
             try emit(.object([("status", .string("admitted"))]), output: output)
         } catch let error as TargetError {
             try emit(.object([("status", .string(error.code.rawValue))]), output: output)
@@ -131,13 +136,10 @@ package enum NativeInterop {
     private static func observe(_ options: [String: String], output: FileHandle) throws {
         do {
             let reference = try resource(options)
-            let observed = try NativeAdmission.observe(reference)
+            let observed = try NativeObservation.snapshot(reference.destination)
             try emit(.object([
                 ("resource", reference.stateRecord()), ("revision", observed.revision.stateRecord()),
-                ("state_revision", observed.state.revision.stateRecord()),
-                ("ancestors", StateCodec.sequence(observed.snapshot.ancestors)),
-                ("receipt", StateCodec.optional(observed.receipt)),
-                ("recovery_paths", .array(observed.recovery.map { .string($0.displayString) })),
+                ("ancestors", StateCodec.sequence(observed.ancestors)),
                 ("error", .null),
             ]), output: output)
         } catch let error as TargetError {
@@ -150,45 +152,19 @@ package enum NativeInterop {
     }
 
     private static func records(_ options: [String: String], output: FileHandle) throws {
-        let index = try InstallationTarget(indexRoot: ResourcePath(required(options, "--index")))
-        var roots = [index.indexRoot]
-        if let destination = options["--destination"] {
-            try roots.append(ResourceAuthority(destination: ResourcePath(destination)).stateRoot)
-        }
-        let recordNames: Set = [
-            "authority.json", "authority.json.next", "receipt.json", "receipt.json.next",
-            "transaction.json", "transaction.json.next", "index.json", "index.json.next",
-        ]
-        var records: [(ResourcePath, Data)] = []
-        for root in roots {
-            try NativeAuthority.managedSpelling(root)
-            let snapshot = try NativeObservation.snapshot(
-                root, privateStorage: true, resourcePayloads: root != index.indexRoot,
-            )
-            for node in snapshot.revision.nodes.dropFirst() where recordNames.contains(node.path) {
-                guard let bytes = node.data else {
-                    throw try nativeFailure(
-                        .invalidState,
-                        "metadata must be a regular file",
-                        appendPath(root, node.path),
-                    )
-                }
-                try records.append((appendPath(root, node.path), bytes))
+        let store = try DirectoryStore(ResourcePath(required(options, "--state")))
+        let result = try StateRecords.keys(store, prefix: "").compactMap { key -> JSONValue? in
+            guard let bytes = try StateRecords.raw(store, key: key) else { return nil }
+            let canonical = try StateCodec.transcode(bytes)
+            guard let tag = try stateRecordTag(JSONParser.parse(canonical)) else {
+                throw FlyrailValueError("record type missing: \(key)")
             }
-            try NativeObservation.require(root, snapshot)
+            return .object([
+                ("key", .string(key)), ("type", .string(tag)),
+                ("bytes", .string(bytes.base64EncodedString())),
+                ("canonical", .string(canonical.base64EncodedString())),
+            ])
         }
-        let result = try records.sorted { $0.0.platformBytes.lexicographicallyPrecedes($1.0.platformBytes) }
-            .map { path, bytes -> JSONValue in
-                let canonical = try StateCodec.transcode(bytes)
-                guard let tag = try stateRecordTag(JSONParser.parse(canonical)) else {
-                    throw FlyrailValueError("record type missing")
-                }
-                return .object([
-                    ("path", .string(path.displayString)), ("type", .string(tag)),
-                    ("bytes", .string(bytes.base64EncodedString())),
-                    ("canonical", .string(canonical.base64EncodedString())),
-                ])
-            }
         try emit(.object([("records", .array(result))]), output: output)
     }
 }

@@ -13,6 +13,7 @@ check:
 check-integration:
     {{python}} python/scripts/check.py check-integration
     cd rust && just check-integration
+    cd swift && just check-integration
 
 format:
     {{python}} python/scripts/check.py format
@@ -29,6 +30,7 @@ build:
 check-package:
     {{python}} python/scripts/check.py check-package
     cd rust && just check-package
+    cd swift && just check-package
 
 audit-dependencies:
     {{python}} python/scripts/check.py audit-dependencies

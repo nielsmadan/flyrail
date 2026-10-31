@@ -12,6 +12,10 @@ build outputs under the repository `.cache`. Set
 SwiftLint 0.65.1; use the same versions locally. CI path selection is described
 in `../python/docs/development.md` under "CI and maintenance".
 
+`just check-integration` and `just check-package` run the cross-language scripts
+and package QA; CI runs them nightly and on dispatch, and `CI result` requires
+them. Tests build stores and targets with `NativeTestRoot.store` and `target()`.
+
 Tests use checkout-local fixtures and temporary roots. Do not read or write real
 agent configuration. Shared conformance fixtures live in `../spec/fixtures`.
 Prefer immutable transformations, clear names, and terse caller-facing DocC.

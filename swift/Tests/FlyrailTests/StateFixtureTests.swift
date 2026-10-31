@@ -33,9 +33,11 @@ func stateClaimAndAuthorityFixturesPinPhysicalIdentity() throws {
     }
     for item in try stateArray(stateField(fixture, "authorities")) {
         let destination = try ResourcePath(stateText(stateField(item, "destination")))
-        let authority = try ResourceAuthority(recordedDestination: destination)
-        #expect(try statePathText(authority.stateRoot) == stateText(stateField(item, "state_root")))
-        #expect(try statePathText(authority.lockPath) == stateText(stateField(item, "lock_path")))
+        #expect(try StateKey.destination(destination) == stateText(stateField(item, "destination_key")))
+        let path = try transactionPath(
+            destination: destination, transactionID: stateText(stateField(item, "transaction_id")),
+        )
+        #expect(try statePathText(path) == stateText(stateField(item, "transaction_path")))
     }
 }
 
@@ -50,6 +52,11 @@ func stateReceiptsJournalsAndRecoverySnapshotsRoundTrip() throws {
         for owned in receipt.claims {
             #expect(try owned.claim.identity(destination: receipt.resource.destination) == owned.claimID)
         }
+    }
+    for item in try stateArray(stateField(fixture, "preparations")) {
+        let raw = try StateCodec.encodeRecord(stateField(item, "record"))
+        let preparation = try StateCodec.decode(raw, as: Preparation.self)
+        #expect(try StateCodec.encode(preparation) == raw)
     }
     var journals: [String: Journal] = [:]
     for item in try stateArray(stateField(fixture, "journals")) {
@@ -115,7 +122,7 @@ func everyNestedDurableFixtureRecordIsStrictlyDecoded() throws {
     #expect(tags.isSuperset(of: [
         "Claim", "Key", "Member", "Selector", "SectionBoundaries", "ArrayPosition", "CreatedContainer",
         "DocumentProvenance", "OwnedSelection", "SelectionSnapshot", "Node", "Revision", "ResourceRef",
-        "OwnedClaim", "Receipt", "Journal", "Ancestor", "DocumentSchema", "Generation", "Index",
+        "OwnedClaim", "Receipt", "Journal", "Preparation", "Ancestor", "DocumentSchema", "Generation", "Index",
     ]))
 }
 

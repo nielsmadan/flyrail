@@ -23,11 +23,11 @@ func skillAdaptersKeepOrderAliasesInventoryAndSourceFreeRemoval() throws {
     try NativeTransactionIO.createFile(blocked.root, data: Data("foreign".utf8))
     let bundle = try lifecycleSkills()
     let before = try NativeObservation.snapshot(root.path)
-    let observations = inspect(bundle, targets: [target, directory, blocked])
+    let observations = inspect(bundle, targets: [target, directory, blocked], store: root.store)
     #expect(observations.map(\.observation.state) == [.absent, .absent, .unknown])
     #expect(observations[1].aliasOf == 0)
     #expect(try NativeObservation.snapshot(root.path) == before)
-    let installed = install(bundle, targets: [target, directory, blocked])
+    let installed = install(bundle, targets: [target, directory, blocked], store: root.store)
     #expect(installed.map(\.status) == [.applied, .applied, .failed])
     #expect(installed[1].aliasOf == 0)
     #expect(installed[0].observation.isCurrent)
@@ -36,14 +36,16 @@ func skillAdaptersKeepOrderAliasesInventoryAndSourceFreeRemoval() throws {
     #expect(entries.first { $0.path == "review/run" }?.executable == true)
     #expect(entries.first { $0.path == "review/SKILL.md" }?.size == 5)
     let second = try lifecycleSkills("2", text: "new")
-    #expect(install(second, targets: [target])[0].error?.code == .updateRequired)
-    #expect(update(second, targets: [directory])[0].status == .applied)
+    #expect(install(second, targets: [target], store: root.store)[0].error?.code == .updateRequired)
+    #expect(update(second, targets: [directory], store: root.store)[0].status == .applied)
     try Data("edited".utf8).write(to: URL(fileURLWithPath: appendPath(target.root, "review/SKILL.md").displayString))
-    #expect(inspect(second, targets: [target])[0].observation.modifications.map(\.kind) == [.contentChanged])
-    #expect(uninstall(bundleID: "team", targets: [target])[0].error?.code == .modified)
-    #expect(update(second, targets: [target], options: SkillOptions(replaceModified: true))[0].status == .applied)
-    #expect(uninstall(bundleID: "team", targets: [directory, target])[0].status == .applied)
-    #expect(uninstall(bundleID: "team", targets: [target])[0].status == .unchanged)
+    #expect(inspect(second, targets: [target], store: root.store)[0].observation.modifications
+        .map(\.kind) == [.contentChanged])
+    #expect(uninstall(bundleID: "team", targets: [target], store: root.store)[0].error?.code == .modified)
+    #expect(update(second, targets: [target], store: root.store, options: SkillOptions(replaceModified: true))[0]
+        .status == .applied)
+    #expect(uninstall(bundleID: "team", targets: [directory, target], store: root.store)[0].status == .applied)
+    #expect(uninstall(bundleID: "team", targets: [target], store: root.store)[0].status == .unchanged)
     #expect(try NativeFilesystem.metadata(appendPath(target.root, "review")) == nil)
 }
 
@@ -57,10 +59,10 @@ func everyDroidConvenienceBoundaryRefusesBeforeAnyTargetIO() throws {
     let bundle = try lifecycleSkills()
     let before = try NativeFilesystem.metadata(blocked)
     #expect(try renderSkills(bundle, target: target).notices.map(\.code) == ["agent-unsupported"])
-    #expect(inspect(bundle, targets: [target])[0].observation.error?.code == .unsupported)
-    #expect(install(bundle, targets: [target])[0].error?.code == .unsupported)
-    #expect(update(bundle, targets: [target])[0].error?.code == .unsupported)
-    #expect(uninstall(bundleID: "team", targets: [target])[0].error?.code == .unsupported)
+    #expect(inspect(bundle, targets: [target], store: root.store)[0].observation.error?.code == .unsupported)
+    #expect(install(bundle, targets: [target], store: root.store)[0].error?.code == .unsupported)
+    #expect(update(bundle, targets: [target], store: root.store)[0].error?.code == .unsupported)
+    #expect(uninstall(bundleID: "team", targets: [target], store: root.store)[0].error?.code == .unsupported)
     #expect(try NativeFilesystem.metadata(blocked)?.st_ino == before?.st_ino)
     #expect(try FileManager.default.contentsOfDirectory(atPath: root.path.displayString) == ["blocked"])
 }
@@ -72,10 +74,12 @@ func convenienceAdaptersRefuseNonSkillsWithoutTouchingTargets() throws {
     let target = try Target.directory(root.child("skills"))
     let bundle = try transactionBundle()
     let before = try NativeObservation.snapshot(root.path)
-    #expect(inspect(bundle, targets: [target])[0].observation.error?
+    #expect(inspect(bundle, targets: [target], store: root.store)[0].observation.error?
         .message == "use explicit rendering for non-skill artifacts")
-    #expect(install(bundle, targets: [target])[0].error?.message == "use explicit rendering for non-skill artifacts")
-    #expect(update(bundle, targets: [target])[0].error?.message == "use explicit rendering for non-skill artifacts")
+    #expect(install(bundle, targets: [target], store: root.store)[0].error?
+        .message == "use explicit rendering for non-skill artifacts")
+    #expect(update(bundle, targets: [target], store: root.store)[0].error?
+        .message == "use explicit rendering for non-skill artifacts")
     #expect(try NativeObservation.snapshot(root.path) == before)
 }
 

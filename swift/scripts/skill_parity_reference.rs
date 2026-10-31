@@ -1,16 +1,20 @@
-use flyrail::{Agent, Bundle, Target, inspect, install, render_skills};
+use std::sync::Arc;
+
+use flyrail::{Agent, Bundle, DirectoryStore, StateStore, Target, inspect, install, render_skills};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1);
     let operation = arguments.next().ok_or("missing operation")?;
     let source = arguments.next().ok_or("missing source")?;
     let destination = arguments.next().ok_or("missing destination")?;
+    let state = arguments.next().ok_or("missing state")?;
+    let store: Arc<dyn StateStore> = Arc::new(DirectoryStore::new(&state)?);
     let bundle = Bundle::from_directory(source)?;
     let target = Target::directory(&destination)?;
     let rendered = render_skills(&bundle, &target)?;
     let droid = render_skills(&bundle, &Target::project(Agent::Droid, &destination)?)?;
     let status = if operation == "install" {
-        let results = install(&bundle, [target.clone()])?;
+        let results = install(&bundle, [target.clone()], &store)?;
         format!(
             "{:?}",
             results.first().ok_or("missing result")?.status().as_str()
@@ -18,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "null".to_owned()
     };
-    let inspections = inspect(&bundle, [target])?;
+    let inspections = inspect(&bundle, [target], &store)?;
     let observed = inspections
         .first()
         .ok_or("missing inspection")?

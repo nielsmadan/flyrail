@@ -3,8 +3,12 @@
 Schema-2 state records preserve complete resource ownership, revision and recovery
 evidence. ``ResourceRef`` locates a physical authority; ``Receipt`` grants claims
 at that boundary. ``Index`` records logical installation membership and does not
-grant ownership. ``Journal`` binds a transaction's complete before, staged,
-published and backup revisions.
+grant ownership. ``Preparation`` names the transaction directory a resource's
+transaction will use, and is recorded before that directory exists. ``Journal``
+binds a transaction's complete before, staged, published and backup revisions.
+
+Every record is a value in the host's ``StateStore`` under a fixed key scheme (see
+<doc:Stores>); nothing is stored beside a managed resource.
 
 Values are immutable and `Sendable`. ``Count`` retains nonnegative decimal
 metadata tokens, including values beyond `UInt64`. Semantic integers remain
@@ -23,5 +27,7 @@ to one million and decimal integers to 4300 digits.
 input. Optional `--type RecordTag` checks its type. `records` accepts an array of
 `{"path":"/absolute/path","bytes":"base64"}` entries and reports their raw and
 canonical base64 bytes and record tags. These commands do not access managed
-resources; native authority admission, publication and recovery are separate
-layers.
+resources. The lifecycle commands take `--state DIRECTORY`, a ``DirectoryStore``
+location shared with the Python and Rust drivers, and `hold` keeps a store lock
+held for cross-language contention checks. Native authority admission, publication
+and recovery are separate layers.

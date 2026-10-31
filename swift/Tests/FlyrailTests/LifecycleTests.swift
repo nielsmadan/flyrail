@@ -3,20 +3,13 @@ import Darwin
 import Foundation
 import Testing
 
-func lifecycleSection(_ path: ResourcePath, text: String = "generated", id: String = "guide") throws -> RenderedBundle {
-    try RenderedBundle(artifacts: [
-        RenderedArtifact(id: id, family: .instructions, destination: path,
-                         content: .section(SectionContent(marker: "guide", text: text))),
-    ])
-}
-
 @Test
 func lifecyclePreviewIsReadOnlyAndRemovalPreservesForeignBytes() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("AGENTS.md")
     try NativeTransactionIO.createFile(path, data: Data("# Foreign\n".utf8))
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let bundle = try transactionBundle()
     let rendered = try lifecycleSection(path)
     let before = try NativeObservation.snapshot(root.path)
@@ -38,7 +31,7 @@ func lifecycleRejectsEveryStalePreview(_ mutation: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("nested/document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let bundle = try transactionBundle()
     let rendered = try lifecycleSection(path)
     #expect(try sync(bundle: bundle, rendered: rendered, target: target).status == .applied)
@@ -47,10 +40,13 @@ func lifecycleRejectsEveryStalePreview(_ mutation: String) throws {
     switch mutation {
     case "payload": try Data("foreign\n".utf8).write(to: URL(fileURLWithPath: path.displayString))
     case "index":
-        let index = try appendPath(target.indexRoot, "index.json")
-        try Data(" ".utf8).appendToFile(index)
+        let key = try InstallationIndex.key(bundleID: "team", target: target)
+        let current = try #require(try target.store.read(key))
+        #expect(try target.store.write(key, value: current + Data(" ".utf8), expected: current))
     case "receipt":
-        try Data(" ".utf8).appendToFile(appendPath(resource.stateRoot, "receipt.json"))
+        let key = try StateKey.resource(resource.destination, .receipt)
+        let current = try #require(try target.store.read(key))
+        #expect(try target.store.write(key, value: current + Data(" ".utf8), expected: current))
     case "mode": #expect(chmod(path.displayString, 0o644) == 0)
     case "ancestor":
         let parent = try root.child("nested")
@@ -63,15 +59,6 @@ func lifecycleRejectsEveryStalePreview(_ mutation: String) throws {
     #expect(try NativeObservation.snapshot(root.path) == changed)
 }
 
-private extension Data {
-    func appendToFile(_ path: ResourcePath) throws {
-        let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path.displayString))
-        defer { try? handle.close() }
-        try handle.seekToEnd()
-        try handle.write(contentsOf: self)
-    }
-}
-
 @Test(arguments: [Acquisition.conflict, .adopt, .takeover])
 func lifecycleAcquisitionAndFirstBaseline(_ acquisition: Acquisition) throws {
     let root = try NativeTestRoot()
@@ -79,7 +66,7 @@ func lifecycleAcquisitionAndFirstBaseline(_ acquisition: Acquisition) throws {
     let path = try root.child("document")
     let original = Data("<!-- flyrail:guide:start -->\noriginal\n<!-- flyrail:guide:end -->\n".utf8)
     try NativeTransactionIO.createFile(path, data: original)
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let result = try sync(bundle: transactionBundle(), rendered: lifecycleSection(path, text: "original"),
                           target: target, acquisition: acquisition)
     if acquisition == .conflict {
@@ -107,16 +94,67 @@ func lifecyclePreflightsEveryResourceAndMissingReceipt() throws {
         RenderedArtifact(id: "second", family: .instructions, destination: second,
                          content: .file(FileContent(data: Data("new".utf8)))),
     ])
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     #expect(try sync(bundle: transactionBundle(), rendered: rendered, target: target).error?.code == .conflict)
     #expect(try NativeFilesystem.metadata(first) == nil)
     #expect(try sync(bundle: transactionBundle(), rendered: rendered, target: target,
                      acquisition: .takeover).status == .applied)
-    let receipt = try appendPath(NativeResourcePlanner.reference(rendered.artifacts[0]).stateRoot, "receipt.json")
-    #expect(unlink(receipt.displayString) == 0)
+    let key = try StateKey.resource(NativeResourcePlanner.reference(rendered.artifacts[0]).destination, .receipt)
+    #expect(try root.store.delete(key, expected: #require(try root.store.read(key))))
     let before = try NativeObservation.snapshot(root.path)
+    let keys = try root.store.keys(prefix: "")
     #expect(try inspectInstallation(bundleID: "team", target: target).isCurrent == false)
     #expect(remove(bundleID: "team", target: target).error?.code == .invalidState)
     #expect(recoverInstallation(bundleID: "team", target: target).error?.code == .invalidState)
     #expect(try NativeObservation.snapshot(root.path) == before)
+    #expect(try root.store.keys(prefix: "") == keys)
+}
+
+private final class FailingReadStore: StateStore, @unchecked Sendable {
+    private let inner = MemoryStore()
+    private let guarded = NSLock()
+    private var failing = false
+
+    func failResourceReads() {
+        guarded.withLock { failing = true }
+    }
+
+    func read(_ key: String) throws -> Data? {
+        if guarded.withLock({ failing }), key.hasPrefix("resource/") {
+            throw StoreError.io(message: "injected read failure", path: nil, errno: EIO)
+        }
+        return try inner.read(key)
+    }
+
+    func write(_ key: String, value: Data, expected: Data?) throws -> Bool {
+        try inner.write(key, value: value, expected: expected)
+    }
+
+    func delete(_ key: String, expected: Data) throws -> Bool {
+        try inner.delete(key, expected: expected)
+    }
+
+    func keys(prefix: String) throws -> [String] {
+        try inner.keys(prefix: prefix)
+    }
+
+    func lock(_ name: String, timeout: Duration) throws -> StoreLock {
+        try inner.lock(name, timeout: timeout)
+    }
+}
+
+@Test
+func storeReadFailuresBecomeTargetErrors() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let store = FailingReadStore()
+    let target = try InstallationTarget(store: store)
+    let rendered = try transactionRendered(root.child("document"))
+    #expect(try sync(bundle: transactionBundle(), rendered: rendered, target: target).status == .applied)
+    store.failResourceReads()
+    let proposed = try preview(bundle: transactionBundle("2"), rendered: rendered, target: target)
+    #expect(proposed.error?.code == .ioError)
+    #expect(proposed.error?.errno == EIO)
+    let observed = try inspectInstallation(bundleID: "team", target: target)
+    #expect(observed.resources.map { $0.error?.code } == [.ioError])
 }

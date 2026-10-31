@@ -3,12 +3,13 @@ import Foundation
 
 package enum NativeTransactionBudget {
     package static func validate(_ plan: ResourcePlan) throws {
+        let destination = plan.resource.destination
         guard plan.before != plan.after || plan.previous != plan.receipt else { return }
         guard plan.previous?.transactionID != plan.receipt.transactionID else {
-            throw nativeFailure(.invalidState, "transaction requires a fresh receipt identity", plan.resource.stateRoot)
+            throw nativeFailure(.invalidState, "transaction requires a fresh receipt identity", destination)
         }
-        try validateRevision(plan.before, destination: plan.resource.destination)
-        try validateRevision(plan.after, destination: plan.resource.destination)
+        try validateRevision(plan.before, destination: destination)
+        try validateRevision(plan.after, destination: destination)
         let changed = plan.before != plan.after
         let staged = try changed ? boundedRevision(plan.after) : plan.before
         let receipt = try Receipt(
@@ -26,27 +27,15 @@ package enum NativeTransactionBudget {
         let receiptBytes = try StateCodec.encode(receipt).count
         let journalBytes = try StateCodec.encode(journal).count
         let storage = changed ? staged.nodes + plan.before.nodes : []
-        let missingDirectories = ["staging", "backup"].filter { name in
-            !plan.stateRevision.nodes.contains { $0.path == name }
-        }.count
-        let nodes = plan.stateRevision.nodes.count + missingDirectories + storage.count + 2
-        let total = plan.stateRevision.nodes.reduce(0) { $0 + ($1.data?.count ?? 0) } +
-            storage.reduce(0) { $0 + ($1.data?.count ?? 0) } + receiptBytes + journalBytes
+        let nodes = storage.count + 3
+        let total = storage.reduce(0) { $0 + ($1.data?.count ?? 0) } + receiptBytes + journalBytes
         guard nodes <= NativeLimits.default.maximumNodes,
               storage.allSatisfy({ depth($0.path) + 2 <= NativeLimits.default.maximumDepth })
         else {
-            throw nativeIO(
-                ENOTSUP,
-                message: "transaction storage exceeds the node limit",
-                path: plan.resource.stateRoot,
-            )
+            throw nativeIO(ENOTSUP, message: "transaction storage exceeds the node limit", path: destination)
         }
         guard total <= NativeLimits.default.maximumTotalBytes else {
-            throw nativeIO(
-                ENOTSUP,
-                message: "transaction storage exceeds the byte limit",
-                path: plan.resource.stateRoot,
-            )
+            throw nativeIO(ENOTSUP, message: "transaction storage exceeds the byte limit", path: destination)
         }
     }
 
@@ -82,20 +71,19 @@ package enum NativeTransactionBudget {
     }
 
     private static func boundedAncestors(_ plan: ResourcePlan) throws -> [Ancestor] {
-        var captured = try NativeTransaction.ancestors(plan.resource)
-        for name in ["staging", "backup"] {
-            let selected = try NativeTransaction.path(plan.resource, name)
-            if !captured.contains(where: { $0.path == selected }) {
-                try captured.append(Ancestor(
+        let directory = plan.transactionDirectory
+        let synthetic = try [directory, appendPath(directory, "staging"), appendPath(directory, "backup")]
+            .filter { selected in !plan.ancestors.contains { $0.path == selected } }
+            .map { selected in
+                try Ancestor(
                     path: selected, device: Count(UInt64(UInt32.max)), inode: Count(UInt64.max), mode: 0o700,
                     uid: Count(UInt64(geteuid())), gid: Count(UInt64(getegid())),
                     security: JSONWriter.canonicalData(.object([
                         ("acl", .string("")), ("flags", .number("0")),
                         ("schema_version", .number("1")), ("xattrs", .array([])),
                     ])),
-                ))
+                )
             }
-        }
-        return captured
+        return plan.ancestors + synthetic
     }
 }

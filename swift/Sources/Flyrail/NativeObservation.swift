@@ -16,8 +16,7 @@ package struct NativeResourceSnapshot: Sendable, Equatable {
 
 package enum NativeObservation {
     package static func snapshot(
-        _ path: ResourcePath, limits: NativeLimits = .default, privateStorage: Bool = false,
-        resourcePayloads: Bool = false,
+        _ path: ResourcePath, limits: NativeLimits = .default,
     ) throws -> NativeResourceSnapshot {
         if String(bytes: path.platformBytes, encoding: .utf8) == nil {
             throw nativeFailure(.unsafePath, "nonportable resource path", path)
@@ -29,9 +28,7 @@ package enum NativeObservation {
             }
             return try NativeResourceSnapshot(revision: Revision(), ancestors: before, stamps: [])
         }
-        let walker = NativeRevisionWalk(
-            limits: limits, privateStorage: privateStorage, resourcePayloads: resourcePayloads,
-        )
+        let walker = NativeRevisionWalk(limits: limits)
         _ = try walker.walk(parent.descriptor, name: parent.name, path: path, relative: "", depth: 0)
         try walker.finish(parent.descriptor)
         try parent.validate()
@@ -72,23 +69,6 @@ package enum NativeObservation {
             throw nativeFailure(.concurrentChange, "complete resource revision changed", path)
         }
     }
-
-    package static func read<T: StateCodable>(
-        _ path: ResourcePath, as type: T.Type, tag: String,
-    ) throws -> T? {
-        let snapshot = try snapshot(
-            path, limits: NativeLimits(maximumFileBytes: JSONLimits.default.maximumInputBytes), privateStorage: true,
-        )
-        guard !snapshot.revision.nodes.isEmpty else { return nil }
-        guard snapshot.revision.nodes.count == 1, let data = snapshot.revision.data else {
-            throw nativeFailure(.invalidState, "expected a regular file", path)
-        }
-        do {
-            return try StateCodec.decodeMetadata(data, as: type, tag: tag)
-        } catch let error as FlyrailValueError {
-            throw nativeFailure(.invalidState, error.message, path)
-        }
-    }
 }
 
 private struct NativeNodeBinding {
@@ -102,16 +82,12 @@ private struct NativeNodeBinding {
 
 private final class NativeRevisionWalk {
     let limits: NativeLimits
-    let privateStorage: Bool
-    let resourcePayloads: Bool
     var totalBytes = 0
     var nodes: [Node] = []
     var bindings: [NativeNodeBinding] = []
 
-    init(limits: NativeLimits, privateStorage: Bool, resourcePayloads: Bool) {
+    init(limits: NativeLimits) {
         self.limits = limits
-        self.privateStorage = privateStorage
-        self.resourcePayloads = resourcePayloads
     }
 
     func walk(
@@ -133,16 +109,6 @@ private final class NativeRevisionWalk {
         let opened = try NativeFilesystem.stat(descriptor, path: path)
         guard NativeStamp(before) == NativeStamp(opened) else {
             throw nativeFailure(.concurrentChange, "file changed while opening", path)
-        }
-        let payload = resourcePayloads && ["staging/resource", "backup/resource"].contains {
-            relative == $0 || relative.hasPrefix($0 + "/")
-        }
-        if privateStorage, !payload {
-            if depth == 1, relative == "lock" {
-                try NativeSecurity.ensureCoordinationLock(descriptor, path: path)
-            } else {
-                try NativeSecurity.ensurePrivate(descriptor, path: path)
-            }
         }
         let security = try NativeSecurity.capture(descriptor.raw, path: path)
         let data = try isDirectory ? nil : NativeFilesystem.read(

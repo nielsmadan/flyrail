@@ -1,28 +1,32 @@
 import Foundation
 
-public func install<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T],
+public func install<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T], store: any StateStore,
                                     lockTimeout: Duration = .zero) -> [TargetResult<T>]
 {
-    skillOperation(bundle: bundle, bundleID: bundle.identity.id, targets: targets, operation: .install,
+    skillOperation(bundle: bundle, bundleID: bundle.identity.id, targets: targets, store: store, operation: .install,
                    options: SkillOptions(lockTimeout: lockTimeout))
 }
 
-public func update<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T],
+public func update<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T], store: any StateStore,
                                    options: SkillOptions = SkillOptions()) -> [TargetResult<T>]
 {
-    skillOperation(bundle: bundle, bundleID: bundle.identity.id, targets: targets, operation: .update, options: options)
+    skillOperation(bundle: bundle, bundleID: bundle.identity.id, targets: targets, store: store, operation: .update,
+                   options: options)
 }
 
-public func uninstall<T: SkillTarget>(bundleID: String, targets: [T],
+public func uninstall<T: SkillTarget>(bundleID: String, targets: [T], store: any StateStore,
                                       options: SkillOptions = SkillOptions()) -> [TargetResult<T>]
 {
-    skillOperation(bundle: nil, bundleID: bundleID, targets: targets, operation: .uninstall, options: options)
+    skillOperation(bundle: nil, bundleID: bundleID, targets: targets, store: store, operation: .uninstall,
+                   options: options)
 }
 
 private enum SkillOperation { case install, update, uninstall }
 
+// swiftlint:disable:next function_parameter_count
 private func skillOperation<T: SkillTarget>(bundle: FlyrailBundle?, bundleID: String, targets: [T],
-                                            operation: SkillOperation, options: SkillOptions) -> [TargetResult<T>]
+                                            store: any StateStore, operation: SkillOperation,
+                                            options: SkillOptions) -> [TargetResult<T>]
 {
     var results: [TargetResult<T>] = []
     var known: [ResourcePath: Int] = [:]
@@ -33,17 +37,20 @@ private func skillOperation<T: SkillTarget>(bundle: FlyrailBundle?, bundleID: St
             if let bundle {
                 try SkillInspection.validate(bundle)
             }
-            let prepared = try SkillInspection.target(target, bundleID: bundleID)
+            let prepared = try SkillInspection.target(target, bundleID: bundleID, store: store)
             root = prepared.0
             if let alias = known[root] {
                 let previous = results[alias]
-                results.append(TargetResult(target: target, root: root, stateRoot: previous.stateRoot, aliasOf: alias,
-                                            status: previous.status, observation: previous.observation,
-                                            error: previous.error, recoveryPaths: previous.recoveryPaths))
+                results.append(TargetResult(target: target, root: root, aliasOf: alias, status: previous.status,
+                                            observation: previous.observation, error: previous.error,
+                                            recoveryPaths: previous.recoveryPaths))
                 continue
             }
             known[root] = results.count
             let rendered = try bundle.map { try SkillInspection.render($0, root: root) }
+            if let bundle, let rendered {
+                try SkillInspection.validateReferences(bundle, rendered: rendered, target: prepared.1)
+            }
             let observed = try inspectInstallation(bundleID: bundleID, target: prepared.1)
             prior = try SkillInspection.observation(observed, bundle: bundle, rendered: rendered)
             if operation == .install, let bundle, observed.version != nil,
@@ -60,13 +67,12 @@ private func skillOperation<T: SkillTarget>(bundle: FlyrailBundle?, bundleID: St
                        replaceModified: options.replaceModified, lockTimeout: options.lockTimeout)
             }
             let observation = try SkillInspection.observation(result.observation, bundle: bundle, rendered: rendered)
-            try results.append(TargetResult(target: target, root: root, stateRoot: statePath(for: root),
-                                            status: result.status, observation: observation, error: result.error,
-                                            recoveryPaths: result.resources.flatMap(\.recoveryPaths)))
+            results.append(TargetResult(target: target, root: root, status: result.status, observation: observation,
+                                        error: result.error, recoveryPaths: result.resources.flatMap(\.recoveryPaths)))
         } catch {
             let error = NativeTransactionExecution.detail(error)
-            results.append(TargetResult(target: target, root: root, stateRoot: (try? statePath(for: root)) ?? root,
-                                        status: .failed, observation: prior ?? .unknown(error), error: error))
+            results.append(TargetResult(target: target, root: root, status: .failed,
+                                        observation: prior ?? .unknown(error), error: error))
         }
     }
     return results

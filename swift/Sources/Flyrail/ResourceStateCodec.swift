@@ -62,18 +62,17 @@ extension ResourceRef: StateCodable {
     package func stateRecord() throws -> JSONValue {
         try StateCodec.record("ResourceRef", [
             ("destination", StateCodec.path(destination)), ("kind", kind.stateRecord()),
-            ("state_root", StateCodec.path(stateRoot)), ("schema_version", .number(String(schemaVersion))),
+            ("schema_version", .number(String(schemaVersion))),
         ])
     }
 
     package static func fromState(_ value: JSONValue) throws -> Self {
         let fields = try StateFields(
-            value, tag: "ResourceRef", names: ["destination", "kind", "state_root", "schema_version"],
+            value, tag: "ResourceRef", names: ["destination", "kind", "schema_version"],
         )
         return try Self(
             destination: fields.path("destination", message: "expected an absolute concrete path"),
             kind: fields.decode("kind"),
-            stateRoot: fields.path("state_root", message: "resource state path disagrees with destination"),
             schemaVersion: fields.schema("authority schema must be 2"),
         )
     }
@@ -236,6 +235,27 @@ extension Journal: StateCodable {
             before: fields.decode("before"), staged: fields.decode("staged"), published: fields.decode("published"),
             backup: fields.decode("backup"), ancestors: fields.sequence("ancestors"),
             schemaVersion: fields.schema("journal schema must be 2"),
+        )
+    }
+}
+
+extension Preparation: StateCodable {
+    package func stateRecord() throws -> JSONValue {
+        try StateCodec.record("Preparation", [
+            ("resource", resource.stateRecord()), ("transaction_id", .string(transactionID)),
+            ("directory", StateCodec.path(directory)), ("schema_version", .number(String(schemaVersion))),
+        ])
+    }
+
+    package static func fromState(_ value: JSONValue) throws -> Self {
+        let fields = try StateFields(
+            value, tag: "Preparation", names: ["resource", "transaction_id", "directory", "schema_version"],
+        )
+        return try Self(
+            resource: fields.decode("resource"),
+            transactionID: fields.text("transaction_id", message: "invalid hexadecimal identity"),
+            directory: fields.path("directory", message: "expected an absolute concrete path"),
+            schemaVersion: fields.schema("preparation schema must be 2"),
         )
     }
 }

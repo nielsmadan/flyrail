@@ -118,7 +118,7 @@ private func stateNestedPairsMatchPython(python: URL, driver: URL, root: URL) th
 }
 
 private func stateRustSupports(_ record: JSONValue) -> Bool {
-    ["Index", "Journal", "Receipt", "ResourceRef"].contains(stateRecordTag(record) ?? "")
+    ["Index", "Journal", "Preparation", "Receipt", "ResourceRef"].contains(stateRecordTag(record) ?? "")
 }
 
 private func statePairEnclosingRecords(_ records: [JSONValue]) throws -> [JSONValue] {
@@ -173,7 +173,7 @@ private func statePairEnclosingRecords(_ records: [JSONValue]) throws -> [JSONVa
 private func stateRustMalformedVector(
     _ vector: StateCompatibilityVector, enclosing records: [JSONValue],
 ) throws -> StateCompatibilityVector {
-    if ["Index", "Journal", "Receipt", "ResourceRef"].contains(vector.tag) {
+    if ["Index", "Journal", "Preparation", "Receipt", "ResourceRef"].contains(vector.tag) {
         return vector
     }
     let enclosing = try #require(records.first {
@@ -235,22 +235,28 @@ func stateInteropCodecCommandsValidateAndReportRecords() throws {
     #expect(records.count == 1)
     #expect(try stateField(records[0], "type") == .string("Claim"))
     #expect(try stateField(records[0], "canonical") == .string(encoded.base64EncodedString()))
-    let native = try run(["records", "--index", directory.appending(path: "absent-index").path], Data())
+    let native = try run(["records", "--state", directory.appending(path: "absent-state").path], Data())
     #expect(native.0 == 0)
     #expect(try stateField(JSONParser.parse(native.1), "records") == .array([]))
     for arguments in [
         ["encode", "--type", "Receipt"], ["encode", "--type", "Claim", "--type", "Claim"],
-        ["encode", "--bad"], ["unknown"], ["write"], ["records", "--index", "/fixture", "--unexpected", "value"],
+        ["encode", "--bad"], ["unknown"],
     ] {
         let failure = try run(arguments, encoded)
         #expect(failure.0 == 1)
         #expect(!failure.2.isEmpty)
     }
+    for arguments in [["write"], ["records", "--state", "/fixture", "--unexpected", "value"]] {
+        let failure = try run(arguments, encoded)
+        #expect(failure.0 == 1)
+        #expect(failure.2 == Data())
+        #expect(try stateField(stateField(JSONParser.parse(failure.1), "error"), "code") == .null)
+    }
 }
 
 private func statePairRecords() throws -> [JSONValue] {
     let fixture = try stateRelocatedFixture(stateFixture())
-    let fixtures = try ["receipts", "journals"].flatMap { key in
+    let fixtures = try ["receipts", "journals", "preparations"].flatMap { key in
         try stateArray(stateField(fixture, key)).map { try stateField($0, "record") }
     }
     let resource = try stateTestResource("pair.json")
@@ -285,15 +291,6 @@ private func statePairMalformedRecords(_ records: [JSONValue]) throws -> [StateC
             tag: tag, input: StateCodec.encodeRecord(StateCodec.record(tag, items + [("unexpected", .null)])),
             message: "state record fields do not match schema",
         ))
-        if tag == "ResourceRef" {
-            let replacement = StateCodec.record(tag, items.map { key, value in
-                (key, key == "state_root" ? .object([("path", .string("/wrong/state"))]) : value)
-            })
-            try result.append(StateCompatibilityVector(
-                tag: tag, input: StateCodec.encodeRecord(replacement),
-                message: "resource state path disagrees with destination",
-            ))
-        }
         return result
     }
 }

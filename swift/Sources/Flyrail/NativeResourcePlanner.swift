@@ -120,16 +120,16 @@ package enum NativeResourcePlanner {
 
     // swiftlint:disable:next function_parameter_count
     package static func plan(
-        _ resource: ResourceRef, observation: NativeResourceObservation, bundleID: String,
+        _ resource: ResourceRef, state: ResourceState, store: any StateStore, bundleID: String,
         bundle: FlyrailBundle?, rendered: RenderedBundle, artifacts: [RenderedArtifact],
         acquisition: Acquisition, replaceModified: Bool,
         requirements: [String: [ClaimRequirement]] = [:], stableRequirements: [String: [ClaimRequirement]] = [:],
         transactionID: String = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased(),
     ) throws -> ResourcePlan {
-        let before = observation.revision
-        let previous = observation.receipt
+        let before = state.revision
+        let previous = state.receipt
         guard previous == nil || previous?.resource == resource else {
-            throw nativeFailure(.invalidState, "receipt resource disagrees", resource.stateRoot)
+            throw nativeFailure(.invalidState, "receipt resource disagrees", resource.destination)
         }
         let claims = previous?.claims ?? []
         let own = Dictionary(uniqueKeysWithValues: claims.filter { $0.bundleID == bundleID }.map { ($0.claim, $0) })
@@ -215,11 +215,15 @@ package enum NativeResourcePlanner {
             claims: result.sorted { utf8Less($0.claimID, $1.claimID) },
             provenance: provenance, createdDirectories: created,
         ) : (previous ?? Receipt(resource: resource, transactionID: transactionID))
+        let planned = try transactionReceipt(receipt, previous: previous, unchanged: before == after)
+        let directory = try NativeTransactionDirectory.choose(
+            store: store, destination: resource.destination, transactionID: planned.transactionID,
+        )
         return try ResourcePlan(
             resource: resource, before: before, after: error == nil ? after : before,
-            previous: previous, receipt: transactionReceipt(receipt, previous: previous, unchanged: before == after),
-            ancestors: observation.ancestors,
-            stateRevision: observation.state.revision, recoveryPaths: observation.recovery,
+            previous: previous, receipt: planned,
+            ancestors: ResourceTransaction.planAncestors(destination: resource.destination, directory: directory),
+            transactionDirectory: directory, recoveryPaths: state.recoveryPaths,
             requireExisting: required, error: error,
         )
     }

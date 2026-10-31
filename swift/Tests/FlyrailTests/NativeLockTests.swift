@@ -3,56 +3,77 @@ import Darwin
 import Foundation
 import Testing
 
-@Test
-func nativeEmptyReadableLocksInteroperateWithoutExposingPayloads() throws {
-    let root = try NativeTestRoot()
-    defer { try? root.cleanup() }
-    let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
-    _ = try NativeAdmission.createPrivateDirectories(ref.stateRoot)
-    let path = try appendPath(ref.stateRoot, "lock")
-    let raw = open(path.displayString, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0o644)
-    #expect(raw >= 0)
-    if raw >= 0 {
-        close(raw)
-    }
-    let lock = try NativeAdmission.reserve(ref, timeout: .zero)
-    try NativeAdmission.admit(ref, lock: lock)
-    #expect(try (NativeFilesystem.metadata(path)?.st_mode ?? 0) & 0o777 == 0o644)
-    #expect(try NativeAdmission.observe(ref, lock: lock).state.revision.nodes.first?.mode == 0o700)
-    let receipt = try appendPath(ref.stateRoot, "receipt.json")
-    try StateCodec.encode(Receipt(resource: ref, transactionID: String(repeating: "1", count: 32)))
-        .write(to: URL(fileURLWithPath: receipt.displayString))
-    #expect(chmod(receipt.displayString, 0o644) == 0)
-    expectNativeError(.unsupported) { _ = try NativeAdmission.observe(ref, lock: lock) }
-}
-
-@Test
-func nativeCoordinationLocksRejectForeignWritesAndAnyPayload() throws {
-    for payload in [Data(), Data("private".utf8)] {
-        let root = try NativeTestRoot()
-        defer { try? root.cleanup() }
-        let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
-        _ = try NativeAdmission.createPrivateDirectories(ref.stateRoot)
-        let path = try appendPath(ref.stateRoot, "lock")
-        try payload.write(to: URL(fileURLWithPath: path.displayString))
-        #expect(chmod(path.displayString, payload.isEmpty ? 0o666 : 0o600) == 0)
-        expectNativeError(.unsupported) { _ = try NativeAdmission.reserve(ref, timeout: .zero) }
+private func storeFailure(_ body: () throws -> Void) -> StoreError? {
+    do {
+        try body()
+        return nil
+    } catch let error as StoreError {
+        return error
+    } catch {
+        return nil
     }
 }
 
+private func mode(_ path: String) -> mode_t? {
+    var metadata = stat()
+    return lstat(path, &metadata) == 0 ? metadata.st_mode & 0o777 : nil
+}
+
 @Test
-func nativeStateRootReplacementInvalidatesHeldLock() throws {
+func aHeldStoreLockMakesAnotherHandleBusyAfterTheBoundedWait() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
-    let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
-    let lock = try NativeAdmission.reserve(ref, timeout: .zero)
-    #expect(rename(ref.stateRoot.displayString, root.url.appending(path: "replaced-state").path) == 0)
-    try FileManager.default.createDirectory(
-        atPath: ref.stateRoot.displayString, withIntermediateDirectories: false,
-        attributes: [.posixPermissions: 0o700],
-    )
-    expectNativeError(.concurrentChange) { try lock.validate() }
-    #expect(try NativeFilesystem.metadata(appendPath(ref.stateRoot, "authority.json")) == nil)
+    let competing = try DirectoryStore(ResourcePath(root.stateURL.path))
+    let name = try StateKey.resourceLock(root.child("document"))
+    let held = try root.store.lock(name, timeout: .zero)
+    defer { held.release() }
+    let wait = Duration.milliseconds(100)
+    let started = ContinuousClock.now
+    #expect(storeFailure { _ = try competing.lock(name, timeout: wait) } == .busy(name: name))
+    #expect(started.duration(to: .now) >= wait)
+    let other = try competing.lock(StateKey.resourceLock(root.child("other")), timeout: .zero)
+    other.release()
+    held.release()
+    let freed = try competing.lock(name, timeout: .zero)
+    freed.release()
+}
+
+@Test
+func lockFilesArePrivateAndAGroupReadableLocksDirectoryIsRefused() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let name = try StateKey.resourceLock(root.child("document"))
+    let held = try root.store.lock(name, timeout: .zero)
+    defer { held.release() }
+    let locks = root.stateURL.appending(path: "locks")
+    let file = locks.appending(path: "resource~" + name.dropFirst("resource/".count))
+    #expect(mode(file.path) == 0o600)
+    #expect(chmod(locks.path, 0o750) == 0)
+    let refusal = storeFailure { _ = try root.store.lock("other", timeout: .zero) }
+    #expect(try refusal == .io(
+        message: "[Errno 13] state store must be private to its owner: \(pythonStringRepr(locks.path))",
+        path: ResourcePath(locks.path), errno: EACCES,
+    ))
+}
+
+@Test
+func syncReportsBusyWhenAnotherHandleHoldsTheResourceLock() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let path = try root.child("document")
+    let ref = try NativeAuthority.reference(path, kind: .document)
+    let name = try StateKey.resourceLock(ref.destination)
+    let competing = try DirectoryStore(ResourcePath(root.stateURL.path))
+    let held = try competing.lock(name, timeout: .zero)
+    defer { held.release() }
+    let wait = Duration.milliseconds(50)
+    let started = ContinuousClock.now
+    let result = try sync(bundle: transactionBundle(), rendered: transactionRendered(path), target: root.target(),
+                          lockTimeout: wait)
+    #expect(started.duration(to: .now) >= wait)
+    #expect(result.error == TargetError(code: .busy, message: "state store lock is busy: \(name)",
+                                        path: root.store.location))
+    #expect(try NativeFilesystem.metadata(path) == nil)
 }
 
 @Test

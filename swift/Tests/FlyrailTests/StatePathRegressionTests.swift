@@ -10,15 +10,14 @@ func statePathSeparatorsAreExactScalarsInFullRecords() throws {
     }
     for (mark, digest) in stateExtendingBasenames {
         let destination = try ResourcePath("/fixture/\(mark)name")
-        #expect(try statePath(for: destination).displayString == "/fixture/.flyrail-\(digest).state")
+        #expect(try transactionPath(destination: destination, transactionID: stateTransactionID).displayString
+            == "/fixture/.flyrail-\(digest)-\(stateTransactionID).txn")
         let doubled = try ResourcePath("//\(mark)parent/\(mark)name")
         #expect(try statePathText(doubled) == "//\(mark)parent/\(mark)name")
-        #expect(try statePath(for: doubled).displayString == "//\(mark)parent/.flyrail-\(digest).state")
+        #expect(try transactionPath(destination: doubled, transactionID: stateTransactionID).displayString
+            == "//\(mark)parent/.flyrail-\(digest)-\(stateTransactionID).txn")
         #expect(throws: FlyrailValueError("state paths must be absolute without traversal")) {
-            try ResourceRef(
-                destination: ResourcePath("/fixture/../\(mark)name"), kind: .document,
-                stateRoot: ResourcePath("/fixture/.flyrail-\(digest).state"),
-            )
+            try ResourceRef(destination: ResourcePath("/fixture/../\(mark)name"), kind: .document)
         }
         #expect(throws: FlyrailValueError("revision path must be an unambiguous relative path")) {
             try stateTestNode("/\(mark)name", Data())
@@ -29,17 +28,17 @@ func statePathSeparatorsAreExactScalarsInFullRecords() throws {
     }
 }
 
+private let stateTransactionID = "0123456789abcdef0123456789abcdef"
+
 private let stateExtendingBasenames = [
     ("\u{301}", "0cb4ad3a41b3fb2f5140117eee37487bd147a4f743c2270b63a0aadc2ff415f4"),
     ("\u{200D}", "5f508d364e660601c73b871734a1c0a36c3c451e5d9f47895f0da6abe843ac6a"),
 ]
 
 func stateExtendingPathRecords() throws -> [JSONValue] {
-    try stateExtendingBasenames.flatMap { mark, digest in
+    try stateExtendingBasenames.flatMap { mark, _ in
         let resources = try ["/fixture", "/\(mark)parent", "//\(mark)parent"].map { parent in
-            try ResourceRef.fromState(stateExtendingResource(
-                "\(parent)/\(mark)name", "\(parent)/.flyrail-\(digest).state",
-            ))
+            try ResourceRef.fromState(stateExtendingResource("\(parent)/\(mark)name"))
         }
         let revision = try Revision(nodes: [
             stateTestNode("", nil), stateTestNode("a", nil), stateTestNode("a/\(mark)name", Data()),
@@ -65,7 +64,7 @@ func stateExtendingPathRecords() throws -> [JSONValue] {
 }
 
 func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
-    try stateExtendingBasenames.flatMap { mark, digest in
+    try stateExtendingBasenames.flatMap { mark, _ in
         var vectors: [StateCompatibilityVector] = []
         func append(_ tag: String, _ record: JSONValue, _ message: String) throws {
             try vectors.append(StateCompatibilityVector(
@@ -79,10 +78,7 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
             ("///\(mark)parent/name", "state record is not canonical"),
             ("\(mark)name", "state paths must be absolute without traversal"),
         ] {
-            let stateRoot = destination.utf8.starts(with: [47, 47, 47])
-                ? "/\(mark)parent/.flyrail-82a3537ff0dbce7eec35d69edc3a189ee6f17d82f353a553f9aa96cb0be3ce89.state"
-                : "/fixture/.flyrail-\(digest).state"
-            try append("ResourceRef", stateExtendingResource(destination, stateRoot), message)
+            try append("ResourceRef", stateExtendingResource(destination), message)
             let ancestor = try Ancestor(
                 path: ResourcePath("/fixture/a"), device: 0, inode: 0, mode: 0, uid: 0, gid: 0,
             ).stateRecord()
@@ -90,9 +86,6 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
                 ancestor, "path", .object([("path", .string(destination))]),
             ), message)
         }
-        try append("ResourceRef", stateExtendingResource(
-            "/fixture/\(mark)name", "/other/.flyrail-\(digest).state",
-        ), "resource state path disagrees with destination")
         for path in [
             "/\(mark)name", "a/../\(mark)name", "a/./\(mark)name", "a//\(mark)name", "a/\(mark)name/",
         ] {
@@ -109,9 +102,7 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
             try append("Revision", StateCodec.record("Revision", [("nodes", .array(nodes))]),
                        "revision parents must be directories")
         }
-        let resource = try ResourceRef.fromState(stateExtendingResource(
-            "/fixture/\(mark)name", "/fixture/.flyrail-\(digest).state",
-        ))
+        let resource = try ResourceRef.fromState(stateExtendingResource("/fixture/\(mark)name"))
         let receipt = try Receipt(
             resource: resource, transactionID: String(repeating: "1", count: 32), claims: [stateTestOwned(resource)],
         ).stateRecord()
@@ -125,11 +116,11 @@ func stateExtendingPathFailures() throws -> [StateCompatibilityVector] {
     }
 }
 
-private func stateExtendingResource(_ destination: String, _ stateRoot: String) -> JSONValue {
+private func stateExtendingResource(_ destination: String) -> JSONValue {
     StateCodec.record("ResourceRef", [
         ("destination", .object([("path", .string(destination))])),
         ("kind", StateCodec.enumeration("ResourceKind", "document")),
-        ("state_root", .object([("path", .string(stateRoot))])), ("schema_version", .number("2")),
+        ("schema_version", .number("2")),
     ])
 }
 
@@ -143,4 +134,39 @@ private func stateReplacingField(_ record: JSONValue, _ field: String, _ value: 
         throw FlyrailValueError("invalid state record")
     }
     return StateCodec.record(tag, fields.map { ($0.0, $0.0 == field ? value : $0.1) })
+}
+
+@Test
+func preparationValidatesItsFields() throws {
+    let resource = try stateTestResource("a.md")
+    let id = String(repeating: "1", count: 32)
+    #expect(throws: FlyrailValueError("filesystem roots are not resources")) {
+        try Preparation(resource: resource, transactionID: id, directory: ResourcePath("/"))
+    }
+    for directory in ["relative/x", "/a/../b"] {
+        #expect(throws: FlyrailValueError("expected an absolute concrete path")) {
+            try Preparation(resource: resource, transactionID: id, directory: ResourcePath(directory))
+        }
+    }
+    #expect(throws: FlyrailValueError("invalid hexadecimal identity")) {
+        try Preparation(resource: resource, transactionID: "1111", directory: ResourcePath("/a/b"))
+    }
+    #expect(throws: FlyrailValueError("preparation schema must be 2")) {
+        try Preparation(resource: resource, transactionID: id, directory: ResourcePath("/a/b"), schemaVersion: 3)
+    }
+    let preparation = try Preparation(resource: resource, transactionID: id, directory: ResourcePath("/a/b"))
+    #expect(try StateCodec.decode(StateCodec.encode(preparation), as: Preparation.self) == preparation)
+}
+
+@Test
+func transactionPathsAreBesideTheDestination() throws {
+    let destination = try ResourcePath("/fixture/project/AGENTS.md")
+    for invalid in ["1111", String(repeating: "A", count: 32), String(repeating: "g", count: 32)] {
+        #expect(throws: FlyrailValueError("transaction id must be 32 lowercase hexadecimal characters")) {
+            try transactionPath(destination: destination, transactionID: invalid)
+        }
+    }
+    let path = try transactionPath(destination: destination, transactionID: stateTransactionID)
+    #expect(path.displayString.hasPrefix("/fixture/project/.flyrail-"))
+    #expect(path.displayString.hasSuffix("-\(stateTransactionID).txn"))
 }

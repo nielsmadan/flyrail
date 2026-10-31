@@ -20,140 +20,123 @@ package enum NativeTransactionExecution {
         if let error = error as? TargetError {
             return error
         }
+        if let error = error as? StoreError {
+            return error.targetError
+        }
         if let error = error as? FlyrailValueError {
             return TargetError(code: .invalidState, message: error.message)
         }
         return TargetError(code: .ioError, message: String(describing: error))
     }
 
-    private static func preflight(_ plan: ResourcePlan, lock: NativeDirectoryLock) throws {
-        if let error = plan.error {
-            throw error
+    package static func recoveryPaths(
+        _ store: any StateStore, _ resource: ResourceRef, directory: ResourcePath?,
+    ) -> [ResourcePath] {
+        if let paths = try? ResourceTransaction.pendingRecovery(resource, store: store) {
+            return paths
         }
-        guard plan.recoveryPaths.isEmpty else {
-            throw nativeFailure(
-                .recoveryNeeded,
-                "preview requires recovery and re-observation",
-                plan.resource.stateRoot,
-            )
-        }
-        try lock.validate()
-        let current = try NativeAdmission.observe(plan.resource, lock: lock)
-        guard current.revision == plan.before, current.receipt == plan.previous,
-              current.state.revision == plan.stateRevision, current.recovery == plan.recoveryPaths,
-              try NativeObservation.ancestors(
-                  appendPath(plan.resource.stateRoot, "transaction.json"),
-              ) == plan.ancestors
-        else {
-            throw nativeFailure(.concurrentChange, "complete resource preconditions changed", plan.resource.destination)
-        }
-    }
-
-    package static func publishIndex(
-        _ value: Index, locks: NativeTransactionLocks, expected: NativeResourceSnapshot,
-        phase: String, seam: NativeTransactionSeam, beforePublication: () throws -> Void = {},
-    ) throws -> NativeResourceSnapshot {
-        try locks.validate()
-        try NativeObservation.require(locks.target.indexRoot, expected)
-        let path = try appendPath(locks.target.indexRoot, "index.json")
-        try NativeTransactionIO.atomic(
-            path, value: value, phase: phase, seam: seam,
-            beforePublication: {
-                try locks.validate()
-                try beforePublication()
-            },
+        guard let directory else { return [] }
+        let preparation = try? StateRecords.read(
+            store, key: StateKey.resource(resource.destination, .preparation), as: Preparation.self,
+            tag: "Preparation",
         )
-        return try NativeObservation.snapshot(locks.target.indexRoot, privateStorage: true)
+        return preparation?.directory == directory ? [directory] : []
     }
 
     package static func execute(
-        _ locks: NativeTransactionLocks, plans: [ResourcePlan], pending: Index, completed: Index,
-        indexSnapshot: NativeResourceSnapshot, seam: NativeTransactionSeam = .none,
+        _ locks: NativeTransactionLocks, plans: [ResourcePlan], previous: Index?, pending: Index, completed: Index,
+        seam: NativeTransactionSeam = .none,
     ) throws -> NativeTransactionOutcome {
-        guard try NativeIndexRecovery.completion(pending) == completed,
-              plans.count == locks.resources.count, Set(plans.map(\.resource)) == Set(locks.resources),
-              pending.bundleID == locks.bundleID, try pending.contextDigest == locks.target.contextDigest,
-              Set(pending.residual) == Set(locks.resources),
-              Set(pending.resources) == Set(locks.resources)
+        let store = locks.target.store
+        let key = try InstallationIndex.key(bundleID: locks.bundleID, target: locks.target)
+        guard try Index(bundleID: pending.bundleID, contextDigest: pending.contextDigest, current: pending.pending) ==
+            completed,
+            plans.count == locks.resources.count, Set(plans.map(\.resource)) == Set(locks.resources),
+            pending.bundleID == locks.bundleID, try pending.contextDigest == locks.target.contextDigest,
+            Set(pending.residual) == Set(locks.resources),
+            Set(pending.resources) == Set(locks.resources)
         else {
-            throw nativeFailure(.invalidState, "installation index completion disagrees with preparation",
-                                locks.target.indexRoot)
+            throw StateRecords.failure(store, .invalidState, "installation index completion disagrees with preparation")
         }
-        try locks.validate()
-        try NativeObservation.require(locks.target.indexRoot, indexSnapshot)
-        let current = try NativeAdmission.observeIndex(locks.target, bundleID: locks.bundleID)
-        guard current.prepared == nil, current.current?.current == pending.current,
-              pending.previous == pending.current
-        else { throw nativeFailure(.invalidState, "installation index preparation disagrees", locks.target.indexRoot) }
-        try validateMembership(plans, pending: pending, indexRoot: locks.target.indexRoot)
+        guard previous?.current == pending.current, pending.previous == pending.current else {
+            throw StateRecords.failure(store, .invalidState, "installation index preparation disagrees")
+        }
+        try validateMembership(plans, pending: pending, store: store)
         _ = try StateCodec.encode(pending)
         _ = try StateCodec.encode(completed)
         for plan in plans {
-            try preflight(plan, lock: locks.guardFor(plan.resource))
             try NativeTransactionBudget.validate(plan)
         }
-        let pendingSnapshot = try publishIndex(
-            pending, locks: locks, expected: indexSnapshot, phase: "index-pending", seam: seam,
-        )
+        try StateRecords.write(store, key: key, value: pending, expected: previous)
         var results: [ResourceResult] = []
         for plan in plans {
-            let lock = try locks.guardFor(plan.resource)
+            if plan.previous == plan.receipt, plan.before == plan.after {
+                try results.append(ResourceResult(resource: plan.resource, status: .unchanged))
+                continue
+            }
             var journal: Journal?
+            var guarded = false
             var committed = false
             do {
                 try seam("resource-precondition")
                 try seam("index-require")
-                try NativeObservation.require(locks.target.indexRoot, pendingSnapshot)
-                try seam("index-ancestor")
-                try locks.index.validate()
+                try StateRecords.requireIndex(store, key: key, expected: pending)
                 try seam("guard-lookup")
-                try preflight(plan, lock: lock)
-                if plan.previous == plan.receipt, plan.before == plan.after {
-                    try results.append(ResourceResult(resource: plan.resource, status: .unchanged))
-                    continue
+                guard locks.resources.contains(plan.resource) else {
+                    throw nativeFailure(.concurrentChange, "resource lock disagrees", plan.resource.destination)
                 }
-                journal = try NativeTransaction.prepare(plan, lock: lock, seam: seam)
-                try NativeObservation.require(locks.target.indexRoot, pendingSnapshot)
-                if let journal {
-                    try NativeTransaction.publish(journal, lock: lock, seam: seam) { committed = true }
-                    try NativeTransaction.cleanup(journal, lock: lock, seam: seam)
-                }
-                try results.append(ResourceResult(resource: plan.resource, status: .applied))
+                guarded = true
+                let prepared = try ResourceTransaction.prepare(plan, store: store, seam: seam)
+                journal = prepared
+                try StateRecords.requireIndex(store, key: key, expected: pending)
+                try ResourceTransaction.publish(prepared, store: store, seam: seam) { committed = true }
+                try ResourceTransaction.cleanup(prepared, store: store, seam: seam)
+            } catch let crash as NativeSimulatedCrash {
+                throw crash
             } catch {
-                var failure = detail(error)
                 if !committed, let journal {
-                    committed = (try? NativeObservation.read(
-                        appendPath(plan.resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt",
+                    committed = (try? StateRecords.read(
+                        store, key: StateKey.resource(plan.resource.destination, .receipt), as: Receipt.self,
+                        tag: "Receipt",
                     )) == journal.receipt
                 }
-                do {
-                    try NativeTransaction.recover(plan.resource, lock: lock, seam: seam)
-                } catch {
-                    failure = TargetError(
-                        code: failure.code, message: failure.message + "; recovery: " + detail(error).message,
-                        path: failure.path, errno: failure.errno,
-                    )
-                }
-                let paths = (try? NativeAdmission.validateState(plan.resource).1) ?? [plan.resource.stateRoot]
+                let failure = try guarded ? recovered(detail(error), plan.resource, store: store, seam: seam) :
+                    detail(error)
+                let paths = recoveryPaths(store, plan.resource, directory: plan.transactionDirectory)
                 try results.append(ResourceResult(
                     resource: plan.resource, status: committed ? .applied : (paths.isEmpty ? .failed : .incomplete),
                     error: failure, recoveryPaths: paths,
                 ))
                 return NativeTransactionOutcome(resources: results, error: failure)
             }
+            try results.append(ResourceResult(resource: plan.resource, status: .applied))
         }
         do {
             try seam("index-completion")
-            _ = try publishIndex(
-                completed, locks: locks, expected: pendingSnapshot, phase: "index-completion", seam: seam,
-            ) {
-                try requireCompleted(plans)
-            }
+            try StateRecords.write(store, key: key, value: completed, expected: pending)
+        } catch let crash as NativeSimulatedCrash {
+            throw crash
         } catch { return NativeTransactionOutcome(resources: results, error: detail(error)) }
         return NativeTransactionOutcome(resources: results, error: nil)
     }
 
-    private static func validateMembership(_ plans: [ResourcePlan], pending: Index, indexRoot: ResourcePath) throws {
+    private static func recovered(
+        _ failure: TargetError, _ resource: ResourceRef, store: any StateStore, seam: NativeTransactionSeam,
+    ) throws -> TargetError {
+        do {
+            try ResourceTransaction.recover(resource, store: store, seam: seam)
+            return failure
+        } catch let crash as NativeSimulatedCrash {
+            throw crash
+        } catch {
+            return TargetError(
+                code: failure.code, message: failure.message + "; recovery: " + detail(error).message,
+                path: failure.path, errno: failure.errno,
+            )
+        }
+    }
+
+    private static func validateMembership(_ plans: [ResourcePlan], pending: Index, store: any StateStore) throws {
         let members = Dictionary(uniqueKeysWithValues: (pending.pending?.membership ?? []).map {
             ($0.resource, Set($0.claimIDs))
         })
@@ -165,26 +148,10 @@ package enum NativeTransactionExecution {
                           $0.bundleDigest == pending.pending?.bundleDigest &&
                           $0.renderDigest == pending.pending?.renderDigest
                   })
-            else { throw nativeFailure(.invalidState, "planned receipt disagrees with membership", indexRoot) }
+            else { throw StateRecords.failure(store, .invalidState, "planned receipt disagrees with membership") }
         }
         guard Set(members.keys).isSubset(of: Set(plans.map(\.resource))) else {
-            throw nativeFailure(.invalidState, "membership has an unplanned resource", indexRoot)
-        }
-    }
-
-    private static func requireCompleted(_ plans: [ResourcePlan]) throws {
-        for plan in plans {
-            let resource = plan.resource
-            let (_, recovery) = try NativeAdmission.validateState(resource)
-            let current = try NativeObservation.read(
-                appendPath(resource.stateRoot, "receipt.json"), as: Receipt.self, tag: "Receipt",
-            )
-            guard recovery.isEmpty, let current, current.resource == resource,
-                  current.transactionID == plan.receipt.transactionID,
-                  current.claims == plan.receipt.claims, current.provenance == plan.receipt.provenance,
-                  current.createdDirectories.map(\.path) == plan.receipt.createdDirectories.map(\.path)
-            else { throw nativeFailure(.concurrentChange, "resource receipt changed before index completion",
-                                       resource.stateRoot) }
+            throw StateRecords.failure(store, .invalidState, "membership has an unplanned resource")
         }
     }
 }

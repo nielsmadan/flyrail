@@ -41,9 +41,12 @@ enum ProbeFailure: Error { case invalid }
         guard runtime.resources.count == 3 else { throw ProbeFailure.invalid }
         let context = try RenderContext(target: .project(agent: .claude, root: ResourcePath(root.path)),
                                         platform: .macOS, surface: .cli).hookRuntime(runtime)
+        let memory = MemoryStore()
+        try checkStore { memory }
         let rendered = try render(bundle, for: context)
         guard rendered.supported else { throw ProbeFailure.invalid }
-        let target = try InstallationTarget(indexRoot: ResourcePath(root.appending(path: "index").path))
+        let store = try DirectoryStore(ResourcePath(root.appending(path: "state").path))
+        let target = try InstallationTarget(store: store)
         let result = try sync(bundle: bundle, rendered: rendered, target: target)
         guard result.status == .applied, result.observation.matches(bundle, rendered) else {
             throw ProbeFailure.invalid
@@ -78,7 +81,7 @@ enum ProbeFailure: Error { case invalid }
               try !inspectInstallation(bundleID: "package-probe", target: target).isCurrent else {
             throw ProbeFailure.invalid
         }
-        print("External Git consumer: packaged resources, render/install/execute/inspect/source-free removal passed")
+        print("External Git consumer: store conformance, packaged resources, render/install/execute/inspect/source-free removal through a directory store passed")
     }
 }
 

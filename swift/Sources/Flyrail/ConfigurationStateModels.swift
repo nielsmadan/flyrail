@@ -48,35 +48,32 @@ public struct TargetError: Error, Sendable, Hashable {
 }
 
 public struct InstallationTarget: Sendable, Hashable {
-    public let indexRoot: ResourcePath
+    public let store: any StateStore
     public let context: [(String, String)]
     public let routingContext: [(String, String)]
 
-    package init(
-        recordedIndexRoot: ResourcePath, context: [(String, String)] = [], routingContext: [(String, String)] = [],
+    public init(
+        store: any StateStore, context: [(String, String)] = [], routingContext: [(String, String)] = [],
     ) throws {
-        try requireResourcePath(recordedIndexRoot)
-        indexRoot = recordedIndexRoot
+        self.store = store
         self.context = try stateContext(context)
         self.routingContext = try stateContext(routingContext)
     }
 
     public var contextDigest: String {
         get throws {
-            try StateCodec.digest(.array([
-                StateCodec.path(indexRoot),
-                .array(context.map { .array([.string($0.0), .string($0.1)]) }),
-            ]))
+            try StateCodec.digest(.array(context.map { .array([.string($0.0), .string($0.1)]) }))
         }
     }
 
     public static func == (left: Self, right: Self) -> Bool {
-        left.indexRoot == right.indexRoot && exactContextEqual(left.context, right.context) &&
+        ObjectIdentifier(left.store) == ObjectIdentifier(right.store) &&
+            exactContextEqual(left.context, right.context) &&
             exactContextEqual(left.routingContext, right.routingContext)
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(indexRoot)
+        hasher.combine(ObjectIdentifier(store))
         for pairs in [context, routingContext] {
             hasher.combine(pairs.count)
             for pair in pairs {
@@ -147,24 +144,21 @@ public struct ClaimObservation: Sendable, Hashable {
 
 public struct ResourceObservation: Sendable, Hashable {
     public let destination: ResourcePath
-    public let stateRoot: ResourcePath
     public let claims: [ClaimObservation]
     public let revisionDigest: String?
     public let error: TargetError?
     public let recoveryPaths: [ResourcePath]
 
     public init(
-        destination: ResourcePath, stateRoot: ResourcePath, claims: [ClaimObservation] = [],
-        revisionDigest: String? = nil, error: TargetError? = nil, recoveryPaths: [ResourcePath] = [],
+        destination: ResourcePath, claims: [ClaimObservation] = [], revisionDigest: String? = nil,
+        error: TargetError? = nil, recoveryPaths: [ResourcePath] = [],
     ) throws {
         try requireResourcePath(destination)
-        try requireResourcePath(stateRoot)
         if let revisionDigest {
             try hexadecimalIdentity(revisionDigest)
         }
         try recoveryPaths.forEach(requireResourcePath)
         self.destination = destination
-        self.stateRoot = stateRoot
         self.claims = claims
         self.revisionDigest = revisionDigest
         self.error = error
@@ -289,19 +283,20 @@ public struct ResourcePlan: Sendable, Hashable {
     public let previous: Receipt?
     public let receipt: Receipt
     public let ancestors: [Ancestor]
-    public let stateRevision: Revision
+    public let transactionDirectory: ResourcePath
     public let recoveryPaths: [ResourcePath]
     public let requireExisting: Bool
     public let error: TargetError?
 
     public init(
         resource: ResourceRef, before: Revision, after: Revision, previous: Receipt?, receipt: Receipt,
-        ancestors: [Ancestor], stateRevision: Revision, recoveryPaths: [ResourcePath],
+        ancestors: [Ancestor], transactionDirectory: ResourcePath, recoveryPaths: [ResourcePath],
         requireExisting: Bool = false, error: TargetError? = nil,
     ) throws {
         guard receipt.resource == resource, previous == nil || previous?.resource == resource else {
             throw FlyrailValueError("planned receipts disagree with resource")
         }
+        try requireResourcePath(transactionDirectory)
         try recoveryPaths.forEach(requireResourcePath)
         self.resource = resource
         self.before = before
@@ -309,7 +304,7 @@ public struct ResourcePlan: Sendable, Hashable {
         self.previous = previous
         self.receipt = receipt
         self.ancestors = ancestors
-        self.stateRevision = stateRevision
+        self.transactionDirectory = transactionDirectory
         self.recoveryPaths = recoveryPaths
         self.requireExisting = requireExisting
         self.error = error
@@ -324,8 +319,6 @@ public struct LifecyclePreview: Sendable, Hashable {
     public let acquisition: Acquisition
     public let replaceModified: Bool
     public let index: Index?
-    public let indexRevision: Revision?
-    public let indexAncestors: [Ancestor]
     public let generation: Generation?
     public let resources: [ResourcePlan]
     public let error: TargetError?
@@ -333,16 +326,13 @@ public struct LifecyclePreview: Sendable, Hashable {
 
     package init(
         bundleID: String, bundle: FlyrailBundle?, rendered: RenderedBundle, target: InstallationTarget,
-        acquisition: Acquisition, replaceModified: Bool, index: Index?, indexRevision: Revision?,
-        indexAncestors: [Ancestor], generation: Generation?, resources: [ResourcePlan], error: TargetError? = nil,
+        acquisition: Acquisition, replaceModified: Bool, index: Index?, generation: Generation?,
+        resources: [ResourcePlan], error: TargetError? = nil,
         artifactsByResource: [ResourceRef: [RenderedArtifact]] = [:],
     ) throws {
         try validateIdentifier(bundleID, label: "bundle id")
         guard bundle == nil || bundle?.identity.id == bundleID else {
             throw FlyrailValueError("preview bundle identity disagrees")
-        }
-        guard indexRevision != nil || error != nil else {
-            throw FlyrailValueError("unobserved preview metadata requires an error")
         }
         self.bundleID = bundleID
         self.bundle = bundle
@@ -351,8 +341,6 @@ public struct LifecyclePreview: Sendable, Hashable {
         self.acquisition = acquisition
         self.replaceModified = replaceModified
         self.index = index
-        self.indexRevision = indexRevision
-        self.indexAncestors = indexAncestors
         self.generation = generation
         self.resources = resources
         self.error = error

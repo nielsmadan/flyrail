@@ -55,71 +55,64 @@ func nativeFixtureReceiptsAreReadThroughTheirAuthority() throws {
             resource: resource, transactionID: original.transactionID, claims: claims,
             provenance: original.provenance, createdDirectories: original.createdDirectories,
         )
-        let lock = try NativeAdmission.reserve(resource, timeout: .zero)
-        try NativeAdmission.admit(resource, lock: lock)
-        let path = try appendPath(resource.stateRoot, "receipt.json")
-        try StateCodec.encode(receipt).write(to: URL(fileURLWithPath: path.displayString))
-        #expect(chmod(path.displayString, 0o600) == 0)
-        let observation = try NativeAdmission.observe(resource, lock: lock)
+        let key = try StateKey.resource(resource.destination, .receipt)
+        try StateRecords.write(root.store, key: key, value: receipt, expected: nil)
+        #expect(try ResourceAdmission.storedReceipt(resource, store: root.store) == receipt)
+        let observation = try ResourceAdmission.observe(resource, store: root.store)
         #expect(observation.receipt == receipt)
-        #expect(observation.recovery.isEmpty)
+        #expect(observation.recoveryPaths.isEmpty)
         #expect(observation.revision.nodes.isEmpty)
+        let other = try ResourceRef(
+            destination: resource.destination,
+            kind: original.resource.kind == .tree ? .document : .tree,
+        )
+        #expect(throws: TargetError(code: .invalidState, message: "receipt resource disagrees",
+                                    path: resource.destination))
+        {
+            _ = try ResourceAdmission.storedReceipt(other, store: root.store)
+        }
     }
 }
 
 @Test
-func nativeAdmissionReplaysOnlyMatchingPreparedHeaders() throws {
+func aSymlinkAtTheFallbackTransactionPathIsRefusedWithoutWritingThrough() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
-    let lock = try NativeAdmission.reserve(ref, timeout: .zero)
-    let prepared = try appendPath(ref.stateRoot, "authority.json.next")
-    try StateCodec.encode(ref).write(to: URL(fileURLWithPath: prepared.displayString))
-    #expect(chmod(prepared.displayString, 0o600) == 0)
-    #expect(try NativeAdmission.validateState(ref).1 == [prepared])
-    try NativeAdmission.admit(ref, lock: lock)
-    #expect(try NativeObservation.read(
-        appendPath(ref.stateRoot, "authority.json"),
-        as: ResourceRef.self,
-        tag: "ResourceRef",
-    ) == ref)
-    #expect(try NativeFilesystem.metadata(prepared) == nil)
-    let mismatched = try ResourceRef(destination: ref.destination, kind: .tree, stateRoot: ref.stateRoot)
-    expectNativeError(.invalidState) { try NativeAdmission.admit(mismatched, lock: lock) }
+    let store = MemoryStore()
+    let plan = try storePlan(ref, store: store, after: Revision(nodes: [
+        NativeResourcePlanner.node("", data: Data("after".utf8), mode: 0o644),
+    ]), previous: nil)
+    let elsewhere = try root.child("elsewhere")
+    #expect(mkdir(elsewhere.displayString, 0o700) == 0)
+    #expect(symlink(elsewhere.displayString, plan.transactionDirectory.displayString) == 0)
+    do {
+        _ = try ResourceTransaction.prepare(plan, store: store)
+        Issue.record("prepare accepted a symlinked transaction directory")
+    } catch let error as TargetError {
+        #expect(error.code == .unsafePath)
+        #expect(error.message == "resource ancestor is not an ordinary directory")
+    }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: elsewhere.displayString) == [])
 }
 
 @Test
-func nativeStateLinksAndCaseAliasedStorageNeverReceivePayloads() throws {
-    for entry in ["state", "lock", "authority.json", "receipt.json", "staging", "backup"] {
-        let root = try NativeTestRoot()
-        defer { try? root.cleanup() }
-        let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
-        if entry == "state" {
-            #expect(symlink(root.path.displayString, ref.stateRoot.displayString) == 0)
-            expectNativeError(.unsafePath) { _ = try NativeAdmission.reserve(ref, timeout: .zero) }
-            continue
-        }
-        let lock = try NativeAdmission.reserve(ref, timeout: .zero)
-        let path = try appendPath(ref.stateRoot, entry)
-        if entry == "lock" {
-            #expect(unlink(path.displayString) == 0)
-        }
-        #expect(symlink(root.path.displayString, path.displayString) == 0)
-        expectNativeError(entry == "lock" ? .concurrentChange : .unsafePath) {
-            try NativeAdmission.admit(ref, lock: lock)
-        }
-    }
+func aSymlinkedStoreStagingDirectoryIsRefusedWithoutWritingThrough() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
-    let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
-    try FileManager.default.createDirectory(
-        atPath: ref.stateRoot.displayString.uppercased().replacingOccurrences(
-            of: root.path.displayString.uppercased(),
-            with: root.path.displayString,
-        ),
-        withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700],
-    )
-    expectNativeError(.unsafePath) { _ = try NativeAdmission.reserve(ref, timeout: .zero) }
+    let target = try root.target()
+    let elsewhere = try root.child("elsewhere")
+    #expect(mkdir(elsewhere.displayString, 0o700) == 0)
+    try FileManager.default.createDirectory(at: root.stateURL, withIntermediateDirectories: true,
+                                            attributes: [.posixPermissions: 0o700])
+    #expect(symlink(elsewhere.displayString, root.stateURL.appending(path: "staging").path) == 0)
+    let path = try root.child("document")
+    let result = try sync(bundle: transactionBundle(), rendered: transactionRendered(path), target: target)
+    #expect(result.status == .failed)
+    #expect(result.error?.code == .ioError)
+    #expect(result.error?.message.hasPrefix("[Errno 13] state store must be private to its owner") == true)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: elsewhere.displayString) == [])
+    #expect(try NativeFilesystem.metadata(path) == nil)
 }
 
 @Test
@@ -128,12 +121,15 @@ func nativeKindValidationCannotBypassDescendantFences() throws {
     defer { try? root.cleanup() }
     try FileManager.default.createDirectory(at: root.url.appending(path: "tree"), withIntermediateDirectories: false)
     let ref = try NativeAuthority.reference(root.child("tree"), kind: .document)
-    let lock = try NativeAdmission.reserve(ref, timeout: .zero)
-    expectNativeError(.unsafePath) { try NativeAdmission.admit(ref, lock: lock) }
-    let aliasedFence = root.url.appending(path: "tree/.FLYRAIL-retained.STATE")
+    #expect(throws: TargetError(code: .unsafePath, message: "resource kind disagrees with existing destination",
+                                path: ref.destination))
+    {
+        try ResourceAdmission.admit(ref, store: root.store)
+    }
+    let aliasedFence = root.url.appending(path: "tree/.FLYRAIL-retained.TXN")
     try FileManager.default.createDirectory(at: aliasedFence, withIntermediateDirectories: false)
     let tree = try NativeAuthority.reference(root.child("tree"), kind: .tree)
-    #expect(try NativeAuthority.hierarchyConflicts(tree.recordedAuthority, wholeTree: true) ==
+    #expect(try ResourceAdmission.hierarchyConflicts(tree.recordedAuthority, store: root.store, wholeTree: true) ==
         [ResourcePath(aliasedFence.path)])
 }
 
@@ -198,56 +194,46 @@ func nativeErrnoDiagnosticsHavePythonFraming() throws {
     ))
 }
 
-@Test
-func nativeTransactionPayloadModesDoNotWeakenAdministrativePrivacy() throws {
-    for mode: mode_t in [0o644, 0o755] {
-        for tree in [false, true] {
-            let root = try NativeTestRoot()
-            defer { try? root.cleanup() }
-            let ref = try NativeAuthority.reference(root.child("resource"), kind: tree ? .tree : .document)
-            let lock = try NativeAdmission.reserve(ref, timeout: .zero)
-            try NativeAdmission.admit(ref, lock: lock)
-            for container in ["staging", "backup"] {
-                let directory = try appendPath(ref.stateRoot, container)
-                #expect(mkdir(directory.displayString, 0o700) == 0)
-                let payload = try appendPath(directory, "resource")
-                let file = tree ? try appendPath(payload, "file") : payload
-                if tree {
-                    #expect(mkdir(payload.displayString, 0o755) == 0)
-                }
-                try Data("resource bytes".utf8).write(to: URL(fileURLWithPath: file.displayString))
-                #expect(chmod(file.displayString, mode) == 0)
-                let observed = try NativeAdmission.observe(ref, lock: lock)
-                let node = try #require(observed.state.revision.nodes.first {
-                    $0.path == container + "/resource" + (tree ? "/file" : "")
-                })
-                #expect(node.mode == Count(UInt64(mode)))
-                #expect(node.data == Data("resource bytes".utf8))
-                #expect(node.uid == Count(UInt64(geteuid())))
-                #expect(node.inode > 0)
-                #expect(observed.recovery.contains(directory))
-                #expect(chmod(directory.displayString, 0o755) == 0)
-                expectNativeError(.unsupported) { _ = try NativeAdmission.validateState(ref) }
-                #expect(chmod(directory.displayString, 0o700) == 0)
-                let descriptor = open(file.displayString, O_RDONLY | O_NOFOLLOW)
-                #expect(descriptor >= 0)
-                defer {
-                    if descriptor >= 0 {
-                        close(descriptor)
-                    }
-                }
-                #expect(fsetxattr(descriptor, "flyrail.payload-test", nil, 0, 0, 0) == 0)
-                expectNativeError(.unsupported) { _ = try NativeAdmission.validateState(ref) }
-                #expect(fremovexattr(descriptor, "flyrail.payload-test", 0) == 0)
-                let foreign = try appendPath(directory, "metadata")
-                try Data().write(to: URL(fileURLWithPath: foreign.displayString))
-                #expect(chmod(foreign.displayString, 0o644) == 0)
-                expectNativeError(.unsupported) { _ = try NativeAdmission.validateState(ref) }
-                #expect(unlink(foreign.displayString) == 0)
-            }
-            let header = try appendPath(ref.stateRoot, "authority.json")
-            #expect(chmod(header.displayString, 0o644) == 0)
-            expectNativeError(.unsupported) { _ = try NativeAdmission.validateState(ref) }
+@Test(arguments: [mode_t(0o644), mode_t(0o755)], [false, true])
+func transactionPayloadModesDoNotWeakenAdministrativePrivacy(_ mode: mode_t, _ tree: Bool) throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let destination = root.url.appending(path: "resource")
+    let payload = tree ? destination.appending(path: "file") : destination
+    if tree {
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false)
+    }
+    try Data("before".utf8).write(to: payload)
+    #expect(chmod(payload.path, mode) == 0)
+    let ref = try NativeAuthority.reference(root.child("resource"), kind: tree ? .tree : .document)
+    let after = try Revision(nodes: tree ? [
+        NativeResourcePlanner.node("", data: nil, mode: 0o755),
+        NativeResourcePlanner.node("file", data: Data("after".utf8), mode: UInt64(mode)),
+    ] : [NativeResourcePlanner.node("", data: Data("after".utf8), mode: UInt64(mode))])
+    let plan = try storePlan(ref, store: root.store, after: after, previous: nil)
+    var observed: [String: mode_t] = [:]
+    let directory = plan.transactionDirectory
+    func record(_ label: String, _ relative: String) {
+        var metadata = stat()
+        if let path = try? appendPath(directory, relative), lstat(path.displayString, &metadata) == 0 {
+            observed[label] = metadata.st_mode & 0o777
         }
     }
+    let seam = NativeTransactionSeam { boundary in
+        switch boundary {
+        case "prepare":
+            record("directory", "")
+            record("staging", "staging")
+            record("staged", tree ? "staging/resource/file" : "staging/resource")
+        case "backup":
+            record("backup", "backup")
+            record("backed", tree ? "backup/resource/file" : "backup/resource")
+        default: break
+        }
+    }
+    let journal = try ResourceTransaction.prepare(plan, store: root.store, seam: seam)
+    try ResourceTransaction.publish(journal, store: root.store, seam: seam)
+    #expect(observed == [
+        "directory": 0o700, "staging": 0o700, "staged": mode, "backup": 0o700, "backed": mode,
+    ])
 }

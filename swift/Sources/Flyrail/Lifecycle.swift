@@ -26,27 +26,31 @@ private func lifecyclePreview(bundleID: String, bundle: FlyrailBundle?, rendered
     } catch let error as TargetError {
         return try LifecyclePreview(bundleID: bundleID, bundle: bundle, rendered: rendered, target: target,
                                     acquisition: acquisition, replaceModified: replaceModified, index: nil,
-                                    indexRevision: nil, indexAncestors: [], generation: nil, resources: [],
-                                    error: error)
+                                    generation: nil, resources: [], error: error)
     }
 }
 
 public func applyPreview(_ preview: LifecyclePreview, lockTimeout: Duration = .zero) -> InstallationResult {
+    if let error = preview.error {
+        return InstallationInspection.failed(preview.bundleID, target: preview.target, error: error,
+                                             notices: preview.rendered.notices)
+    }
+    guard preview.rendered.supported else {
+        return InstallationInspection.failed(preview.bundleID,
+                                             target: preview.target,
+                                             error: TargetError(code: .unsupported,
+                                                                message: "rendered target has unsupported requirements"),
+                                             notices: preview.rendered.notices)
+    }
     do {
-        try LifecycleExecution.requireApplicable(preview)
-        _ = try LifecyclePlanning.fresh(preview, initial: true)
-        let locks = try NativeTransactionLocks(target: preview.target, bundleID: preview.bundleID,
-                                               resources: preview.resources.map(\.resource), timeout: lockTimeout,
-                                               allowRecovery: false)
-        { observed in
-            guard observed.current == preview.index, observed.prepared == nil else {
-                throw nativeFailure(.concurrentChange, "index changed while acquiring locks", preview.target.indexRoot)
-            }
-        }
+        _ = try LifecyclePlanning.fresh(preview, created: [])
+        let locks = try LifecycleExecution.locks(bundleID: preview.bundleID, target: preview.target,
+                                                 expected: preview.index, resources: preview.resources.map(\.resource),
+                                                 timeout: lockTimeout)
+        defer { locks.release() }
         return try LifecycleExecution.run(preview, locks: locks)
     } catch {
-        return InstallationInspection.failed(preview.bundleID, target: preview.target, error: error,
-                                             notices: preview.error == nil ? [] : preview.rendered.notices)
+        return InstallationInspection.failed(preview.bundleID, target: preview.target, error: error)
     }
 }
 
@@ -65,15 +69,19 @@ public func sync(bundle: FlyrailBundle, rendered: RenderedBundle, target: Instal
             notices: rendered.notices,
         )
     }
-    return LifecycleExecution.synchronize(
-        bundleID: bundle.identity.id,
-        bundle: bundle,
-        rendered: rendered,
-        target: target,
-        acquisition: acquisition,
-        replaceModified: replaceModified,
-        lockTimeout: lockTimeout,
-    )
+    do {
+        return try LifecycleExecution.synchronize(
+            bundleID: bundle.identity.id,
+            bundle: bundle,
+            rendered: rendered,
+            target: target,
+            acquisition: acquisition,
+            replaceModified: replaceModified,
+            lockTimeout: lockTimeout,
+        )
+    } catch {
+        return InstallationInspection.failed(bundle.identity.id, target: target, error: error)
+    }
 }
 
 public func remove(bundleID: String, target: InstallationTarget, replaceModified: Bool = false,
@@ -104,16 +112,18 @@ public func recoverInstallation(bundleID: String, target: InstallationTarget,
                                   error: NativeTransactionExecution.detail(error))
     }
     do {
-        let observed = try NativeAdmission.observeIndex(target, bundleID: bundleID)
-        guard let index = try LifecyclePlanning.visible(observed, target: target, bundleID: bundleID) else {
+        guard let index = try InstallationIndex.read(bundleID: bundleID, target: target) else {
             return try InstallationResult(status: .unchanged,
                                           observation: InstallationInspection.observe(
                                               bundleID: bundleID,
                                               target: target,
                                           ))
         }
-        let locks = try LifecycleExecution.locks(bundleID: bundleID, target: target, observed: observed,
-                                                 resources: index.resources, timeout: lockTimeout)
+        let references = try LifecyclePlanning.references(.empty, index: index, target: target, bundle: nil,
+                                                          group: NativeTransactionPlanning.group(.empty))
+        let locks = try LifecycleExecution.locks(bundleID: bundleID, target: target, expected: index,
+                                                 resources: references, timeout: lockTimeout)
+        defer { locks.release() }
         return try LifecycleExecution.recover(bundleID: bundleID, target: target, locks: locks)
     } catch {
         return InstallationInspection.failed(bundleID, target: target, error: error)

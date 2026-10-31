@@ -4,12 +4,27 @@ import Foundation
 package func runInterop(
     arguments: [String], standardInput: FileHandle, standardOutput: FileHandle, standardError: FileHandle,
 ) -> Int32 {
-    do {
-        guard let name = arguments.first, let command = InteropCommand(rawValue: name) else {
-            throw FlyrailValueError(
-                "usage: FlyrailInterop differential|render-hooks|encode|decode|write|inspect|remove|recover|records|hold|observe [options]",
-            )
+    guard let name = arguments.first, let command = InteropCommand(rawValue: name) else {
+        let commands = "differential|render-hooks|encode|decode|write|install|update|inspect|remove|recover|records|hold|observe"
+        try? standardError.write(contentsOf: Data("usage: FlyrailInterop \(commands) [options]\n".utf8))
+        return 1
+    }
+    if [.hold, .write, .install, .update, .inspect, .remove, .recover].contains(command) ||
+        (command == .records && arguments.count > 1)
+    {
+        do {
+            try NativeInterop.run(command, arguments: Array(arguments.dropFirst()), output: standardOutput)
+            return 0
+        } catch {
+            let message = (error as? TargetError)?.message ?? "\(error)"
+            let value = JSONValue.object([("error", .object([
+                ("code", .null), ("message", .string(message)), ("path", .null),
+            ]))])
+            try? standardOutput.write(contentsOf: JSONWriter.canonicalData(value) + Data([10]))
+            return 1
         }
+    }
+    do {
         if command == .differential {
             try standardOutput.write(contentsOf: InteropDifferential.run(Array(arguments.dropFirst())))
             return 0
@@ -19,9 +34,7 @@ package func runInterop(
             try standardOutput.write(contentsOf: InteropHookRendering.run(boundedStateInput(standardInput)))
             return 0
         }
-        if [.hold, .observe, .write, .inspect, .remove, .recover].contains(command) ||
-            (command == .records && arguments.count > 1)
-        {
+        if command == .observe {
             try NativeInterop.run(command, arguments: Array(arguments.dropFirst()), output: standardOutput)
             return 0
         }

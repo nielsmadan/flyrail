@@ -99,25 +99,28 @@ func stateJournalAndResourcePlanBindCompleteMatchingEvidence() throws {
     #expect(throws: FlyrailValueError("planned receipts disagree with resource")) {
         try ResourcePlan(
             resource: resource, before: before, after: after, previous: nil, receipt: other,
-            ancestors: [], stateRevision: Revision(), recoveryPaths: [],
+            ancestors: [], transactionDirectory: transactionPath(
+                destination: resource.destination, transactionID: receipt.transactionID,
+            ),
+            recoveryPaths: [],
         )
     }
 }
 
 @Test
 func stateContextFingerprintsBindSortedExactPairsAndExcludeRouting() throws {
-    let root = try ResourcePath("/pin/index")
-    let first = try InstallationTarget(recordedIndexRoot: root, context: [("z", "1"), ("a", "e\u{301}")])
+    let store = MemoryStore()
+    let first = try InstallationTarget(store: store, context: [("z", "1"), ("a", "e\u{301}")])
     let second = try InstallationTarget(
-        recordedIndexRoot: root, context: [("a", "e\u{301}"), ("z", "1")], routingContext: [("agent", "claude")],
+        store: store, context: [("a", "e\u{301}"), ("z", "1")], routingContext: [("agent", "claude")],
     )
     #expect(try first.contextDigest == second.contextDigest)
-    let composed = try InstallationTarget(recordedIndexRoot: root, context: [("a", "é"), ("z", "1")])
+    let composed = try InstallationTarget(store: store, context: [("a", "é"), ("z", "1")])
     #expect(try first.contextDigest != composed.contextDigest)
     #expect(first != second)
-    let exactKeys = try InstallationTarget(recordedIndexRoot: root, context: [("é", "1"), ("e\u{301}", "2")])
+    let exactKeys = try InstallationTarget(store: store, context: [("é", "1"), ("e\u{301}", "2")])
     #expect(exactKeys.context.count == 2)
     #expect(throws: FlyrailValueError.self) {
-        try InstallationTarget(recordedIndexRoot: root, context: [("a", "1"), ("a", "2")])
+        try InstallationTarget(store: store, context: [("a", "1"), ("a", "2")])
     }
 }

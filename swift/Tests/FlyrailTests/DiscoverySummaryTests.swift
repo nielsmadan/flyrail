@@ -35,8 +35,7 @@ func summariesReportAllArtifactsRoutingActionsErrorsAndNotices() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"),
-                                        routingContext: [("agent", "claude"), ("scope", "project"), ("surface", "cli")])
+    let target = try root.target(routingContext: [("agent", "claude"), ("scope", "project"), ("surface", "cli")])
     let notice = try Notice(artifactID: "first", kind: .activation, message: "Reload the host.", code: "reload")
     let rendered = try RenderedBundle(artifacts: [
         RenderedArtifact(id: "second", family: .instructions, destination: path,

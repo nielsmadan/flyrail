@@ -111,6 +111,15 @@ public struct RenderContext: Sendable, Hashable {
             return result.sorted { $0.0 == $1.0 ? utf8Less($0.1, $1.1) : utf8Less($0.0, $1.0) }
         }
     }
+
+    public func installation(store: any StateStore,
+                             context: [(String, String)]? = nil) throws -> InstallationTarget
+    {
+        let routing = try routingContext
+        let identity: Set = ["agent", "scope", "surface", "root"]
+        return try InstallationTarget(store: store, context: context ?? routing.filter { identity.contains($0.0) },
+                                      routingContext: routing)
+    }
 }
 
 public struct Capability: Sendable, Hashable {

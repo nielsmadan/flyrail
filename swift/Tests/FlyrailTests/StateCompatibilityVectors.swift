@@ -61,9 +61,14 @@ private func stateCompatibilityBases() -> [String: [(String, JSONValue)]] {
         "ResourceRef": [
             ("destination", .object([("path", .string("/pin/AGENTS.md"))])),
             ("kind", StateCodec.enumeration("ResourceKind", "document")), ("schema_version", .number("2")),
-            ("state_root", .object([("path", .string(
-                "/pin/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state",
-            ))])),
+        ],
+        "Preparation": [
+            ("directory", .object([("path", .string("/pin/x"))])),
+            ("resource", StateCodec.record("ResourceRef", [
+                ("destination", .object([("path", .string("/pin/AGENTS.md"))])),
+                ("kind", StateCodec.enumeration("ResourceKind", "document")), ("schema_version", .number("2")),
+            ])),
+            ("schema_version", .number("2")), ("transaction_id", .string(String(repeating: "1", count: 32))),
         ],
         "Index": [
             ("bundle_id", .string("owner")), ("context_digest", .string(String(repeating: "0", count: 64))),
@@ -183,7 +188,19 @@ private func stateCompatibilityNodeAndEnumVectors() throws -> [StateCompatibilit
     try append("ResourceRef", "schema_version", .boolean(true), "authority schema must be 2")
     try append("ResourceRef", "kind", .string("document"), invalid)
     try append("ResourceRef", "destination", .string("/pin/AGENTS.md"), "expected an absolute concrete path")
-    try append("ResourceRef", "state_root", .string("/pin/x"), "resource state path disagrees with destination")
+    try vectors.append(StateCompatibilityVector(
+        tag: "ResourceRef",
+        input: JSONWriter.canonicalData(StateCodec.record(
+            "ResourceRef", #require(bases["ResourceRef"]) + [("state_root", .object([("path", .string("/pin/x"))]))],
+        )),
+        message: "state record fields do not match schema",
+    ))
+    try append("Preparation", "transaction_id", .string("1111"), "invalid hexadecimal identity")
+    try append("Preparation", "directory", .object([("path", .string("x"))]),
+               "state paths must be absolute without traversal")
+    try append("Preparation", "resource", .number("5"), invalid)
+    try append("Preparation", "schema_version", .number("3"), "preparation schema must be 2")
+    try append("Preparation", "schema_version", .number("2"), "")
     try append("Index", "bundle_id", .number("5"), invalid)
     try append("Index", "current", .number("5"), invalid)
     try append("Index", "schema_version", .number("3"), "index schema must be 2")

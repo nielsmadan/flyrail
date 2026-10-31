@@ -28,7 +28,12 @@ package func requireResourcePath(_ path: ResourcePath) throws {
     }
 }
 
-public func statePath(for destination: ResourcePath) throws -> ResourcePath {
+public func transactionPath(destination: ResourcePath, transactionID: String) throws -> ResourcePath {
+    guard transactionID.utf8.count == 32,
+          transactionID.utf8.allSatisfy({ (48 ... 57).contains($0) || (97 ... 102).contains($0) })
+    else {
+        throw FlyrailValueError("transaction id must be 32 lowercase hexadecimal characters")
+    }
     try requireResourcePath(destination)
     let bytes = try Array(statePathText(destination).utf8)
     guard let slash = bytes.lastIndex(of: 47) else {
@@ -36,7 +41,8 @@ public func statePath(for destination: ResourcePath) throws -> ResourcePath {
     }
     let basename = String(decoding: bytes[(slash + 1)...], as: UTF8.self)
     let digest = stateSHA256(Data(portablePathKey(basename).utf8))
-    return try ResourcePath(String(decoding: bytes[...slash], as: UTF8.self) + ".flyrail-\(digest).state")
+    return try ResourcePath(String(decoding: bytes[...slash], as: UTF8.self) +
+        ".flyrail-\(digest)-\(transactionID).txn")
 }
 
 package func stateSHA256(_ data: Data) -> String {
@@ -53,15 +59,10 @@ package func hexadecimalIdentity(_ text: String, length: Int = 64) throws {
 
 public struct ResourceAuthority: Sendable, Hashable {
     public let destination: ResourcePath
-    public let stateRoot: ResourcePath
 
     package init(recordedDestination: ResourcePath) throws {
+        try requireResourcePath(recordedDestination)
         destination = recordedDestination
-        stateRoot = try statePath(for: recordedDestination)
-    }
-
-    public var lockPath: ResourcePath {
-        get throws { try appendPath(stateRoot, "lock") }
     }
 }
 

@@ -2,8 +2,8 @@
 import Foundation
 import Testing
 
-@Test(.enabled(if: repositoryCheckout), arguments: ["python", "swift-python", "rust", "swift-rust"])
-func skillConvenienceInstallAndInspectPreserveNameIdentityAcrossLanguages(_ first: String) throws {
+@Test(.enabled(if: repositoryCheckout), arguments: ["python", "rust"])
+func skillConvenienceInstallAndInspectPreserveNameIdentityAcrossLanguages(_ language: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let source = root.url.appending(path: "source")
@@ -13,63 +13,58 @@ func skillConvenienceInstallAndInspectPreserveNameIdentityAcrossLanguages(_ firs
     """.utf8)
     try manifest.write(to: source.appending(path: "flyrail.json"))
     try Data("skill".utf8).write(to: source.appending(path: "review/SKILL.md"))
-    let bundle = try FlyrailBundle(directory: ResourcePath(source.path))
-    let target = try Target.directory(root.child("skills"))
-    let rendered = try renderSkills(bundle, target: target)
-    #expect(rendered.artifacts.map(\.id) == ["review"])
-    let droid = try renderSkills(bundle, target: Target.project(agent: .droid, root: root.path))
-    #expect(droid.notices.map(\.artifactID) == ["review"])
-    let language = first.hasSuffix("rust") ? "rust" : "python"
     _ = try repositoryFile("python/src/flyrail")
     if language == "rust" {
         _ = try repositoryFile("rust/Cargo.toml")
     }
-    if !first.hasPrefix("swift") {
-        let installed = try skillReference(
-            language: language,
-            operation: "install",
-            source: source,
-            target: target.root,
-        )
-        #expect(installed["status"] as? String == "applied")
-        #expect(installed["render_digest"] as? String == rendered.renderDigest)
-    } else {
-        #expect(install(bundle, targets: [target])[0].status == .applied)
+    let bundle = try FlyrailBundle(directory: ResourcePath(source.path))
+    let referenceTarget = try Target.directory(root.child("reference-skills"))
+    let referenceState = root.url.appending(path: "reference-state")
+    let rendered = try renderSkills(bundle, target: referenceTarget)
+    func reference(_ operation: String) throws -> [String: Any] {
+        try skillReference(language: language, operation: operation, source: source,
+                           target: referenceTarget.root, state: referenceState)
     }
-    let before = try NativeObservation.snapshot(root.path)
-    let observed = inspect(bundle, targets: [target])[0].observation
-    #expect(observed.isCurrent)
-    #expect(observed.contentMatches == true)
-    #expect(install(bundle, targets: [target])[0].status == .unchanged)
-    let reference = try skillReference(
-        language: language,
-        operation: "install",
-        source: source,
-        target: target.root,
-    )
-    #expect(reference["current"] as? Bool == true)
-    #expect(reference["content_matches"] as? Bool == true)
-    #expect(reference["status"] as? String == "unchanged")
-    #expect(reference["ids"] as? [String] == ["review"])
-    #expect(reference["droid_ids"] as? [String] == ["review"])
-    #expect(reference["render_digest"] as? String == rendered.renderDigest)
-    #expect(try NativeObservation.snapshot(root.path) == before)
+    let installed = try reference("install")
+    #expect(installed["status"] as? String == "applied")
+    #expect(installed["render_digest"] as? String == rendered.renderDigest)
+    let repeated = try reference("install")
+    #expect(repeated["status"] as? String == "unchanged")
+    #expect(repeated["current"] as? Bool == true)
+    #expect(repeated["content_matches"] as? Bool == true)
+    #expect(repeated["ids"] as? [String] == ["review"])
+    #expect(repeated["droid_ids"] as? [String] == ["review"])
+
+    let swiftTarget = try Target.directory(root.child("swift-skills"))
+    #expect(install(bundle, targets: [swiftTarget], store: root.store)[0].status == .applied)
+    #expect(inspect(bundle, targets: [swiftTarget], store: root.store)[0].observation.isCurrent)
+    #expect(install(bundle, targets: [swiftTarget], store: root.store)[0].status == .unchanged)
+
+    let before = try NativeObservation.snapshot(referenceTarget.root)
+    let foreign = install(bundle, targets: [referenceTarget], store: root.store)[0]
+    #expect(foreign.status == .failed)
+    #expect(foreign.error?.code == .conflict)
+    #expect(try NativeObservation.snapshot(referenceTarget.root) == before)
+    #expect(!inspect(bundle, targets: [referenceTarget], store: root.store)[0].observation.isCurrent)
+    let inspected = try reference("inspect")
+    #expect(inspected["current"] as? Bool == true)
+    #expect(inspected["content_matches"] as? Bool == true)
 }
 
 private func skillReference(language: String, operation: String, source: URL,
-                            target: ResourcePath) throws -> [String: Any]
+                            target: ResourcePath, state: URL) throws -> [String: Any]
 {
     let process = Process()
     let output = Pipe()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.executableURL = try repositoryFile("python/.venv/bin/python3")
     process.arguments = try [
-        "python3",
         "-B",
         repositoryFile("swift/scripts/skill_parity_reference.py").path,
         language,
         operation,
         source.path,
         target.displayString,
+        state.path,
     ]
     process.standardOutput = output
     process.standardError = output

@@ -9,34 +9,27 @@ package enum InstallationInspection {
     package static func observe(bundleID: String, target: InstallationTarget) throws -> InstallationObservation {
         var resources: [ResourceObservation] = []
         do {
-            let observed = try NativeAdmission.observeIndex(target, bundleID: bundleID)
-            let index = try LifecyclePlanning.visible(observed, target: target, bundleID: bundleID)
+            let index = try InstallationIndex.read(bundleID: bundleID, target: target)
             for resource in index?.resources ?? [] {
                 do {
-                    let current = try NativeAdmission.observe(resource)
-                    if try current.receipt == nil && NativeIndexRecovery.expectsReceipt(
-                        observed.current, prepared: observed.prepared, resource: resource,
-                    ) {
-                        throw try LifecyclePlanning.missingReceipt(resource)
-                    }
+                    try LifecycleExecution.requireReceipts(index, resources: [resource], store: target.store)
+                    let current = try ResourceAdmission.observe(resource, store: target.store)
                     try resources.append(ResourceObservation(
-                        destination: resource.destination, stateRoot: resource.stateRoot,
+                        destination: resource.destination,
                         claims: current.receipt.map {
                             try NativeResourcePlanner.claimObservations($0, revision: current.revision)
                         } ?? [],
-                        revisionDigest: current.revision.contentDigest, recoveryPaths: current.recovery,
+                        revisionDigest: current.revision.contentDigest, recoveryPaths: current.recoveryPaths,
                     ))
                 } catch {
                     try resources.append(ResourceObservation(
                         destination: resource.destination,
-                        stateRoot: resource.stateRoot,
                         error: NativeTransactionExecution.detail(error),
                     ))
                 }
             }
             let generation = index?.current
-            let pending = observed.prepared != nil || index?.pending != nil ||
-                index?.previous != nil || !(index?.residual.isEmpty ?? true)
+            let pending = InstallationIndex.isPending(index)
             let actual = Set(resources.flatMap { resource in
                 resource.claims.filter { $0.bundleID == bundleID }.map {
                     Membership(destination: resource.destination, claimID: $0.claimID)

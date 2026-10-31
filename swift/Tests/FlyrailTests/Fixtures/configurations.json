@@ -726,38 +726,44 @@
     {
       "name": "document",
       "destination": "/fixture/project/AGENTS.md",
-      "state_root": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state",
-      "lock_path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state/lock"
+      "destination_key": "665079703c8b5d73627634a067a3a229d8116dd5190767e1d2a2dd4f70151cc5",
+      "transaction_id": "0123456789abcdef0123456789abcdef",
+      "transaction_path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7-0123456789abcdef0123456789abcdef.txn"
     },
     {
       "name": "absent-uppercase",
       "destination": "/fixture/project/ABSENT.md",
-      "state_root": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state",
-      "lock_path": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state/lock"
+      "destination_key": "32103a49438f45e1b96ee81214cc20917b2a54b1c39deb99be39388920e20739",
+      "transaction_id": "0123456789abcdef0123456789abcdef",
+      "transaction_path": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53-0123456789abcdef0123456789abcdef.txn"
     },
     {
       "name": "absent-lowercase",
       "destination": "/fixture/project/absent.md",
-      "state_root": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state",
-      "lock_path": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53.state/lock"
+      "destination_key": "32103a49438f45e1b96ee81214cc20917b2a54b1c39deb99be39388920e20739",
+      "transaction_id": "0123456789abcdef0123456789abcdef",
+      "transaction_path": "/fixture/project/.flyrail-8d6bb25ac3a5ada9d6e24dfc2cfcb4feb9e79a2614ee60cf48531d0d04b79e53-0123456789abcdef0123456789abcdef.txn"
     },
     {
       "name": "unicode",
       "destination": "/fixture/project/Stra\u00dfe.json",
-      "state_root": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state",
-      "lock_path": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state/lock"
+      "destination_key": "9615682a02fafe1a7369e71c01cacf7ae8ed50f830e39365e226f7b38ec942ed",
+      "transaction_id": "0123456789abcdef0123456789abcdef",
+      "transaction_path": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30-0123456789abcdef0123456789abcdef.txn"
     },
     {
       "name": "unicode-folded",
       "destination": "/fixture/project/STRASSE.json",
-      "state_root": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state",
-      "lock_path": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30.state/lock"
+      "destination_key": "9615682a02fafe1a7369e71c01cacf7ae8ed50f830e39365e226f7b38ec942ed",
+      "transaction_id": "0123456789abcdef0123456789abcdef",
+      "transaction_path": "/fixture/project/.flyrail-673e90c45484a93ad2b77ab71dfe4bfac9a130c3d479d4070b7f00e558f8ef30-0123456789abcdef0123456789abcdef.txn"
     },
     {
       "name": "relocated",
       "destination": "/fixture/relocated/AGENTS.md",
-      "state_root": "/fixture/relocated/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state",
-      "lock_path": "/fixture/relocated/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state/lock"
+      "destination_key": "7285f8670973fabd0d53a6cd91d14b3a34326d97f06728637f121697e279bb1d",
+      "transaction_id": "0123456789abcdef0123456789abcdef",
+      "transaction_path": "/fixture/relocated/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7-0123456789abcdef0123456789abcdef.txn"
     }
   ],
   "renderings": [
@@ -874,9 +880,6 @@
               "kind": {
                 "enum": "ResourceKind",
                 "value": "document"
-              },
-              "state_root": {
-                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
               },
               "schema_version": 2
             }
@@ -1008,9 +1011,6 @@
               "kind": {
                 "enum": "ResourceKind",
                 "value": "document"
-              },
-              "state_root": {
-                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
               },
               "schema_version": 2
             }
@@ -1160,9 +1160,6 @@
                 "enum": "ResourceKind",
                 "value": "document"
               },
-              "state_root": {
-                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
-              },
               "schema_version": 2
             }
           },
@@ -1293,9 +1290,6 @@
               "kind": {
                 "enum": "ResourceKind",
                 "value": "document"
-              },
-              "state_root": {
-                "path": "/fixture/project/.flyrail-587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf.state"
               },
               "schema_version": 2
             }
@@ -1602,9 +1596,6 @@
                 "enum": "ResourceKind",
                 "value": "document"
               },
-              "state_root": {
-                "path": "/fixture/.flyrail-587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf.state"
-              },
               "schema_version": 2
             }
           },
@@ -1829,9 +1820,6 @@
               "kind": {
                 "enum": "ResourceKind",
                 "value": "document"
-              },
-              "state_root": {
-                "path": "/fixture/.flyrail-587cb980af76fdc7e52369fd0b9d926dff266976b6f8ac631e358fecc49ff8cf.state"
               },
               "schema_version": 2
             }
@@ -2060,9 +2048,6 @@
                 "enum": "ResourceKind",
                 "value": "document"
               },
-              "state_root": {
-                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
-              },
               "schema_version": 2
             }
           },
@@ -2078,9 +2063,6 @@
                   "kind": {
                     "enum": "ResourceKind",
                     "value": "document"
-                  },
-                  "state_root": {
-                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
                   },
                   "schema_version": 2
                 }
@@ -2113,9 +2095,6 @@
                   "kind": {
                     "enum": "ResourceKind",
                     "value": "document"
-                  },
-                  "state_root": {
-                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
                   },
                   "schema_version": 2
                 }
@@ -2337,9 +2316,6 @@
                 "enum": "ResourceKind",
                 "value": "document"
               },
-              "state_root": {
-                "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
-              },
               "schema_version": 2
             }
           },
@@ -2355,9 +2331,6 @@
                   "kind": {
                     "enum": "ResourceKind",
                     "value": "document"
-                  },
-                  "state_root": {
-                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
                   },
                   "schema_version": 2
                 }
@@ -2390,9 +2363,6 @@
                   "kind": {
                     "enum": "ResourceKind",
                     "value": "document"
-                  },
-                  "state_root": {
-                    "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7.state"
                   },
                   "schema_version": 2
                 }
@@ -2595,6 +2565,34 @@
             }
           },
           "ancestors": [],
+          "schema_version": 2
+        }
+      }
+    }
+  ],
+  "preparations": [
+    {
+      "name": "create-section",
+      "record": {
+        "type": "Preparation",
+        "fields": {
+          "resource": {
+            "type": "ResourceRef",
+            "fields": {
+              "destination": {
+                "path": "/fixture/project/AGENTS.md"
+              },
+              "kind": {
+                "enum": "ResourceKind",
+                "value": "document"
+              },
+              "schema_version": 2
+            }
+          },
+          "transaction_id": "11111111111111111111111111111111",
+          "directory": {
+            "path": "/fixture/project/.flyrail-b951327c37d8a1ed4d5ed18908681f6aca718ecdfe174aa39cf2237547f92fe7-11111111111111111111111111111111.txn"
+          },
           "schema_version": 2
         }
       }

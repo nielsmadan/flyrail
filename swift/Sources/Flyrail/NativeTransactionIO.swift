@@ -48,39 +48,6 @@ package enum NativeTransactionIO {
         try parent.validate()
     }
 
-    package static func atomic(
-        _ path: ResourcePath, value: some StateCodable, expected: Revision? = nil,
-        exclusive: Bool = false, phase: String,
-        seam: NativeTransactionSeam = .none, beforePublication: () throws -> Void = {},
-        committed: () throws -> Void = {},
-    ) throws {
-        let before = try NativeObservation.snapshot(path, privateStorage: true)
-        if let expected, before.revision != expected {
-            throw nativeFailure(.concurrentChange, "metadata revision changed", path)
-        }
-        guard let parent = try NativeFilesystem.parent(path) else { throw nativeIO(ENOENT, path: path) }
-        let next = try ResourcePath(platformBytes: path.platformBytes + Array(".next".utf8))
-        let payload = try StateCodec.encode(value)
-        if try NativeFilesystem.metadata(next) != nil {
-            throw nativeFailure(.recoveryNeeded, "unrecognized metadata preparation", next)
-        }
-        try createFile(next, data: payload) { try seam("\(phase)-created") }
-        let prepared = try NativeObservation.snapshot(next, privateStorage: true)
-        guard prepared.revision.data == payload else {
-            throw nativeFailure(.concurrentChange, "metadata staging changed", next)
-        }
-        try seam("\(phase)-prepared")
-        try beforePublication()
-        try NativeObservation.requireRevision(path, before.revision)
-        try NativeObservation.require(next, prepared)
-        try parent.validate()
-        try rename(next, to: path, exclusive: exclusive)
-        try committed()
-        try seam("\(phase)-reread")
-        try NativeObservation.requireRevision(path, prepared.revision)
-        try seam("\(phase)-committed")
-    }
-
     package static func rename(_ source: ResourcePath, to destination: ResourcePath, exclusive: Bool) throws {
         guard let from = try NativeFilesystem.parent(source),
               let to = try NativeFilesystem.parent(destination)

@@ -291,6 +291,7 @@ package enum StateCodec {
         "Generation": decoder(Generation.self),
         "Index": decoder(Index.self),
         "Journal": decoder(Journal.self),
+        "Preparation": decoder(Preparation.self),
     ]
 }
 

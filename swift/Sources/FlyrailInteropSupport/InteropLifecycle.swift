@@ -10,7 +10,9 @@ extension InteropDifferential {
         let name = row.name
         let caseRoot = root.appending(path: name)
         try FileManager.default.createDirectory(at: caseRoot, withIntermediateDirectories: false)
-        let target = try InstallationTarget(indexRoot: ResourcePath(caseRoot.appending(path: "index").path))
+        let target = try InstallationTarget(store: DirectoryStore(ResourcePath(
+            root.appending(path: ".state").appending(path: name).path,
+        )))
         let (first, ids) = try lifecycleRendered(root: caseRoot, kind: row.kind, text: row.first)
         if let initial = row.initial {
             try initial.write(to: URL(fileURLWithPath: first.artifacts[0].destination.displayString))
@@ -28,8 +30,6 @@ extension InteropDifferential {
                                    result: sync(bundle: lifecycleBundle(version: "2", ids: ids), rendered: second,
                                                 target: target),
                                    root: caseRoot, target: target)
-        try FileManager.default.copyItem(at: caseRoot.appending(path: "index/index.json"),
-                                         to: caseRoot.appending(path: "index/index.json.next"))
         try records += stepRecords(name, step: "4-recover",
                                    result: recoverInstallation(bundleID: "team", target: target),
                                    root: caseRoot, target: target)
@@ -89,26 +89,34 @@ extension InteropDifferential {
                             root: URL, target: InstallationTarget) throws -> [String]
     {
         var records = try [lifecycleRecord(name, field: step + "-result", value: resultValue(result, root: root))]
-        let files = try regularFiles(root)
-        let states = files.filter { $0.lastPathComponent == "receipt.json" ||
-            ($0.deletingLastPathComponent().path == target.indexRoot.displayString &&
-                ["index.json", "index.json.next"].contains($0.lastPathComponent))
-        }
-        for path in states {
-            let data = try Data(contentsOf: path)
+        let store = target.store
+        for key in try StateRecords.keys(store, prefix: "") {
+            guard let data = try StateRecords.raw(store, key: key) else { continue }
             guard try StateCodec.transcode(data) == data else {
-                throw FlyrailValueError("state record is not canonical")
+                throw FlyrailValueError("state record is not canonical: \(key)")
             }
-            let normalized = try sortedJSON(normalize(JSONSerialization.jsonObject(with: data), root: root)) +
-                Data([10])
-            records.append(record("lifecycle", name, "\(step)-state-\(relative(path.path, root: root))",
-                                  normalized))
+            let value = try JSONSerialization.jsonObject(with: data)
+            let normalized = try sortedJSON(normalize(value, root: root)) + Data([10])
+            try records.append(record("lifecycle", name, "\(step)-state-\(stateKey(key, value: value, root: root))",
+                                      normalized))
         }
-        let payloads = try files.filter { !$0.path.contains(".flyrail") && $0.lastPathComponent != "lock" }.map {
-            try [relative($0.path, root: root), Data(contentsOf: $0).nativeHex]
-        }
+        let payloads = try regularFiles(root).filter {
+            !$0.path.contains(".flyrail") && $0.lastPathComponent != "lock"
+        }.map { try [relative($0.path, root: root), Data(contentsOf: $0).nativeHex] }
         try records.append(lifecycleRecord(name, field: step + "-payloads", value: payloads))
         return records
+    }
+
+    private static func stateKey(_ key: String, value: Any, root: URL) throws -> String {
+        guard key.hasPrefix("resource/") else { return key }
+        let record = value as? [String: Any]
+        let fields = record?["fields"] as? [String: Any]
+        let resource = record?["type"] as? String == "ResourceRef" ? fields :
+            (fields?["resource"] as? [String: Any])?["fields"] as? [String: Any]
+        guard let destination = (resource?["destination"] as? [String: Any])?["path"] as? String,
+              let suffix = key.split(separator: "/").last
+        else { throw FlyrailValueError("state record has no destination: \(key)") }
+        return "resource/\(relative(destination, root: root))/\(suffix)"
     }
 
     private static func resultValue(_ result: InstallationResult, root: URL) -> [String: Any] {
@@ -130,7 +138,6 @@ extension InteropDifferential {
                         "destination": relative(resource.destination.displayString, root: root),
                         "error": errorValue(resource.error, root: root),
                         "revision": optional(resource.revisionDigest),
-                        "state_root": relative(resource.stateRoot.displayString, root: root),
                     ]
                 },
                 "version": optional(observed.version),
@@ -149,7 +156,10 @@ extension InteropDifferential {
 
     private static func relative(_ path: String, root: URL) -> String {
         let prefix = root.path + "/"
-        return path.hasPrefix(prefix) ? "$ROOT/" + path.dropFirst(prefix.count) : path
+        let text = path.hasPrefix(prefix) ? "$ROOT/" + path.dropFirst(prefix.count) : path
+        return text.replacing(#/((?:^|/)(?:\.flyrail-)?[0-9a-f]{64}-)[0-9a-f]{32}(?=\.txn|/|$)/#) {
+            $0.output.1 + String(repeating: "0", count: 32)
+        }
     }
 
     private static func errorValue(_ error: TargetError?, root: URL) -> Any {
@@ -185,7 +195,7 @@ extension InteropDifferential {
                 }
                 record["security"] = ["bytes": ""]
             }
-            if normalized["type"] as? String == "Receipt" {
+            if ["Receipt", "Preparation"].contains(normalized["type"] as? String ?? "") {
                 record["transaction_id"] = String(repeating: "0", count: 32)
             }
             normalized["fields"] = record

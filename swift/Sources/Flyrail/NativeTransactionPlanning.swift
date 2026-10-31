@@ -100,9 +100,9 @@ package enum NativeTransactionPlanning {
         var pending = Dictionary(uniqueKeysWithValues: plans.map { ($0.resource, $0) })
         var ordered: [ResourcePlan] = []
         while !pending.isEmpty {
-            let ready = pending.keys.filter { resource in
+            let ready = destinationOrder(pending.keys.filter { resource in
                 !edges.contains { $0.dependent == resource && pending[$0.required] != nil }
-            }.sorted { $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes) }
+            })
             guard !ready.isEmpty else { throw FlyrailValueError("cyclic resource dependencies") }
             for resource in ready {
                 if let plan = pending.removeValue(forKey: resource) {
@@ -117,9 +117,7 @@ package enum NativeTransactionPlanning {
                                    group: Group) throws -> Generation?
     {
         guard let bundle else { return nil }
-        let membership = try group.artifacts.keys.sorted {
-            $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes)
-        }.map { resource in
+        let membership = try destinationOrder(Array(group.artifacts.keys)).map { resource in
             try GenerationMember(resource: resource, claimIDs: (group.artifacts[resource] ?? []).map {
                 try NativeResourcePlanner.claim($0).identity(destination: resource.destination)
             }.sorted(by: utf8Less))

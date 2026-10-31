@@ -20,7 +20,7 @@ func requireLifecycleCoverage(_ output: String, corpus: URL) throws {
         }
         #expect(keys.contains("lifecycle\t\(name)\t5-inspect"))
     }
-    for field in ["desired-generation", "stale-no-recovery", "partial-inspect",
+    for field in ["desired-generation", "stale-preview", "partial-inspect",
                   "source-free-recover-result", "partial-sync-result", "source-free-remove-result"]
     {
         #expect(keys.contains("lifecycle\tpublic-boundaries\t\(field)"))

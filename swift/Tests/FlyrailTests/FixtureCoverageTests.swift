@@ -6,7 +6,7 @@ private let fixtureCaseCounts = [
     "configurations": [
         "cases": 4, "semantic_values": 10, "claims": 17, "claim_overlaps": 11,
         "authorities": 6, "renderings": 3, "receipts": 6, "journals": 2,
-        "transactions": 9, "capabilities": 7,
+        "transactions": 9, "capabilities": 7, "preparations": 1,
     ],
     "edits": ["cases": 27, "invalid": 6],
     "hooks": ["cases": 58],

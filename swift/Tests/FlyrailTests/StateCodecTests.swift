@@ -101,7 +101,8 @@ func statePathsAndTextIdentitiesRetainExactUTF8() throws {
     let composed = try ResourcePath("/fixture/é")
     let decomposed = try ResourcePath("/fixture/e\u{301}")
     #expect(composed != decomposed)
-    #expect(try statePath(for: composed) == statePath(for: decomposed))
+    #expect(try transactionPath(destination: composed, transactionID: String(repeating: "0", count: 32)) ==
+        transactionPath(destination: decomposed, transactionID: String(repeating: "0", count: 32)))
     let key1 = try Key("é")
     let key2 = try Key("e\u{301}")
     #expect(try StateCodec.encode(key1) != StateCodec.encode(key2))
@@ -131,9 +132,7 @@ func stateIndexesUnionAndValidateAllGenerations() throws {
         bundleID: "team", contextDigest: String(repeating: "d", count: 64),
         current: generation, pending: stateTestGeneration([b, c]), previous: generation, residual: [c],
     )
-    let expected = [a, b, c].sorted {
-        $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes)
-    }
+    let expected = destinationOrder([a, b, c])
     #expect(index.resources == expected)
     #expect(try StateCodec.decode(StateCodec.encode(index), as: Index.self) == index)
     #expect(throws: FlyrailValueError.self) { try stateTestGeneration([a, a]) }
@@ -143,7 +142,7 @@ func stateIndexesUnionAndValidateAllGenerations() throws {
             claimIDs: [String(repeating: "a", count: 64), String(repeating: "a", count: 64)],
         )
     }
-    let tree = try ResourceRef(destination: a.destination, kind: .tree, stateRoot: a.stateRoot)
+    let tree = try ResourceRef(destination: a.destination, kind: .tree)
     #expect(throws: FlyrailValueError.self) {
         try Index(
             bundleID: "team",
@@ -160,7 +159,7 @@ func stateTestNode(_ path: String, _ data: Data?, inode: Count = 1) throws -> No
 
 func stateTestResource(_ name: String, kind: ResourceKind = .document) throws -> ResourceRef {
     let destination = try ResourcePath("/fixture/project/\(name)")
-    return try ResourceRef(destination: destination, kind: kind, stateRoot: statePath(for: destination))
+    return try ResourceRef(destination: destination, kind: kind)
 }
 
 func stateTestOwned(_ resource: ResourceRef, version: String = "1", inode: Count = 1) throws -> OwnedClaim {

@@ -169,13 +169,11 @@ public struct Observation: Sendable, Hashable {
 public struct TargetInspection<T: Sendable>: Sendable {
     public let target: T
     public let root: ResourcePath
-    public let stateRoot: ResourcePath
     public let aliasOf: Int?
     public let observation: Observation
-    public init(target: T, root: ResourcePath, stateRoot: ResourcePath, aliasOf: Int? = nil, observation: Observation) {
+    public init(target: T, root: ResourcePath, aliasOf: Int? = nil, observation: Observation) {
         self.target = target
         self.root = root
-        self.stateRoot = stateRoot
         self.aliasOf = aliasOf
         self.observation = observation
     }
@@ -187,20 +185,17 @@ extension TargetInspection: Hashable where T: Hashable {}
 public struct TargetResult<T: Sendable>: Sendable {
     public let target: T
     public let root: ResourcePath
-    public let stateRoot: ResourcePath
     public let aliasOf: Int?
     public let status: OperationStatus
     public let observation: Observation
     public let error: TargetError?
     public let recoveryPaths: [ResourcePath]
 
-    public init(target: T, root: ResourcePath, stateRoot: ResourcePath, aliasOf: Int? = nil,
-                status: OperationStatus, observation: Observation, error: TargetError? = nil,
-                recoveryPaths: [ResourcePath] = [])
+    public init(target: T, root: ResourcePath, aliasOf: Int? = nil, status: OperationStatus,
+                observation: Observation, error: TargetError? = nil, recoveryPaths: [ResourcePath] = [])
     {
         self.target = target
         self.root = root
-        self.stateRoot = stateRoot
         self.aliasOf = aliasOf
         self.status = status
         self.observation = observation

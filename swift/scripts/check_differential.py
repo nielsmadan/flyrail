@@ -5,17 +5,22 @@ from collections import Counter
 from pathlib import Path
 
 from check_corpus_limits import check_corpus_limits
-from flyrail.authority import ResourceAuthority
 from harness import ENV, PYTHON, ROOT, RUST, SWIFT, build_rust_examples, run, use_python_paths
 
 CATEGORIES = {"value", "bundle", "render", "edit", "lifecycle"}
 BOUNDARY_FIELDS = {
-    "desired-generation", "stale-no-recovery", "partial-inspect",
+    "desired-generation", "stale-preview", "partial-inspect",
     "source-free-recover-result", "partial-sync-result", "source-free-remove-result",
 }
 
 
-def expected_keys(rows, work):
+INDEX_KEY = "index/team/37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+LIFECYCLE_PHASES = ["1-create", "2-unchanged", "3-update", "4-recover", "6-remove"]
+LIFECYCLE_FILES = {"file": "owned", "alias": "owned", "casefold": "Straße", "toml": "config.toml",
+                   "json": "config.json"}
+
+
+def required_keys(rows):
     keys = set()
     for category, name, *columns in rows:
         fields = []
@@ -37,19 +42,21 @@ def expected_keys(rows, work):
                 else:
                     assert operations[step * 3] == "retire"
         elif category == "lifecycle":
-            filename = {"file": "owned", "alias": "owned", "casefold": "Straße",
-                        "toml": "config.toml", "json": "config.json"}.get(columns[0], "AGENTS.md")
-            state = ResourceAuthority(work / name / filename).state_root.name
-            for phase in ["1-create", "2-unchanged", "3-update", "4-recover", "6-remove"]:
+            filename = LIFECYCLE_FILES.get(columns[0], "AGENTS.md")
+            for phase in LIFECYCLE_PHASES:
                 fields += [f"{phase}-{field}" for field in [
-                    "result", "payloads", f"state-$ROOT/{state}/receipt.json",
-                    "state-$ROOT/index/index.json",
+                    "result", "payloads", f"state-{INDEX_KEY}", f"state-resource/$ROOT/{filename}/authority",
                 ]]
             fields.append("5-inspect")
         else:
             raise AssertionError(category)
         keys.update((category, name, field) for field in fields)
     return keys
+
+
+def state_key(key):
+    category, _, field = key
+    return category == "lifecycle" and any(field.startswith(f"{phase}-state-") for phase in LIFECYCLE_PHASES)
 
 
 def records(output):
@@ -90,7 +97,7 @@ def check_state_vectors(root):
 
     vectors = fixture_records()
     tags = Counter(tag for _, _, tag in vectors)
-    assert tags.keys() == {"Receipt", "Journal"} and all(tags.values()), tags
+    assert tags.keys() == {"Receipt", "Journal", "Preparation"} and all(tags.values()), tags
     for name, raw, tag in vectors:
         vector = prepared(name, raw, root)
         for driver in [PYTHON, RUST, SWIFT]:
@@ -126,15 +133,15 @@ def main():
                 output, boundaries = split_boundaries(output)
                 shutil.rmtree(work)
                 boundary_count = check_boundaries(boundaries, work.resolve())
-            actual = records(output)
-            assert actual.keys() == expected_keys(rows, work), (
-                driver, actual.keys() ^ expected_keys(rows, work),
-            )
             outputs.append(output)
             shutil.rmtree(work)
         expected = records(outputs[0])
+        required = required_keys(rows)
+        assert expected.keys() >= required, required - expected.keys()
+        assert all(map(state_key, expected.keys() - required)), expected.keys() - required
         for output in outputs[1:]:
             actual = records(output)
+            assert actual.keys() == expected.keys(), actual.keys() ^ expected.keys()
             assert actual == expected, [
                 (key, expected[key], actual[key]) for key in expected if expected[key] != actual[key]
             ][:3]

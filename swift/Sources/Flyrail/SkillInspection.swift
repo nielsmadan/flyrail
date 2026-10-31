@@ -70,8 +70,8 @@ package enum SkillInspection {
         })
     }
 
-    package static func target(_ target: some SkillTarget,
-                               bundleID: String) throws -> (ResourcePath, InstallationTarget)
+    package static func target(_ target: some SkillTarget, bundleID: String,
+                               store: any StateStore) throws -> (ResourcePath, InstallationTarget)
     {
         if target
             .agent == .droid
@@ -80,13 +80,16 @@ package enum SkillInspection {
         }
         try validateIdentifier(bundleID, label: "bundle id")
         let root = try NativeAuthority.canonicalDestination(target.root)
-        let parts = try NativeFilesystem.components(root)
-        let parent = try ResourcePath(platformBytes: [47] + parts.dropLast().joined(separator: [47]))
-        let name = String(decoding: parts.last ?? [], as: UTF8.self)
-        let index = try appendPath(parent, ".\(name).flyrail-index-\(bundleID)")
         let context = [("destination", root.displayString)]
-        return try (root, InstallationTarget(indexRoot: index, context: context,
+        return try (root, InstallationTarget(store: store, context: context,
                                              routingContext: context + target.skillRoutingContext))
+    }
+
+    package static func validateReferences(_ bundle: FlyrailBundle, rendered: RenderedBundle,
+                                           target: InstallationTarget) throws
+    {
+        _ = try LifecyclePlanning.references(rendered, index: nil, target: target, bundle: bundle,
+                                             group: NativeTransactionPlanning.group(rendered))
     }
 
     package static func observation(_ observed: InstallationObservation, bundle: FlyrailBundle?,
@@ -97,8 +100,10 @@ package enum SkillInspection {
         var metadataError: TargetError?
         for resource in observed.resources {
             do {
-                guard let receipt = try NativeObservation.read(appendPath(resource.stateRoot, "receipt.json"),
-                                                               as: Receipt.self, tag: "Receipt") else { continue }
+                guard let receipt = try StateRecords.read(
+                    observed.target.store, key: StateKey.resource(resource.destination, .receipt), as: Receipt.self,
+                    tag: "Receipt",
+                ) else { continue }
                 for identifier in Set(receipt.claims.map(\.bundleID)).sorted(by: utf8Less) {
                     let claims = receipt.claims.filter { $0.bundleID == identifier }
                     guard let first = claims.first else { continue }
@@ -140,7 +145,9 @@ package enum SkillInspection {
     }
 }
 
-public func inspect<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T]) -> [TargetInspection<T>] {
+public func inspect<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T],
+                                    store: any StateStore) -> [TargetInspection<T>]
+{
     var results: [TargetInspection<T>] = []
     var known: [ResourcePath: Int] = [:]
     for target in targets {
@@ -148,16 +155,17 @@ public func inspect<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T]) -> [T
         var observation: Observation
         do {
             try SkillInspection.validate(bundle)
-            let prepared = try SkillInspection.target(target, bundleID: bundle.identity.id)
+            let prepared = try SkillInspection.target(target, bundleID: bundle.identity.id, store: store)
             root = prepared.0
             if let alias = known[root] {
                 let prior = results[alias]
-                results.append(TargetInspection(target: target, root: root, stateRoot: prior.stateRoot,
-                                                aliasOf: alias, observation: prior.observation))
+                results.append(TargetInspection(target: target, root: root, aliasOf: alias,
+                                                observation: prior.observation))
                 continue
             }
             known[root] = results.count
             let rendered = try SkillInspection.render(bundle, root: root)
+            try SkillInspection.validateReferences(bundle, rendered: rendered, target: prepared.1)
             let observed = try inspectInstallation(bundleID: bundle.identity.id, target: prepared.1)
             let proposed = try preview(bundle: bundle, rendered: rendered, target: prepared.1)
             let conflicts = proposed.resources.filter { $0.error?.code == .conflict }.map {
@@ -167,8 +175,7 @@ public func inspect<T: SkillTarget>(_ bundle: FlyrailBundle, targets: [T]) -> [T
             observation = try SkillInspection.observation(observed, bundle: bundle, rendered: rendered,
                                                           conflicts: conflicts, previewError: error)
         } catch { observation = .unknown(NativeTransactionExecution.detail(error)) }
-        results.append(TargetInspection(target: target, root: root, stateRoot: (try? statePath(for: root)) ?? root,
-                                        observation: observation))
+        results.append(TargetInspection(target: target, root: root, observation: observation))
     }
     return results
 }

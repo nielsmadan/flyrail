@@ -3,83 +3,90 @@ import Darwin
 import Foundation
 import Testing
 
-@Test(arguments: [
-    "stage-node",
-    "index-pending-created",
-    "journal-created",
-    "receipt-created",
-    "index-completion-created",
-])
-func nativeIncompletePreparationsRemainEvidenceWithoutInventingRecovery(_ boundary: String) throws {
-    let root = try NativeTestRoot()
-    defer { try? root.cleanup() }
+private let preparationBoundaries = ["preparation", "directory", "stage-node", "staged", "journal"]
+
+private func installedDocument(_ root: NativeTestRoot, target: InstallationTarget) throws -> ResourcePath {
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
     try NativeTransactionIO.createFile(path, data: Data("baseline".utf8))
     #expect(try transactionWrite(transactionBundle(), rendered: transactionRendered(path, "first"),
                                  target: target, acquisition: .takeover).status == .applied)
-    var reached = false
+    return path
+}
+
+private func exists(_ path: ResourcePath) -> Bool {
+    var metadata = stat()
+    return lstat(path.displayString, &metadata) == 0
+}
+
+@Test(arguments: preparationBoundaries)
+func nativeCrashedPreparationsAreAbandonedByRecovery(_ boundary: String) throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let target = try root.target()
+    let path = try installedDocument(root, target: target)
+    let (seam, fired) = crashSeam(at: boundary)
+    #expect(throws: NativeSimulatedCrash(boundary)) {
+        try transactionWrite(transactionBundle("2"), rendered: transactionRendered(path, "second"),
+                             target: target, seam: seam)
+    }
+    try #require(fired())
+    let preparation = try #require(try storedPreparation(path, store: target.store))
+    #expect(try transactionRecordKeys(target.store) == [StateKey.resource(path, .preparation)])
+
+    #expect(try transactionRecover(target).status == .applied)
+    #expect(FileManager.default.contents(atPath: path.displayString) == Data("first".utf8))
+    #expect(try storedReceipt(path, store: target.store)?.claims.first?.version == "1")
+    #expect(try transactionRecordKeys(target.store) == [])
+    #expect(!exists(preparation.directory))
+}
+
+@Test(arguments: preparationBoundaries)
+func nativeFailedPreparationsCompensateWithinTheCall(_ boundary: String) throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let target = try root.target()
+    let path = try installedDocument(root, target: target)
+    var directory: ResourcePath?
     let seam = NativeTransactionSeam {
-        if $0 == boundary {
-            reached = true
-            throw TargetError(code: .ioError, message: "interrupted creation")
-        }
+        guard $0 == boundary, directory == nil else { return }
+        directory = try storedPreparation(path, store: target.store)?.directory
+        throw TargetError(code: .ioError, message: "interrupted creation")
     }
-    do {
-        let result = try transactionWrite(transactionBundle("2"), rendered: transactionRendered(path, "second"),
-                                          target: target, seam: seam)
-        #expect(result.status == (boundary == "index-completion-created" ? .partial : .incomplete))
-    } catch let error as TargetError { #expect(error.code == .ioError) }
-    #expect(reached)
-    let before = try NativeObservation.snapshot(root.path)
-    do {
-        _ = try NativeTransactionDriver.recover("team", target: target, timeout: .zero)
-        Issue.record("incomplete preparation was discarded")
-    } catch let error as TargetError {
-        #expect(error.code == (boundary == "stage-node" ? .recoveryNeeded : .invalidState))
-    }
-    #expect(try NativeObservation.snapshot(root.path) == before)
-    let ref = try NativeAuthority.reference(path, kind: .document)
-    let observed = try NativeAdmission.observe(ref)
-    #expect(observed.receipt?.claims.first?.version == (boundary == "index-completion-created" ? "2" : "1"))
-    #expect(observed.revision.data == Data(
-        (boundary == "receipt-created" || boundary == "index-completion-created" ? "second" : "first").utf8,
-    ))
+    let result = try transactionWrite(transactionBundle("2"), rendered: transactionRendered(path, "second"),
+                                      target: target, seam: seam)
+    #expect(result.status == .failed)
+    #expect(result.error == TargetError(code: .ioError, message: "interrupted creation"))
+    #expect(result.resources.first?.recoveryPaths == [])
+    let planned = try #require(directory)
+    #expect(!exists(planned))
+    #expect(try transactionRecordKeys(target.store) == [])
+    #expect(FileManager.default.contents(atPath: path.displayString) == Data("first".utf8))
+    #expect(try transactionWrite(transactionBundle("2"), rendered: transactionRendered(path, "second"),
+                                 target: target).status == .applied)
 }
 
 @Test
-func nativeRecognizedIndexPreparationRecoveryCanBeInterruptedAfterPromotion() throws {
+func nativeAnExistingTransactionDirectoryReleasesThePreparation() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
-    let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let store = root.store
+    try NativeTransactionIO.createFile(root.child("document"), data: Data("before\n".utf8))
+    let ref = try NativeAuthority.reference(root.child("document"), kind: .document)
+    let plan = try storePlan(ref, store: store, after: Revision(nodes: [
+        NativeResourcePlanner.node("", data: Data("after\n".utf8), mode: 0o644),
+    ]), previous: nil)
     let seam = NativeTransactionSeam {
-        if $0 == "index-pending-prepared" {
-            throw TargetError(code: .ioError, message: "pending interruption")
+        if $0 == "preparation" {
+            try FileManager.default.createDirectory(atPath: plan.transactionDirectory.displayString,
+                                                    withIntermediateDirectories: false)
         }
     }
-    do {
-        _ = try transactionWrite(transactionBundle(), rendered: transactionRendered(path), target: target, seam: seam)
-        Issue.record("initial seam was not reached")
-    } catch let error as TargetError { #expect(error.code == .ioError) }
-    var reached = false
-    let retry = NativeTransactionSeam {
-        if $0 == "recover-index" {
-            reached = true
-            throw TargetError(code: .ioError, message: "index recovery interruption")
-        }
-    }
-    do {
-        _ = try NativeTransactionDriver.recover("team", target: target, timeout: .zero, seam: retry)
-        Issue.record("recovery seam was not reached")
-    } catch let error as TargetError { #expect(error.code == .ioError) }
-    #expect(reached)
-    let recovered = try NativeTransactionDriver.recover("team", target: target, timeout: .zero)
-    #expect(recovered.status == .unchanged)
-    #expect(recovered.observation.pending)
-    #expect(recovered.observation.resources.map(\.destination) == [path])
-    #expect(try transactionRemove("team", target: target).status == .applied)
-    #expect(try NativeObservation.snapshot(path).revision.nodes.isEmpty)
+    #expect(throws: TargetError(
+        code: .recoveryNeeded, message: "unrecognized transaction data retained", path: plan.transactionDirectory,
+    )) { _ = try ResourceTransaction.prepare(plan, store: store, seam: seam) }
+    #expect(FileManager.default.fileExists(atPath: plan.transactionDirectory.displayString))
+    #expect(try transactionRecordKeys(store) == [])
+    #expect(FileManager.default.contents(atPath: ref.destination.displayString) == Data("before\n".utf8))
 }
 
 @Test
@@ -87,53 +94,50 @@ func nativeNonUTF8TransactionRoutesAreRejectedWithoutCreatingState() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let bytes = try ResourcePath(platformBytes: root.path.platformBytes + [47, 255])
-    let target = try InstallationTarget(indexRoot: root.child("index"))
-    do {
-        _ = try transactionWrite(transactionBundle(), rendered: transactionRendered(bytes), target: target)
-        Issue.record("nonportable route was accepted")
-    } catch let error as TargetError {
-        #expect(error.code == .unsafePath)
-        #expect(error.path?.platformBytes == bytes.platformBytes)
-    } catch is FlyrailValueError {
-        #expect(try NativeFilesystem.metadata(target.indexRoot) == nil)
-    }
+    let target = try root.target()
+    let result = try transactionWrite(transactionBundle(), rendered: transactionRendered(bytes), target: target)
+    #expect(result.status == .failed)
+    #expect(result.error?.code == .unsafePath)
+    #expect(result.error?.path?.platformBytes == bytes.platformBytes)
     #expect(try NativeObservation.snapshot(root.path).revision.nodes.count == 1)
+    #expect(try StateRecords.keys(target.store, prefix: "") == [])
 }
 
 @Test
-func nativePartiallyStagedTreeRetainsItsUnjournaledPrefix() throws {
+func nativePartiallyStagedTreeIsDestroyedByRecovery() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("tree")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
-    let content = try TreeContent(entries: [
-        BundleEntry(path: "a/file", data: Data("first".utf8)),
-        BundleEntry(path: "b/file", data: Data("second".utf8)),
-    ])
-    let rendered = try RenderedBundle(artifacts: [
-        RenderedArtifact(id: "guide", family: .skills, destination: path, content: .tree(content)),
-    ])
+    let target = try root.target()
+    func rendered(_ text: String) throws -> RenderedBundle {
+        let content = try TreeContent(entries: [
+            BundleEntry(path: "a/file", data: Data(text.utf8)),
+            BundleEntry(path: "b/file", data: Data(text.utf8)),
+        ])
+        return try RenderedBundle(artifacts: [
+            RenderedArtifact(id: "guide", family: .skills, destination: path, content: .tree(content)),
+        ])
+    }
+    #expect(try transactionWrite(transactionBundle(), rendered: rendered("first"), target: target).status == .applied)
+    let installed = try NativeObservation.snapshot(path)
     var staged = 0
     let seam = NativeTransactionSeam {
-        if $0 == "stage-node" {
-            staged += 1
-            if staged == 2 {
-                throw TargetError(code: .ioError, message: "partial tree interruption")
-            }
+        guard $0 == "stage-node" else { return }
+        staged += 1
+        if staged == 2 {
+            throw NativeSimulatedCrash("stage-node")
         }
     }
-    #expect(try transactionWrite(transactionBundle(), rendered: rendered, target: target,
-                                 seam: seam).status == .incomplete)
+    #expect(throws: NativeSimulatedCrash("stage-node")) {
+        try transactionWrite(transactionBundle("2"), rendered: rendered("second"), target: target, seam: seam)
+    }
     #expect(staged == 2)
-    let ref = try NativeAuthority.reference(path, kind: .tree)
-    let preparation = try appendPath(ref.stateRoot, "staging/resource")
-    #expect(try NativeObservation.snapshot(preparation).revision.nodes.map(\.path) == ["", "a"])
-    #expect(try NativeAdmission.observeIndex(target, bundleID: "team").current?.resources == [ref])
-    let before = try NativeObservation.snapshot(root.path)
-    do {
-        _ = try NativeTransactionDriver.recover("team", target: target, timeout: .zero)
-        Issue.record("unjournaled partial tree was discarded")
-    } catch let error as TargetError { #expect(error.code == .recoveryNeeded) }
-    #expect(try NativeObservation.snapshot(root.path) == before)
-    #expect(try NativeObservation.snapshot(path).revision.nodes.isEmpty)
+    let preparation = try #require(try storedPreparation(path, store: target.store))
+    let partial = try appendPath(preparation.directory, "staging/resource")
+    #expect(try NativeObservation.snapshot(partial).revision.nodes.map(\.path) == ["", "a"])
+
+    #expect(try transactionRecover(target).status == .applied)
+    #expect(!exists(preparation.directory))
+    #expect(try transactionRecordKeys(target.store) == [])
+    #expect(try NativeObservation.snapshot(path) == installed)
 }

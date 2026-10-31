@@ -9,20 +9,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python/src"))
 from flyrail.bundle import Bundle
 from flyrail.inspection import inspect, render_skills
 from flyrail.lifecycle import install
+from flyrail.stores import DirectoryStore
 from flyrail.targets import Agent, Target
 
 
 def main():
-    language, operation, source, destination = sys.argv[1:]
+    language, operation, source, destination, state = sys.argv[1:]
     if language == "rust":
-        rust_reference(operation, source, destination)
+        rust_reference(operation, source, destination, state)
         return
+    store = DirectoryStore(Path(state))
     bundle = Bundle.from_directory(Path(source))
     target = Target.directory(Path(destination))
     rendered = render_skills(bundle, target)
     droid = render_skills(bundle, Target.project(Agent.DROID, Path(destination)))
-    status = install(bundle, (target,))[0].status.value if operation == "install" else None
-    observed = inspect(bundle, (target,))[0].observation
+    status = install(bundle, (target,), store=store)[0].status.value if operation == "install" else None
+    observed = inspect(bundle, (target,), store=store)[0].observation
     print(json.dumps({
         "status": status,
         "current": observed.is_current,
@@ -33,7 +35,7 @@ def main():
     }, sort_keys=True))
 
 
-def rust_reference(operation, source, destination):
+def rust_reference(operation, source, destination, state):
     root = Path(__file__).resolve().parents[2]
     crate = root / ".cache/swift-skill-parity"
     crate.mkdir(parents=True, exist_ok=True)
@@ -49,7 +51,7 @@ def rust_reference(operation, source, destination):
         path.write_text(manifest)
     process = subprocess.run(
         ["cargo", "run", "--quiet", "--offline", "--manifest-path", str(path), "--",
-         operation, source, destination],
+         operation, source, destination, state],
         env={**os.environ, "CARGO_HOME": str(root / ".cache/cargo-home")},
         text=True, capture_output=True, check=True,
     )

@@ -10,21 +10,16 @@ func stateRelocatedFixture(_ value: JSONValue) throws -> JSONValue {
             let basename = String(original.split(separator: "/").last ?? "")
             let path = try ResourcePath("/pin/\(basename)")
             if basename.hasPrefix(".flyrail-") {
-                return try StateCodec.path(statePath(for: ResourcePath(
-                    original.contains("config.json") ? "/pin/config.json" : "/pin/AGENTS.md",
-                )))
+                let transactionID = String(basename.dropLast(".txn".count).suffix(32))
+                return try StateCodec.path(transactionPath(
+                    destination: ResourcePath(original.contains("config.json") ? "/pin/config.json" : "/pin/AGENTS.md"),
+                    transactionID: transactionID,
+                ))
             }
             return try StateCodec.path(path)
         }
         let relocated = try JSONValue.object(items.map { try ($0.0, stateRelocatedFixture($0.1)) })
         switch stateRecordTag(relocated) {
-        case "ResourceRef":
-            let fields = try stateField(relocated, "fields")
-            let destination = try StateCodec.decodePath(stateField(fields, "destination"))
-            return try stateReplacingField(
-                relocated, "fields",
-                stateReplacingField(fields, "state_root", StateCodec.path(statePath(for: destination))),
-            )
         case "Receipt":
             let fields = try stateField(relocated, "fields")
             let reference = try ResourceRef.fromState(stateField(fields, "resource"))

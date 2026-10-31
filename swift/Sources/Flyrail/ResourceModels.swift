@@ -151,27 +151,50 @@ public struct Revision: Sendable, Hashable {
 public struct ResourceRef: Sendable, Hashable {
     public let destination: ResourcePath
     public let kind: ResourceKind
-    public let stateRoot: ResourcePath
     public let schemaVersion: Int
 
-    public init(
-        destination: ResourcePath, kind: ResourceKind, stateRoot: ResourcePath,
-        schemaVersion: Int = 2,
-    ) throws {
+    public init(destination: ResourcePath, kind: ResourceKind, schemaVersion: Int = 2) throws {
         guard schemaVersion == 2 else { throw FlyrailValueError("authority schema must be 2") }
         try requireResourcePath(destination)
-        guard try stateRoot == statePath(for: destination) else {
-            throw FlyrailValueError("resource state path disagrees with destination")
-        }
         self.destination = destination
         self.kind = kind
-        self.stateRoot = stateRoot
         self.schemaVersion = schemaVersion
     }
 
     public var recordedAuthority: ResourceAuthority {
         get throws { try ResourceAuthority(recordedDestination: destination) }
     }
+}
+
+public struct Preparation: Sendable, Hashable {
+    public let resource: ResourceRef
+    public let transactionID: String
+    public let directory: ResourcePath
+    public let schemaVersion: Int
+
+    public init(resource: ResourceRef, transactionID: String, directory: ResourcePath, schemaVersion: Int = 2) throws {
+        try hexadecimalIdentity(transactionID, length: 32)
+        try Self.requireConcrete(directory)
+        guard schemaVersion == 2 else { throw FlyrailValueError("preparation schema must be 2") }
+        self.resource = resource
+        self.transactionID = transactionID
+        self.directory = directory
+        self.schemaVersion = schemaVersion
+    }
+
+    private static func requireConcrete(_ path: ResourcePath) throws {
+        let parts = path.platformBytes.split(separator: 47, omittingEmptySubsequences: false)
+        guard path.platformBytes.first == 47, !parts.contains(where: { $0.elementsEqual([46, 46]) }) else {
+            throw FlyrailValueError("expected an absolute concrete path")
+        }
+        guard parts.contains(where: { !$0.isEmpty && !$0.elementsEqual([46]) }) else {
+            throw FlyrailValueError("filesystem roots are not resources")
+        }
+    }
+}
+
+package func destinationOrder(_ resources: [ResourceRef]) -> [ResourceRef] {
+    resources.sorted { $0.destination.platformBytes.lexicographicallyPrecedes($1.destination.platformBytes) }
 }
 
 public struct ClaimRequirement: Sendable, Hashable {
@@ -407,8 +430,9 @@ public struct Index: Sendable, Hashable {
     }
 
     public var resources: [ResourceRef] {
-        Set(residual + [current, pending, previous].compactMap(\.self).flatMap { $0.membership.map(\.resource) })
-            .sorted { $0.stateRoot.platformBytes.lexicographicallyPrecedes($1.stateRoot.platformBytes) }
+        destinationOrder(Array(Set(
+            residual + [current, pending, previous].compactMap(\.self).flatMap { $0.membership.map(\.resource) },
+        )))
     }
 }
 

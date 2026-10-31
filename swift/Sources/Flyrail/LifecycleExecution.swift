@@ -10,14 +10,13 @@ package enum LifecycleExecution {
         }
     }
 
-    package static func locks(bundleID: String, target: InstallationTarget, observed: NativeIndexObservation,
+    package static func locks(bundleID: String, target: InstallationTarget, expected: Index?,
                               resources: [ResourceRef], timeout: Duration) throws -> NativeTransactionLocks
     {
-        try NativeTransactionLocks(target: target, bundleID: bundleID, resources: resources,
-                                   timeout: timeout)
-        { current in
-            guard current.current == observed.current, current.prepared == observed.prepared else {
-                throw nativeFailure(.concurrentChange, "index changed while acquiring locks", target.indexRoot)
+        try NativeTransactionLocks(target: target, bundleID: bundleID, resources: resources, timeout: timeout) {
+            guard try InstallationIndex.read(bundleID: bundleID, target: target) == expected else {
+                throw TargetError(code: .concurrentChange, message: "index changed while acquiring locks",
+                                  path: target.store.location)
             }
         }
     }
@@ -26,7 +25,7 @@ package enum LifecycleExecution {
                             seam: NativeTransactionSeam = .none) throws -> InstallationResult
     {
         try requireApplicable(preview)
-        let fresh = try LifecyclePlanning.fresh(preview, initial: false, created: locks.created)
+        let fresh = try LifecyclePlanning.fresh(preview, created: locks.created)
         let unchanged = fresh.resources.allSatisfy { $0.before == $0.after && $0.previous == $0.receipt }
         if unchanged, (fresh.index?.current == fresh.generation && fresh.index?.pending == nil &&
             fresh.index?.residual.isEmpty == true) || (fresh.index == nil && fresh.bundle == nil)
@@ -42,13 +41,10 @@ package enum LifecycleExecution {
                                 current: fresh.index?.current, pending: fresh.generation,
                                 previous: fresh.index?.current,
                                 residual: fresh.resources.map(\.resource))
-        let completed = try NativeIndexRecovery.completion(pending)
-        let snapshot = try NativeObservation.snapshot(fresh.target.indexRoot, privateStorage: true)
-        guard snapshot.revision == fresh.indexRevision else {
-            throw nativeFailure(.concurrentChange, "preview metadata changed", fresh.target.indexRoot)
-        }
-        let outcome = try NativeTransactionExecution.execute(locks, plans: fresh.resources, pending: pending,
-                                                             completed: completed, indexSnapshot: snapshot, seam: seam)
+        let completed = try Index(bundleID: fresh.bundleID, contextDigest: fresh.target.contextDigest,
+                                  current: fresh.generation)
+        let outcome = try NativeTransactionExecution.execute(locks, plans: fresh.resources, previous: fresh.index,
+                                                             pending: pending, completed: completed, seam: seam)
         return try InstallationResult(status: outcome.status,
                                       observation: InstallationInspection.observe(
                                           bundleID: fresh.bundleID,
@@ -58,34 +54,60 @@ package enum LifecycleExecution {
                                       notices: fresh.rendered.notices)
     }
 
+    package static func requireReceipts(_ index: Index?, resources: [ResourceRef], store: any StateStore) throws {
+        for resource in resources {
+            if InstallationIndex.expectsReceipt(index, resource: resource),
+               try ResourceAdmission.storedReceipt(resource, store: store) == nil
+            {
+                throw LifecyclePlanning.missingReceipt(resource)
+            }
+        }
+    }
+
     package static func recover(bundleID: String, target: InstallationTarget,
                                 locks: NativeTransactionLocks,
                                 seam: NativeTransactionSeam = .none) throws -> InstallationResult
     {
-        do {
-            let resources = try NativeIndexRecovery.recover(locks, seam: seam, retainingResults: true)
-            let changed = locks.observation.prepared != nil || resources.contains { $0.status == .applied }
-            return try InstallationResult(status: changed ? .applied : .unchanged,
-                                          observation: InstallationInspection.observe(
-                                              bundleID: bundleID,
-                                              target: target,
-                                          ),
-                                          resources: resources)
-        } catch let failure as NativeIndexRecoveryFailure {
-            return try InstallationResult(status: .incomplete,
-                                          observation: InstallationInspection.observe(
-                                              bundleID: bundleID,
-                                              target: target,
-                                          ),
-                                          resources: failure.resources, error: failure.error)
+        let store = target.store
+        let index = try InstallationIndex.read(bundleID: bundleID, target: target)
+        try requireReceipts(index, resources: locks.resources, store: store)
+        var results: [ResourceResult] = []
+        for resource in locks.resources {
+            let pending: Bool
+            do {
+                pending = try !ResourceTransaction.pendingRecovery(resource, store: store).isEmpty
+                try ResourceTransaction.recover(resource, store: store, seam: seam)
+            } catch let crash as NativeSimulatedCrash {
+                throw crash
+            } catch {
+                let detail = NativeTransactionExecution.detail(error)
+                try results.append(ResourceResult(
+                    resource: resource, status: .incomplete, error: detail,
+                    recoveryPaths: NativeTransactionExecution.recoveryPaths(store, resource, directory: nil),
+                ))
+                return try InstallationResult(status: .incomplete,
+                                              observation: InstallationInspection.observe(
+                                                  bundleID: bundleID,
+                                                  target: target,
+                                              ),
+                                              resources: results, error: detail)
+            }
+            try results.append(ResourceResult(resource: resource, status: pending ? .applied : .unchanged))
         }
+        let changed = results.contains { $0.status == .applied }
+        return try InstallationResult(status: changed ? .applied : .unchanged,
+                                      observation: InstallationInspection.observe(
+                                          bundleID: bundleID,
+                                          target: target,
+                                      ),
+                                      resources: results)
     }
 
     // swiftlint:disable:next function_parameter_count
     package static func synchronize(bundleID: String, bundle: FlyrailBundle?, rendered: RenderedBundle,
                                     target: InstallationTarget, acquisition: Acquisition,
                                     replaceModified: Bool, lockTimeout: Duration,
-                                    seam: NativeTransactionSeam = .none) -> InstallationResult
+                                    seam: NativeTransactionSeam = .none) throws -> InstallationResult
     {
         do {
             guard rendered.supported else {
@@ -97,8 +119,7 @@ package enum LifecycleExecution {
                                                      ),
                                                      notices: rendered.notices)
             }
-            let observed = try NativeAdmission.observeIndex(target, bundleID: bundleID)
-            let index = try LifecyclePlanning.visible(observed, target: target, bundleID: bundleID)
+            let index = try InstallationIndex.read(bundleID: bundleID, target: target)
             let group = try NativeTransactionPlanning.group(rendered)
             let references = try LifecyclePlanning.references(
                 rendered,
@@ -107,8 +128,9 @@ package enum LifecycleExecution {
                 bundle: bundle,
                 group: group,
             )
-            let locks = try locks(bundleID: bundleID, target: target, observed: observed,
+            let locks = try locks(bundleID: bundleID, target: target, expected: index,
                                   resources: references, timeout: lockTimeout)
+            defer { locks.release() }
             let recovered = try recover(bundleID: bundleID, target: target, locks: locks, seam: seam)
             if recovered.error != nil {
                 return recovered
@@ -122,6 +144,8 @@ package enum LifecycleExecution {
                 replaceModified: replaceModified,
             )
             return try run(preview, locks: locks, seam: seam)
+        } catch let crash as NativeSimulatedCrash {
+            throw crash
         } catch {
             return InstallationInspection.failed(bundleID, target: target, error: error)
         }

@@ -8,52 +8,55 @@ func nativeSameGenerationRepairRollbackRetainsModifiedPreimage() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
+    let store = target.store
     let bundle = try transactionBundle()
     let rendered = try transactionRendered(path)
     #expect(try transactionWrite(bundle, rendered: rendered, target: target).status == .applied)
     let ref = try NativeAuthority.reference(path, kind: .document)
-    let previous = try #require(NativeAdmission.observe(ref).receipt)
+    let previous = try #require(try storedReceipt(path, store: store))
     #expect(try transactionWrite(bundle, rendered: rendered, target: target).status == .unchanged)
-    #expect(try NativeAdmission.observe(ref).receipt == previous)
+    #expect(try storedReceipt(path, store: store) == previous)
+    let receiptBytes = try store.read(StateKey.resource(path, .receipt))
     try Data("local edited content\n".utf8).write(to: URL(fileURLWithPath: path.displayString))
     let original = try NativeObservation.snapshot(path).revision
-    let lock = try NativeAdmission.reserve(ref, timeout: .zero)
     let plan = try NativeResourcePlanner.plan(
-        ref, observation: NativeAdmission.observe(ref, lock: lock), bundleID: "team",
+        ref, state: ResourceAdmission.observe(ref, store: store), store: store, bundleID: "team",
         bundle: bundle, rendered: rendered, artifacts: rendered.artifacts,
         acquisition: .conflict, replaceModified: true, transactionID: previous.transactionID,
     )
     #expect(plan.receipt.transactionID != previous.transactionID)
-    let journal = try NativeTransaction.prepare(plan, lock: lock)
-    let interrupted = NativeTransactionSeam {
+    let journal = try ResourceTransaction.prepare(plan, store: store)
+    let (staged, backup) = try ResourceTransaction.paths(plan.transactionDirectory)
+    let publishFault = NativeTransactionSeam {
         if $0 == "backup" {
             throw TargetError(code: .ioError, message: "backup interrupted")
         }
     }
-    expectNativeError(.ioError) { try NativeTransaction.publish(journal, lock: lock, seam: interrupted) }
+    expectNativeError(.ioError) { try ResourceTransaction.publish(journal, store: store, seam: publishFault) }
     #expect(try NativeObservation.snapshot(path).revision.nodes.isEmpty)
-    #expect(try NativeObservation.snapshot(NativeTransaction.path(ref, "backup/resource")).revision == original)
-    #expect(try NativeObservation.snapshot(NativeTransaction.path(ref, "staging/resource")).revision == journal.staged)
-    #expect(try NativeObservation.read(
-        NativeTransaction.path(ref, "transaction.json"), as: Journal.self, tag: "Journal",
+    #expect(try NativeObservation.snapshot(backup).revision == original)
+    #expect(try NativeObservation.snapshot(staged).revision == journal.staged)
+    #expect(try StateRecords.read(
+        store, key: StateKey.resource(path, .journal), as: Journal.self, tag: "Journal",
     ) == journal)
-    expectNativeError(.ioError) {
-        try NativeTransaction.recover(ref, lock: lock, seam: NativeTransactionSeam {
-            if $0 == "rollback-backup" {
-                throw TargetError(code: .ioError, message: "rollback interrupted")
-            }
-        })
+    let recoveryFault = NativeTransactionSeam {
+        if $0 == "rollback-backup" {
+            throw TargetError(code: .ioError, message: "rollback interrupted")
+        }
     }
+    expectNativeError(.ioError) { try ResourceTransaction.recover(ref, store: store, seam: recoveryFault) }
     #expect(try NativeObservation.snapshot(path).revision == original)
-    #expect(try NativeObservation.snapshot(NativeTransaction.path(ref, "backup/resource")).revision.nodes.isEmpty)
-    #expect(try NativeObservation.snapshot(NativeTransaction.path(ref, "staging/resource")).revision == journal.staged)
-    try NativeTransaction.recover(ref, lock: lock)
-    try NativeTransaction.recover(ref, lock: lock)
+    #expect(try NativeObservation.snapshot(backup).revision.nodes.isEmpty)
+    #expect(try NativeObservation.snapshot(staged).revision == journal.staged)
+    try ResourceTransaction.recover(ref, store: store)
+    try ResourceTransaction.recover(ref, store: store)
     #expect(try NativeObservation.snapshot(path).revision == original)
-    #expect(try NativeAdmission.observe(ref).receipt == previous)
-    #expect(try NativeAdmission.observe(ref).state.revision.nodes.map(\.path) ==
-        ["", "authority.json", "backup", "lock", "receipt.json", "staging"])
+    #expect(try storedReceipt(path, store: store) == previous)
+    #expect(try store.read(StateKey.resource(path, .receipt)) == receiptBytes)
+    #expect(try transactionRecordKeys(store) == [])
+    #expect(!FileManager.default.fileExists(atPath: plan.transactionDirectory.displayString))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: root.stateURL.appending(path: "staging").path) == [])
 }
 
 @Test
@@ -61,7 +64,7 @@ func nativeSameGenerationRepairFaultIsNotReportedAsCommitted() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let bundle = try transactionBundle()
     let rendered = try transactionRendered(path)
     #expect(try transactionWrite(bundle, rendered: rendered, target: target).status == .applied)
@@ -78,7 +81,7 @@ func nativeSameGenerationRepairFaultIsNotReportedAsCommitted() throws {
     #expect(result.resources.map(\.status) == [.failed])
     #expect(result.resources.first?.recoveryPaths == [])
     for _ in 0 ..< 2 {
-        _ = try NativeTransactionDriver.recover("team", target: target, timeout: .zero)
+        #expect(try transactionRecover(target).error == nil)
     }
     #expect(try NativeObservation.snapshot(path).revision == before)
     #expect(try transactionWrite(bundle, rendered: rendered, target: target,
@@ -92,25 +95,22 @@ func nativePredictableStateOversizeLeavesNoTransactionEvidence(_ size: Int) thro
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let original = Data(repeating: 97, count: size)
     try NativeTransactionIO.createFile(path, data: original)
     let before = try NativeObservation.snapshot(path)
     for _ in 0 ..< 2 {
-        do {
-            _ = try transactionWrite(transactionBundle(), rendered: transactionRendered(path, "new\n"),
-                                     target: target, acquisition: .takeover)
-            Issue.record("oversized journal was accepted")
-        } catch let error as FlyrailValueError {
-            #expect(error.message == (size == 3 * 1024 * 1024
-                    ? "JSON input exceeds the byte limit" : "JSON string exceeds the byte limit"))
-        }
-        let ref = try NativeAuthority.reference(path, kind: .document)
-        #expect(try NativeAdmission.observe(ref).state.revision.nodes.map(\.path) == ["", "authority.json", "lock"])
-        #expect(try NativeAdmission.observe(ref).recovery == [])
-        #expect(try NativeObservation.snapshot(target.indexRoot).revision.nodes.map(\.path) == ["", "lock"])
+        let result = try transactionWrite(transactionBundle(), rendered: transactionRendered(path, "new\n"),
+                                          target: target, acquisition: .takeover)
+        #expect(result.status == .failed)
+        #expect(result.error?.code == .invalidState)
+        #expect(result.error?.message == (size == 3 * 1024 * 1024
+                ? "JSON input exceeds the byte limit" : "JSON string exceeds the byte limit"))
+        #expect(try StateRecords.keys(target.store, prefix: "") == [StateKey.resource(path, .authority)])
+        #expect(try transactionRecordKeys(target.store) == [])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.url.path) == ["document"])
         #expect(try NativeObservation.snapshot(path) == before)
-        #expect(try NativeTransactionDriver.recover("team", target: target, timeout: .zero).status == .unchanged)
+        #expect(try transactionRecover(target).status == .unchanged)
         #expect(try transactionRemove("team", target: target).status == .unchanged)
     }
     try Data("small baseline\n".utf8).write(to: URL(fileURLWithPath: path.displayString))
@@ -125,28 +125,29 @@ func nativeOversizedRepairPreservesExistingIndexAndCanBeRemoved() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let rendered = try transactionRendered(path, String(repeating: "a", count: 3 * 1024 * 1024))
-    do {
-        _ = try transactionWrite(transactionBundle(), rendered: rendered, target: target)
-        Issue.record("oversized creation journal was accepted")
-    } catch let error as FlyrailValueError { #expect(error.message == "JSON input exceeds the byte limit") }
+    let creation = try transactionWrite(transactionBundle(), rendered: rendered, target: target)
+    #expect(creation.status == .failed)
+    #expect(creation.error?.code == .invalidState)
+    #expect(creation.error?.message == "JSON input exceeds the byte limit")
     #expect(try transactionWrite(transactionBundle(), rendered: transactionRendered(path), target: target)
         .status == .applied)
     try Data("local edit".utf8).write(to: URL(fileURLWithPath: path.displayString))
     let before = try NativeObservation.snapshot(root.path)
-    do {
-        _ = try transactionWrite(transactionBundle(), rendered: rendered, target: target, replaceModified: true)
-        Issue.record("oversized repair journal was accepted")
-    } catch let error as FlyrailValueError { #expect(error.message == "JSON input exceeds the byte limit") }
+    let storeBefore = try storeContents(target.store)
+    let index = try InstallationIndex.read(bundleID: "team", target: target)
+    let repair = try transactionWrite(transactionBundle(), rendered: rendered, target: target, replaceModified: true)
+    #expect(repair.status == .failed)
+    #expect(repair.error?.code == .invalidState)
+    #expect(repair.error?.message == "JSON input exceeds the byte limit")
     for _ in 0 ..< 2 {
-        _ = try NativeTransactionDriver.recover("team", target: target, timeout: .zero)
+        #expect(try transactionRecover(target).error == nil)
     }
     #expect(try NativeObservation.snapshot(root.path) == before)
-    #expect(try NativeTransactionDriver.write(
-        bundle: nil, bundleID: "team", rendered: .empty, target: target, acquisition: .conflict,
-        replaceModified: true, timeout: .zero,
-    ).status == .applied)
+    #expect(try storeContents(target.store) == storeBefore)
+    #expect(try InstallationIndex.read(bundleID: "team", target: target) == index)
+    #expect(remove(bundleID: "team", target: target, replaceModified: true).status == .applied)
     #expect(try NativeObservation.snapshot(path).revision.nodes.isEmpty)
 }
 
@@ -162,20 +163,20 @@ func nativeReadonlyTreeTakeoverFailsBeforePreparation(_ mode: UInt32) throws {
     try FileManager.default.createDirectory(atPath: readonly.displayString, withIntermediateDirectories: true)
     try NativeTransactionIO.createFile(appendPath(readonly, "old"), data: Data("baseline".utf8))
     #expect(chmod(readonly.displayString, mode_t(mode)) == 0)
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     let rendered = try RenderedBundle(artifacts: [
         RenderedArtifact(id: "guide", family: .skills, destination: path,
                          content: .tree(TreeContent(entries: [BundleEntry(path: "new", data: Data("new".utf8))]))),
     ])
     let before = try NativeObservation.snapshot(path)
     for _ in 0 ..< 2 {
-        expectNativeError(.unsupported) {
-            _ = try transactionWrite(transactionBundle(), rendered: rendered, target: target, acquisition: .takeover)
-        }
-        let ref = try NativeAuthority.reference(path, kind: .tree)
-        #expect(try NativeAdmission.observe(ref).state.revision.nodes.map(\.path) == ["", "authority.json", "lock"])
+        let result = try transactionWrite(transactionBundle(), rendered: rendered, target: target,
+                                          acquisition: .takeover)
+        #expect(result.status == .failed)
+        #expect(result.error?.code == .unsupported)
+        #expect(try StateRecords.keys(target.store, prefix: "") == [StateKey.resource(path, .authority)])
         #expect(try NativeObservation.snapshot(path) == before)
-        #expect(try NativeTransactionDriver.recover("team", target: target, timeout: .zero).status == .unchanged)
+        #expect(try transactionRecover(target).status == .unchanged)
         #expect(try transactionRemove("team", target: target).status == .unchanged)
     }
     #expect(chmod(readonly.displayString, 0o700) == 0)
@@ -209,12 +210,9 @@ func nativeRestagingChecksEveryDirectoryBeforePopulatingTheTree() throws {
     #expect(try NativeObservation.snapshot(root.path).revision.nodes.map(\.path) == [""])
 }
 
-@Test
-func nativeIntactStructuredMemberDoesNotRequireItsBaselineAnchorsForObservation() throws {
-    let root = try NativeTestRoot()
-    defer { try? root.cleanup() }
+private func structuredFixture(_ root: NativeTestRoot) throws -> (ResourcePath, InstallationTarget, RenderedBundle) {
     let path = try root.child("document")
-    let target = try InstallationTarget(indexRoot: root.child("index"))
+    let target = try root.target()
     try NativeTransactionIO.createFile(path, data: Data(#"{"items":[{"id":"a"},{"id":"x","v":1},{"id":"b"}]}"#.utf8))
     let content = try StructuredContent(
         format: .json, selector: Selector(parts: [
@@ -227,21 +225,42 @@ func nativeIntactStructuredMemberDoesNotRequireItsBaselineAnchorsForObservation(
     ])
     #expect(try transactionWrite(transactionBundle(), rendered: rendered, target: target,
                                  acquisition: .takeover).status == .applied)
-    let ref = try NativeAuthority.reference(path, kind: .document)
-    let baseline = try #require(NativeAdmission.observe(ref).receipt?.claims.first?.selection?.baseline)
     try Data(#"{"items":[{"id":"c"},{"id":"x","v":2},{"id":"d"}]}"#.utf8)
         .write(to: URL(fileURLWithPath: path.displayString))
+    return (path, target, rendered)
+}
+
+@Test
+func nativeIntactStructuredMemberDoesNotRequireItsBaselineAnchorsForObservation() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let (path, target, rendered) = try structuredFixture(root)
     let before = try NativeObservation.snapshot(root.path)
-    let observation = try NativeTransactionDriver.inspect("team", target: target)
+    let storeBefore = try storeContents(target.store)
+    let observation = try inspectInstallation(bundleID: "team", target: target)
     #expect(observation.isCurrent)
     #expect(observation.resources.first?.claims.map(\.status) == [.current])
     #expect(try NativeObservation.snapshot(root.path) == before)
+    #expect(try storeContents(target.store) == storeBefore)
     #expect(try transactionWrite(transactionBundle(), rendered: rendered, target: target).status == .applied)
     #expect(try transactionWrite(transactionBundle(), rendered: rendered, target: target).status == .unchanged)
-    let stable = try NativeObservation.snapshot(root.path)
-    let removal = try transactionRemove("team", target: target)
-    #expect(removal.status == .failed)
-    #expect(removal.error?.message.contains("no surviving anchors") == true)
-    #expect(try NativeObservation.snapshot(root.path) == stable)
-    #expect(try NativeAdmission.observe(ref).receipt?.claims.first?.selection?.baseline == baseline)
+    #expect(try Data(contentsOf: URL(fileURLWithPath: path.displayString)) ==
+        Data(#"{"items":[{"id":"c"},{"id":"x","v":2},{"id":"d"}]}"#.utf8))
+}
+
+@Test
+func nativeForeignAnchorsMakeRemovalConflictWithoutChangingFiles() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let (_, target, _) = try structuredFixture(root)
+    let before = try NativeObservation.snapshot(root.path)
+    let storeBefore = try storeContents(target.store)
+    for _ in 0 ..< 2 {
+        let removal = try transactionRemove("team", target: target)
+        #expect(removal.status == .failed)
+        #expect(removal.error?.code == .conflict)
+        #expect(removal.error?.message.contains("no surviving anchors") == true)
+        #expect(try NativeObservation.snapshot(root.path) == before)
+        #expect(try storeContents(target.store) == storeBefore)
+    }
 }

@@ -92,18 +92,6 @@ package enum NativeSecurity {
         }
         _ = try capture(descriptor.raw, path: path)
     }
-
-    package static func ensureCoordinationLock(_ descriptor: NativeDescriptor, path: ResourcePath) throws {
-        let metadata = try NativeFilesystem.stat(descriptor, path: path)
-        try NativeFilesystem.ordinary(metadata, path: path)
-        guard metadata.st_mode & S_IFMT == S_IFREG, metadata.st_size == 0,
-              metadata.st_mode & 0o022 == 0, metadata.st_uid == geteuid()
-        else {
-            throw nativeIO(ENOTSUP, message: "management storage must be private to its owner", path: path)
-        }
-        try NativeFilesystem.resourceMode(metadata.st_mode, path: path)
-        _ = try capture(descriptor.raw, path: path)
-    }
 }
 
 package extension Data {
