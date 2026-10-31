@@ -67,6 +67,8 @@ def main() -> None:
     vendor = qa / "vendor"
     qa.mkdir(parents=True)
     try:
+        # cargo vendor needs every locked package, including ones no build downloads.
+        run(["cargo", "fetch", "--locked"])
         common = [
             "cargo",
             "package",
