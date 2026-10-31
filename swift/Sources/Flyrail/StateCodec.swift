@@ -195,7 +195,7 @@ package enum StateCodec {
         case let .boolean(value): value ? "True" : "False"
         case let .number(token):
             token.contains(".") || token.contains("e") || token.contains("E")
-                ? Double(token).map(String.init) ?? token
+                ? Double(token).map(\.description) ?? token
                 : token == "-0" ? "0" : token
         case let .string(text): pythonStringRepr(text)
         case let .array(items): "[" + items.map(enumValueRepr).joined(separator: ", ") + "]"
