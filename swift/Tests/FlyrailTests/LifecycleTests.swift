@@ -158,3 +158,87 @@ func storeReadFailuresBecomeTargetErrors() throws {
     let observed = try inspectInstallation(bundleID: "team", target: target)
     #expect(observed.resources.map { $0.error?.code } == [.ioError])
 }
+
+private struct HostStoreFailure: Error, CustomStringConvertible {
+    var description: String {
+        "host store failed"
+    }
+}
+
+private final class HostErrorStore: StateStore, @unchecked Sendable {
+    let location: ResourcePath?
+
+    init(location: ResourcePath) {
+        self.location = location
+    }
+
+    func read(_: String) throws -> Data? {
+        throw HostStoreFailure()
+    }
+
+    func write(_: String, value _: Data, expected _: Data?) throws -> Bool {
+        throw HostStoreFailure()
+    }
+
+    func delete(_: String, expected _: Data) throws -> Bool {
+        throw HostStoreFailure()
+    }
+
+    func keys(prefix _: String) throws -> [String] {
+        throw HostStoreFailure()
+    }
+
+    func lock(_: String, timeout _: Duration) throws -> StoreLock {
+        throw HostStoreFailure()
+    }
+}
+
+@Test
+func hostStoreErrorsBecomeTargetErrorsAtTheStoreLocation() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let location = try root.child("host-state")
+    let target = try InstallationTarget(store: HostErrorStore(location: location))
+    let rendered = try transactionRendered(root.child("document"))
+    let expected = TargetError(code: .ioError, message: "host store failed", path: location)
+    #expect(try preview(bundle: transactionBundle(), rendered: rendered, target: target).error == expected)
+    #expect(try previewRemoval(bundleID: "team", target: target).error == expected)
+    #expect(try sync(bundle: transactionBundle(), rendered: rendered, target: target).error == expected)
+    #expect(throws: expected) { _ = try StateRecords.lock(target.store, name: "resource/a", timeout: .zero) }
+}
+
+@Test
+func lifecycleRejectsNegativeLockTimeoutsBeforeTouchingTheStore() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let target = try root.target()
+    let rendered = try transactionRendered(root.child("document"))
+    let message = "lock timeout must be finite and nonnegative"
+    let negative = Duration.seconds(-1)
+    #expect(throws: FlyrailValueError(message)) {
+        _ = try sync(bundle: transactionBundle(), rendered: rendered, target: target, lockTimeout: negative)
+    }
+    let expected = TargetError(code: .invalidState, message: message)
+    #expect(remove(bundleID: "team", target: target, lockTimeout: negative).error == expected)
+    #expect(recoverInstallation(bundleID: "team", target: target, lockTimeout: negative).error == expected)
+    let proposed = try preview(bundle: transactionBundle(), rendered: rendered, target: target)
+    #expect(applyPreview(proposed, lockTimeout: negative).error == expected)
+    #expect(!FileManager.default.fileExists(atPath: root.stateURL.path))
+}
+
+@Test
+func recoveryRequiresOnlyThatExpectedReceiptsArePresent() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let target = try root.target()
+    let path = try root.child("document")
+    #expect(try sync(bundle: transactionBundle(), rendered: transactionRendered(path), target: target).status ==
+        .applied)
+    let stored = try #require(try StateRecords.receipt(root.store, path))
+    let other = try NativeAuthority.reference(root.child("other"), kind: .document)
+    let foreign = try Receipt(resource: other, transactionID: randomTransactionID())
+    try StateRecords.write(root.store, key: StateKey.resource(path, .receipt), value: foreign, expected: stored)
+    let recovered = recoverInstallation(bundleID: "team", target: target)
+    #expect(recovered.status == .unchanged)
+    #expect(recovered.error == nil)
+}

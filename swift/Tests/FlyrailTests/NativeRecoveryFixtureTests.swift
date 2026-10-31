@@ -22,7 +22,7 @@ private func stageFixture(
 ) throws {
     let path = journal.resource.destination
     let directory = try ResourceTransaction.transactionDirectory(journal, store: store)
-    let (staged, backup) = try ResourceTransaction.paths(directory)
+    let (staged, backup) = try TransactionLayout.resources(directory)
     switch name {
     case "prepared", "ownership-only-adoption":
         return
@@ -120,7 +120,7 @@ func nativeFixturePreparationsDecodeAtTheirTransactionPath() throws {
     }
 }
 
-@Test(arguments: ["rollback-stage", "rollback-backup", "rollback", "cleanup-node", "cleanup"])
+@Test(arguments: ResourceTransaction.recoveryBoundaries + ["cleanup-node", "cleanup"])
 func nativeRecoveryItselfCanBeInterruptedRepeatedly(_ boundary: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
@@ -143,21 +143,15 @@ func nativeRecoveryItselfCanBeInterruptedRepeatedly(_ boundary: String) throws {
     }
     try #require(crashed())
 
-    var reached = 0
+    let interrupted = TargetError(code: .ioError, message: "interrupted recovery")
     let seam = NativeTransactionSeam {
         if $0 == boundary {
-            reached += 1
-            throw TargetError(code: .ioError, message: "interrupted recovery")
+            throw interrupted
         }
     }
-    for _ in 0 ..< 3 {
-        do {
-            try ResourceTransaction.recover(ref, store: store, seam: seam)
-        } catch let error as TargetError {
-            #expect(error == TargetError(code: .ioError, message: "interrupted recovery"))
-        }
-    }
-    try #require(reached > 0)
+    let outcomes = (0 ..< 3).map { _ in kernelError { try ResourceTransaction.recover(ref, store: store, seam: seam) } }
+    let passedOnce = ["rollback-stage", "rollback-backup"].contains(boundary)
+    #expect(outcomes == (passedOnce ? [interrupted, nil, nil] : [interrupted, interrupted, interrupted]))
     try ResourceTransaction.recover(ref, store: store)
     try ResourceTransaction.recover(ref, store: store)
     #expect(try NativeObservation.snapshot(path).revision == before)
@@ -197,7 +191,7 @@ func nativeRecoveryRefusesALaterBirthTime() throws {
     try #require(lstat(path.displayString, &changed) == 0)
     try #require(changed.st_birthtimespec.tv_sec == born.tv_sec)
     try #require(!ResourceTransaction.changedAfter(
-        boundary: boundary.st_mtimespec, modified: changed.st_mtimespec, born: nil, birthTime: false,
+        boundary: boundary.st_mtimespec, modified: changed.st_mtimespec, born: boundary.st_mtimespec,
     ))
 
     #expect(throws: TargetError(

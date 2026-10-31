@@ -470,7 +470,7 @@ def source_option_validation(app):
         command = app.command("write", "--destination", app.root / "project", "--source", source, option, value)
         result = subprocess.run(command, env=ENV, cwd=ROOT, capture_output=True, timeout=30)
         assert result.returncode == 1, (option, result)
-        message = driver_error(app.driver, result)
+        message = driver_error(result)
         assert message == expected, (option, message)
         assert tree_snapshot(app.root, modes=True) == before
         assert not app.state.exists() and not (app.root / "project").exists()

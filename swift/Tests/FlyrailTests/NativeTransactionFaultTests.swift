@@ -3,10 +3,6 @@ import Darwin
 import Foundation
 import Testing
 
-private let forwardTransactionBoundaries = ResourceTransaction.boundaries.filter {
-    !ResourceTransaction.recoveryBoundaries.contains($0)
-}
-
 private let committedBoundaries: Set = [
     "receipt-reread", "receipt-committed", "cleanup-node", "cleanup", "index-completion",
 ]
@@ -34,7 +30,7 @@ private func installed(_ root: NativeTestRoot, target: InstallationTarget, text:
     return path
 }
 
-@Test(arguments: forwardTransactionBoundaries)
+@Test(arguments: lifecycleForwardBoundaries)
 func nativeEveryTransactionFaultKeepsPermanentCommitsAndRecognizedRecovery(_ boundary: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }

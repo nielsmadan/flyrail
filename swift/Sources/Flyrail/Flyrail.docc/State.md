@@ -8,7 +8,9 @@ transaction will use, and is recorded before that directory exists. ``Journal``
 binds a transaction's complete before, staged, published and backup revisions.
 
 Every record is a value in the host's ``StateStore`` under a fixed key scheme (see
-<doc:Stores>); nothing is stored beside a managed resource.
+<doc:Stores>); nothing is stored beside a managed resource. Lifecycle operations
+accept a stored record only in its exact canonical encoding and with the record
+tag its key implies; anything else is reported as `invalid_state`.
 
 Values are immutable and `Sendable`. ``Count`` retains nonnegative decimal
 metadata tokens, including values beyond `UInt64`. Semantic integers remain
@@ -26,8 +28,10 @@ to one million and decimal integers to 4300 digits.
 `FlyrailInterop encode` and `decode` canonicalize one state value on standard
 input. Optional `--type RecordTag` checks its type. `records` accepts an array of
 `{"path":"/absolute/path","bytes":"base64"}` entries and reports their raw and
-canonical base64 bytes and record tags. These commands do not access managed
-resources. The lifecycle commands take `--state DIRECTORY`, a ``DirectoryStore``
-location shared with the Python and Rust drivers, and `hold` keeps a store lock
-held for cross-language contention checks. Native authority admission, publication
-and recovery are separate layers.
+canonical base64 bytes and record tags; `records --state DIRECTORY` instead lists
+every record in that ``DirectoryStore`` with its key, tag and raw and canonical
+bytes. These commands do not access managed resources. The lifecycle commands
+take `--state DIRECTORY`, a ``DirectoryStore`` location; each driver in a
+cross-language check gets its own store. `hold` keeps a store lock held for that
+driver's contention checks. Native authority admission, publication and recovery
+are separate layers.

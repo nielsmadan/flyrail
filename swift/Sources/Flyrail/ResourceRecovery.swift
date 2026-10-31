@@ -7,7 +7,7 @@ extension ResourceTransaction {
     {
         let destination = journal.resource.destination
         let directory = try transactionDirectory(journal, store: store)
-        let (stagedPath, backupPath) = try paths(directory)
+        let (stagedPath, backupPath) = try TransactionLayout.resources(directory)
         try layout(directory)
         try validateAncestors(journal, store: store, directory: directory)
         let actual = try NativeObservation.snapshot(destination).revision
@@ -51,9 +51,7 @@ extension ResourceTransaction {
                 .recoveryNeeded, "transaction record repeats the previous receipt", preparation.directory,
             )
         }
-        let current = try StateRecords.read(
-            store, key: StateKey.resource(resource.destination, .receipt), as: Receipt.self, tag: "Receipt",
-        )
+        let current = try StateRecords.receipt(store, resource.destination)
         if current == journal.receipt {
             try cleanup(journal, store: store, seam: seam)
         } else if current == journal.previous {
@@ -67,9 +65,9 @@ extension ResourceTransaction {
         try records(resource, store: store).preparation.map { [$0.directory] } ?? []
     }
 
-    package static func changedAfter(boundary: timespec, modified: timespec, born: timespec?, birthTime: Bool) -> Bool {
+    package static func changedAfter(boundary: timespec, modified: timespec, born: timespec) -> Bool {
         let later = { (value: timespec) in (value.tv_sec, value.tv_nsec) > (boundary.tv_sec, boundary.tv_nsec) }
-        return later(modified) || (birthTime && born.map(later) == true)
+        return later(modified) || later(born)
     }
 
     // swiftlint:disable:next function_parameter_count
@@ -78,7 +76,7 @@ extension ResourceTransaction {
         seam: NativeTransactionSeam,
     ) throws {
         let destination = journal.resource.destination
-        let (stagedPath, backupPath) = try paths(directory)
+        let (stagedPath, backupPath) = try TransactionLayout.resources(directory)
         if journal.before == journal.staged {
             try NativeObservation.requireRevision(destination, journal.before)
         } else if !backup.nodes.isEmpty {
@@ -107,7 +105,7 @@ extension ResourceTransaction {
         if try pathExists(directory) {
             guard known(preparation, store: store) else { throw unrecognizedDirectory(store) }
             let unrecognized = nativeFailure(.recoveryNeeded, "unrecognized transaction data retained", directory)
-            let (staged, backup) = try paths(directory)
+            let (staged, backup) = try TransactionLayout.resources(directory)
             let retained: Revision
             let current: Revision
             do {
@@ -143,9 +141,7 @@ extension ResourceTransaction {
                 }
                 throw nativeIO(code, path: selected)
             }
-            if changedAfter(
-                boundary: boundary, modified: metadata.st_mtimespec, born: metadata.st_birthtimespec, birthTime: true,
-            ) {
+            if changedAfter(boundary: boundary, modified: metadata.st_mtimespec, born: metadata.st_birthtimespec) {
                 throw nativeFailure(.recoveryNeeded, "destination revision changed after preparation", selected)
             }
         }

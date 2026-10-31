@@ -72,7 +72,7 @@ package enum NativeTransactionBudget {
 
     private static func boundedAncestors(_ plan: ResourcePlan) throws -> [Ancestor] {
         let directory = plan.transactionDirectory
-        let synthetic = try [directory, appendPath(directory, "staging"), appendPath(directory, "backup")]
+        let synthetic = try TransactionLayout.directories(directory)
             .filter { selected in !plan.ancestors.contains { $0.path == selected } }
             .map { selected in
                 try Ancestor(

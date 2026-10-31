@@ -22,15 +22,20 @@ package enum LifecyclePlanning {
         portablePathKey(String(decoding: name, as: UTF8.self))
     }
 
+    package static func requireStoreOutsideSources(bundle: FlyrailBundle?, target: InstallationTarget) throws {
+        let stores = try NativeTransactionDirectory.storePaths(target.store)
+        for source in bundle?.sourceRoots ?? [] where try stores.contains(where: { try overlaps(source, $0) }) {
+            throw FlyrailValueError("state store overlaps bundle source")
+        }
+    }
+
     package static func references(_ rendered: RenderedBundle, index: Index?, target: InstallationTarget,
                                    bundle: FlyrailBundle?,
                                    group: NativeTransactionPlanning.Group) throws -> [ResourceRef]
     {
+        try requireStoreOutsideSources(bundle: bundle, target: target)
         let stores = try NativeTransactionDirectory.storePaths(target.store)
         let sources = bundle?.sourceRoots ?? []
-        for source in sources where try stores.contains(where: { try overlaps(source, $0) }) {
-            throw FlyrailValueError("state store overlaps bundle source")
-        }
         let resources = destinationOrder(Array(Set(Array(group.artifacts.keys) + (index?.resources ?? []))))
         guard Set(resources.map(\.destination)).count == resources.count else {
             throw FlyrailValueError("resource kinds disagree at the same destination")
@@ -82,14 +87,17 @@ package enum LifecyclePlanning {
         if plans.allSatisfy({ $0.error == nil }) {
             plans = try NativeTransactionPlanning.order(plans, rendered: rendered, byID: group.byID)
         }
-        let error: TargetError? = rendered.supported ? nil :
-            TargetError(code: .unsupported, message: "rendered target has unsupported requirements")
+        let error: TargetError? = rendered.supported ? nil : unsupportedRequirements
         return try LifecyclePreview(
             bundleID: bundleID, bundle: bundle, rendered: rendered, target: target, acquisition: acquisition,
             replaceModified: replaceModified, index: index,
             generation: NativeTransactionPlanning.generation(bundle, rendered: rendered, group: group),
             resources: plans, error: error, artifactsByResource: group.artifacts,
         )
+    }
+
+    package static var unsupportedRequirements: TargetError {
+        TargetError(code: .unsupported, message: "rendered target has unsupported requirements")
     }
 
     package static func missingReceipt(_ resource: ResourceRef) -> TargetError {
@@ -125,7 +133,7 @@ package enum LifecyclePlanning {
             if recorded == plan.recoveryPaths.isEmpty {
                 throw nativeFailure(.concurrentChange, "preview recovery changed", destination)
             }
-            let staging = try appendPath(plan.transactionDirectory, "staging")
+            let staging = try TransactionLayout.stagingDirectory(plan.transactionDirectory)
             let current = try ResourceTransaction.planAncestors(
                 destination: destination, directory: plan.transactionDirectory,
             )

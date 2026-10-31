@@ -100,7 +100,7 @@ package enum NativeTransactionDirectory {
             throw TargetError(code: .invalidState, message: error.message)
         }
         guard let selected = staged(store: store, destination: destination, transactionID: transactionID),
-              let left = parent(selected), let right = parent(destination), sameMount(left, right)
+              let left = parentPath(selected), let right = parentPath(destination), sameMount(left, right)
         else { return fallback }
         return selected
     }
@@ -125,35 +125,46 @@ package enum NativeTransactionDirectory {
         guard metadata.st_mode & S_IFMT == S_IFDIR else {
             throw nativeFailure(.unsafePath, "whole-tree resource must be a directory", destination)
         }
-        var pending = [destination]
-        var entries: [ResourcePath] = []
-        while let directory = pending.popLast() {
-            guard let location = try NativeFilesystem.parent(directory) else { throw nativeIO(ENOENT, path: directory) }
-            let descriptor = try NativeFilesystem.open(
-                location.descriptor.raw, name: location.name, directory: true, path: directory,
-            )
-            for name in try NativeFilesystem.names(descriptor, path: directory) {
-                let child = try NativeFilesystem.child(directory, name)
-                if isTransactionName(String(decoding: name, as: UTF8.self)) {
-                    entries.append(child)
-                    continue
-                }
-                guard let metadata = try NativeFilesystem.metadata(descriptor.raw, name: name, path: child) else {
-                    throw nativeIO(ENOENT, path: child)
-                }
-                try NativeAuthority.safe(metadata, path: child)
-                if metadata.st_mode & S_IFMT == S_IFDIR {
-                    pending.append(child)
-                }
-            }
-        }
-        return entries
+        let descriptor = try NativeFilesystem.open(
+            parent.descriptor.raw, name: parent.name, directory: true, path: destination,
+        )
+        return try entries(descriptor, path: destination, depth: 0)
     }
 
-    private static func parent(_ path: ResourcePath) -> ResourcePath? {
-        let bytes = path.platformBytes
-        guard let slash = bytes.lastIndex(of: 47), bytes != [47] else { return nil }
-        return try? ResourcePath(platformBytes: slash == 0 ? [47] : Array(bytes[..<slash]))
+    private static func entries(
+        _ descriptor: NativeDescriptor, path: ResourcePath, depth: Int,
+    ) throws -> [ResourcePath] {
+        guard depth <= NativeLimits.default.maximumDepth else {
+            throw nativeIO(ENOTSUP, message: "resource exceeds the node limit", path: path)
+        }
+        let names = try NativeFilesystem.names(descriptor, path: path)
+        var found: [ResourcePath] = []
+        for name in names {
+            let child = try NativeFilesystem.child(path, name)
+            if isTransactionName(String(decoding: name, as: UTF8.self)) {
+                found.append(child)
+                continue
+            }
+            guard let metadata = try NativeFilesystem.metadata(descriptor.raw, name: name, path: child) else {
+                throw nativeIO(ENOENT, path: child)
+            }
+            try NativeAuthority.safe(metadata, path: child)
+            guard metadata.st_mode & S_IFMT == S_IFDIR else { continue }
+            let opened: NativeDescriptor
+            do {
+                opened = try NativeFilesystem.open(descriptor.raw, name: name, directory: true, path: child)
+            } catch let error as TargetError where error.message == "file disappeared while opening" {
+                throw nativeIO(ENOENT, path: child)
+            }
+            found += try entries(opened, path: child, depth: depth + 1)
+            guard try NativeFilesystem.identity(descriptor.raw, name: name, descriptor: opened, path: child) else {
+                throw nativeFailure(.concurrentChange, "resource changed during inspection", child)
+            }
+        }
+        guard try NativeFilesystem.names(descriptor, path: path) == names else {
+            throw nativeFailure(.concurrentChange, "directory entries changed", path)
+        }
+        return found
     }
 
     private static func device(_ bytes: [UInt8]) -> dev_t? {

@@ -75,23 +75,3 @@ func syncReportsBusyWhenAnotherHandleHoldsTheResourceLock() throws {
                                         path: root.store.location))
     #expect(try NativeFilesystem.metadata(path) == nil)
 }
-
-@Test
-func nativeEqualByteRewritesCarryPostJournalReplacementEvidence() throws {
-    let root = try NativeTestRoot()
-    defer { try? root.cleanup() }
-    let resource = try root.child("resource")
-    let path = root.url.appending(path: "resource")
-    try Data("bytes".utf8).write(to: path)
-    let original = try NativeObservation.snapshot(resource)
-    Thread.sleep(forTimeInterval: 0.003)
-    try Data("journal".utf8).write(to: root.url.appending(path: "journal"))
-    let journal = try #require(try NativeObservation.snapshot(root.child("journal")).stamps.first)
-    #expect(original.hasReplacementEvidence(after: journal) == false)
-    Thread.sleep(forTimeInterval: 0.003)
-    try Data("bytes".utf8).write(to: path)
-    let changed = try NativeObservation.snapshot(resource)
-    #expect(changed.revision == original.revision)
-    #expect(changed.hasReplacementEvidence(after: journal))
-    expectNativeError(.concurrentChange) { try NativeObservation.require(resource, original) }
-}

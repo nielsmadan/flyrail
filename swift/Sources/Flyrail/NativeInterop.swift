@@ -95,17 +95,20 @@ package enum NativeInterop {
         return try NativeAuthority.reference(ResourcePath(required(options, "--destination")), kind: kind)
     }
 
-    private static func timeout(_ options: [String: String], _ key: String,
-                                default fallback: Double) throws -> Duration
-    {
-        guard let seconds = Double(options[key] ?? String(fallback)), seconds.isFinite, seconds >= 0 else {
+    package static func duration(_ name: String, _ value: String) throws -> Duration {
+        guard let seconds = Double(value) else {
             throw FlyrailValueError(
-                "\(key.dropFirst(2).replacingOccurrences(of: "-", with: " ")) must be finite and nonnegative",
+                "invalid \(name): " +
+                    (value.isEmpty ? "cannot parse float from empty string" : "invalid float literal"),
             )
         }
-        guard seconds <= 1e9 else { throw FlyrailValueError("invalid \(key): duration is too large") }
-        return .seconds(seconds)
+        let reason = "invalid \(name): cannot convert float seconds to Duration: value is"
+        guard !(seconds < 0) else { throw FlyrailValueError("\(reason) negative") }
+        guard seconds < 18_446_744_073_709_551_616 else { throw FlyrailValueError("\(reason) either too big or NaN") }
+        return seconds >= maximumSeconds ? .seconds(maximumSeconds) : .seconds(seconds)
     }
+
+    package static let maximumSeconds: Double = 4e18
 
     private static func emit(_ value: JSONValue, output: FileHandle) throws {
         try output.write(contentsOf: StateCodec.encodeRecord(value))
@@ -115,11 +118,14 @@ package enum NativeInterop {
         let store = try DirectoryStore(ResourcePath(required(options, "--state")))
         let reference = try resource(options)
         let barrier = try NativeAuthority.absolute(ResourcePath(required(options, "--barrier")))
-        let timeout = try timeout(options, "--lock-timeout", default: 0)
-        let wait = try self.timeout(options, "--wait-timeout", default: 30)
+        let wait = try duration("--wait-timeout", options["--wait-timeout"] ?? "30")
+        let timeout = try duration("--lock-timeout", options["--lock-timeout"] ?? "0")
         let lock = try StateRecords.lock(store, name: StateKey.resourceLock(reference.destination), timeout: timeout)
         defer { lock.release() }
         try emit(.object([("status", .string("reserved"))]), output: output)
+        guard wait < .seconds(maximumSeconds) else {
+            throw FlyrailValueError("invalid --wait-timeout: duration is too large")
+        }
         let deadline = ContinuousClock.now.advanced(by: wait)
         while try NativeFilesystem.metadata(barrier) == nil {
             guard ContinuousClock.now < deadline else { throw FlyrailValueError("barrier timed out") }

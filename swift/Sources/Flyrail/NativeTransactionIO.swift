@@ -18,7 +18,7 @@ package struct NativeTransactionSeam {
 }
 
 package enum NativeTransactionIO {
-    package static func createFile(_ path: ResourcePath, data: Data, created: () throws -> Void = {}) throws {
+    package static func createFile(_ path: ResourcePath, data: Data) throws {
         guard let parent = try NativeFilesystem.parent(path) else { throw nativeIO(ENOENT, path: path) }
         let raw = try NativeFilesystem.withName(parent.name) {
             openat(parent.descriptor.raw, $0, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
@@ -26,7 +26,6 @@ package enum NativeTransactionIO {
         guard raw >= 0 else { throw nativeIO(errno, path: path) }
         let descriptor = NativeDescriptor(raw)
         try NativeSecurity.ensurePrivate(descriptor, path: path)
-        try created()
         try data.withUnsafeBytes { bytes in
             var offset = 0
             while offset < bytes.count {
@@ -48,7 +47,7 @@ package enum NativeTransactionIO {
         try parent.validate()
     }
 
-    package static func rename(_ source: ResourcePath, to destination: ResourcePath, exclusive: Bool) throws {
+    package static func rename(_ source: ResourcePath, to destination: ResourcePath) throws {
         guard let from = try NativeFilesystem.parent(source),
               let to = try NativeFilesystem.parent(destination)
         else { throw nativeIO(ENOENT, path: destination) }
@@ -56,7 +55,7 @@ package enum NativeTransactionIO {
         try to.validate()
         let status = try NativeFilesystem.withName(from.name) { name in
             try NativeFilesystem.withName(to.name) { other in
-                renameatx_np(from.descriptor.raw, name, to.descriptor.raw, other, exclusive ? UInt32(RENAME_EXCL) : 0)
+                renameatx_np(from.descriptor.raw, name, to.descriptor.raw, other, UInt32(RENAME_EXCL))
             }
         }
         guard status == 0 else { throw nativeIO(errno, path: destination) }
@@ -66,26 +65,12 @@ package enum NativeTransactionIO {
 
     package static func move(_ source: ResourcePath, to destination: ResourcePath, revision: Revision) throws {
         try NativeObservation.requireRevision(source, revision)
-        try rename(source, to: destination, exclusive: true)
+        try rename(source, to: destination)
         try NativeObservation.requireRevision(destination, revision)
     }
 
-    package static func unlink(_ path: ResourcePath, revision: Revision) throws {
-        try NativeObservation.requireRevision(path, revision)
-        guard let parent = try NativeFilesystem.parent(path) else { throw nativeIO(ENOENT, path: path) }
-        let status = try NativeFilesystem.withName(parent.name) {
-            unlinkat(parent.descriptor.raw, $0, revision.nodes.first?.data == nil ? AT_REMOVEDIR : 0)
-        }
-        guard status == 0 else { throw nativeIO(errno, path: path) }
-        try parent.validate()
-    }
-
-    package static func destroy(
-        _ path: ResourcePath, revision: Revision, seam: NativeTransactionSeam = .none,
-        beforeRemoval: () throws -> Void = {},
-    ) throws {
+    package static func destroy(_ path: ResourcePath, revision: Revision, seam: NativeTransactionSeam = .none) throws {
         for count in stride(from: revision.nodes.count, through: 1, by: -1) {
-            try beforeRemoval()
             let prefix = try Revision(nodes: Array(revision.nodes.prefix(count)))
             try NativeObservation.requireRevision(path, prefix)
             let node = revision.nodes[count - 1]

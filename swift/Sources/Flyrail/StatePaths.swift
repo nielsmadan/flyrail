@@ -21,6 +21,15 @@ package func statePathText(_ bytes: [UInt8]) throws -> String {
     return text
 }
 
+package func parentPath(_ path: ResourcePath) -> ResourcePath? {
+    let bytes = path.platformBytes
+    guard let end = bytes.lastIndex(where: { $0 != 47 }), let slash = bytes[...end].lastIndex(of: 47) else {
+        return nil
+    }
+    let head = bytes[..<slash]
+    return try? ResourcePath(platformBytes: head.lastIndex(where: { $0 != 47 }).map { Array(head[...$0]) } ?? [47])
+}
+
 package func requireResourcePath(_ path: ResourcePath) throws {
     let text = try statePathText(path)
     guard text != "/", text != "//" else {

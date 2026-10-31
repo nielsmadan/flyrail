@@ -24,13 +24,14 @@ security framing. Resource flags, extended ACLs, foreign extended attributes,
 special modes, symlinks, hard-linked documents and special files refuse
 management. The opaque `com.apple.provenance` attribute is captured as evidence.
 
-Package-internal admission takes the resource's store lock, validates its
-authority record, probes hierarchy conflicts and reobserves the resource. Each
-resource's permanent fence is its authority record, and fences are checked only
-within one store; a destination managed through another store is foreign content.
-Filesystem stores keep their directories and files owner-private (new directories
-0700, files 0600) and refuse an existing unsafe location rather than repairing it;
-see <doc:Stores>.
+Package-internal admission runs under the resource's store lock. It confirms the
+canonical destination, records or validates the authority record, checks the
+existing destination's kind and probes hierarchy conflicts. Each resource's
+permanent fence is its authority record, and fences are checked only within one
+store; a destination managed through another store is foreign content. Filesystem
+stores keep their directories and files owner-private (new directories 0700, files
+0600) and refuse an existing unsafe location rather than repairing it; see
+<doc:Stores>.
 
 ``InstallationTarget`` names an installation by its ``StateStore`` and context.
 Internal index observation validates closed records and installation context
@@ -41,5 +42,5 @@ policy.
 `cd swift && just check-integration` exercises Swift/Python/Rust authority
 orderings, alias lock contention, native revision fixtures and exact record/security
 parity.
-The reference `hold` drivers receive canonical final spelling for replay; Swift's
-driver additionally accepts existing physical case aliases.
+Every `hold` driver receives existing physical case aliases and canonicalizes
+them before taking the lock.

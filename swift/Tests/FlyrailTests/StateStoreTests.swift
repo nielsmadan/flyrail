@@ -412,6 +412,33 @@ func storeLocksRejectNegativeTimeouts() throws {
     defer { try? root.cleanup() }
     let stores: [any StateStore] = try [MemoryStore(), DirectoryStore(root.child("state"))]
     for store in stores {
-        #expect(throws: FlyrailValueError.self) { _ = try store.lock("x", timeout: .seconds(-1)) }
+        #expect(throws: FlyrailValueError("lock timeout must be finite and nonnegative")) {
+            _ = try store.lock("x", timeout: .seconds(-1))
+        }
+    }
+}
+
+@Test
+func parentPathTreatsDoubleSlashAsTheRoot() throws {
+    let parents = try ["/a/b", "/a/", "//a", "/a", "//", "/"].map { try parentPath(ResourcePath($0))?.displayString }
+    #expect(parents == ["/a", "/", "/", "/", nil, nil])
+}
+
+@Test
+func storeKeysAcceptTwoHundredBytesAndRefuseLongerKeys() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let longest = "k/" + String(repeating: "a", count: 198)
+    let stores: [any StateStore] = try [MemoryStore(), DirectoryStore(root.child("state"))]
+    for store in stores {
+        #expect(try store.write(longest, value: Data("v".utf8), expected: nil))
+        #expect(try store.read(longest) == Data("v".utf8))
+        #expect(try store.keys(prefix: "k/") == [longest])
+        #expect(throws: StoreError.invalidKey(message: "state key must be slash-separated lowercase segments")) {
+            _ = try store.write(longest + "a", value: Data("v".utf8), expected: nil)
+        }
+        #expect(throws: StoreError.invalidKey(message: "lock name must be slash-separated lowercase segments")) {
+            _ = try store.lock(longest + "a", timeout: .zero)
+        }
     }
 }

@@ -100,10 +100,9 @@ package enum SkillInspection {
         var metadataError: TargetError?
         for resource in observed.resources {
             do {
-                guard let receipt = try StateRecords.read(
-                    observed.target.store, key: StateKey.resource(resource.destination, .receipt), as: Receipt.self,
-                    tag: "Receipt",
-                ) else { continue }
+                guard let receipt = try StateRecords.receipt(observed.target.store, resource.destination) else {
+                    continue
+                }
                 for identifier in Set(receipt.claims.map(\.bundleID)).sorted(by: utf8Less) {
                     let claims = receipt.claims.filter { $0.bundleID == identifier }
                     guard let first = claims.first else { continue }

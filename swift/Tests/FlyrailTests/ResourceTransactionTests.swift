@@ -3,12 +3,6 @@ import Darwin
 import Foundation
 import Testing
 
-private let forwardBoundaries = [
-    "preparation", "directory", "stage-node", "staged", "journal", "prepare", "backup-move", "backup", "rename",
-    "staging", "publish", "publish-receipt", "receipt", "receipt-reread", "receipt-committed", "cleanup-node",
-    "cleanup",
-]
-
 private let committedBoundaries: Set<String> = ["receipt-reread", "receipt-committed", "cleanup-node", "cleanup"]
 
 private func kernelStore(_ root: NativeTestRoot, directory: Bool) -> any StateStore {
@@ -73,17 +67,6 @@ private func commitPrevious(_ ref: ResourceRef, store: any StateStore) throws ->
     return previous
 }
 
-private func kernelError(_ body: () throws -> Void) -> TargetError? {
-    do {
-        try body()
-        return nil
-    } catch let error as TargetError {
-        return error
-    } catch {
-        return nil
-    }
-}
-
 private func crashForward(_ plan: ResourcePlan, store: any StateStore, at boundary: String) throws {
     let (seam, fired) = crashSeam(at: boundary)
     #expect(throws: NativeSimulatedCrash(boundary)) {
@@ -146,23 +129,63 @@ func preparePublishAndCleanupCommitAResourceAndReceipt(_ directoryStore: Bool) t
         "staging", "rename", "publish", "publish-receipt", "receipt", "receipt-reread", "receipt-committed",
         "cleanup-node", "cleanup",
     ])
+    #expect(Set(seen) == Set(kernelForwardBoundaries))
 }
 
-@Test(arguments: [false, true], forwardBoundaries)
-func everyKernelBoundaryCrashRecoversToARecognizedRevision(_ directoryStore: Bool, _ boundary: String) throws {
+enum KernelShape: String, CaseIterable, Sendable {
+    case updateDocument
+    case createDocument
+    case createTree
+}
+
+struct KernelCrash: Sendable, CustomTestStringConvertible {
+    let shape: KernelShape
+    let boundary: String
+
+    var testDescription: String {
+        "\(shape.rawValue) at \(boundary)"
+    }
+}
+
+private let kernelCrashes = KernelShape.allCases.flatMap { shape in
+    kernelForwardBoundaries
+        .filter { shape == .updateDocument || !existingResourceBoundaries.contains($0) }
+        .map { KernelCrash(shape: shape, boundary: $0) }
+}
+
+private func published(_ ref: ResourceRef, shape: KernelShape) throws -> Data? {
+    try contents(shape == .createTree ? appendPath(ref.destination, "nested/file") : ref.destination)
+}
+
+@Test(arguments: [false, true], kernelCrashes)
+func everyKernelBoundaryCrashRecoversToARecognizedRevision(_ directoryStore: Bool, _ crash: KernelCrash) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     let store = kernelStore(root, directory: directoryStore)
-    let ref = try existingDocument(root)
-    let previous = try commitPrevious(ref, store: store)
-    let plan = try storePlan(ref, store: store, after: fileRevision("after\n"), previous: previous)
+    let ref: ResourceRef
+    let previous: Receipt?
+    switch crash.shape {
+    case .updateDocument:
+        ref = try existingDocument(root)
+        previous = try commitPrevious(ref, store: store)
+    case .createDocument:
+        ref = try NativeAuthority.reference(root.child("document"), kind: .document)
+        previous = nil
+    case .createTree:
+        ref = try NativeAuthority.reference(root.child("tree"), kind: .tree)
+        previous = nil
+    }
+    let after = try crash.shape == .createTree ? treeRevision("after\n") : fileRevision("after\n")
+    let plan = try storePlan(ref, store: store, after: after, previous: previous)
 
-    try crashForward(plan, store: store, at: boundary)
+    try crashForward(plan, store: store, at: crash.boundary)
     try ResourceTransaction.recover(ref, store: store)
     try ResourceTransaction.recover(ref, store: store)
 
-    let committed = committedBoundaries.contains(boundary)
-    #expect(contents(ref.destination) == Data((committed ? "after\n" : "before\n").utf8))
+    let committed = committedBoundaries.contains(crash.boundary)
+    let restored = crash.shape == .updateDocument ? Data("before\n".utf8) : nil
+    #expect(try published(ref, shape: crash.shape) == (committed ? Data("after\n".utf8) : restored))
+    #expect(exists(ref.destination) == (committed || crash.shape == .updateDocument))
     #expect(try receipt(ref, store: store) == (committed ? plan.receipt : previous))
     #expect(try transactionKeys(store) == [])
     #expect(!exists(plan.transactionDirectory))
@@ -275,14 +298,12 @@ func recoveryRefusesADestinationModifiedAfterTheBoundary() throws {
 }
 
 @Test
-func changedAfterComparesBirthTimeOnlyWhenAsked() {
+func changedAfterComparesModificationAndBirthTime() {
     let boundary = timespec(tv_sec: 1_000_000, tv_nsec: 0)
-    let born = timespec(tv_sec: 1_000_060, tv_nsec: 0)
-    #expect(ResourceTransaction.changedAfter(boundary: boundary, modified: boundary, born: born, birthTime: true))
-    #expect(!ResourceTransaction.changedAfter(boundary: boundary, modified: boundary, born: born, birthTime: false))
-    #expect(ResourceTransaction.changedAfter(
-        boundary: boundary, modified: timespec(tv_sec: 1_000_000, tv_nsec: 1), born: nil, birthTime: false,
-    ))
+    let later = timespec(tv_sec: 1_000_000, tv_nsec: 1)
+    #expect(ResourceTransaction.changedAfter(boundary: boundary, modified: boundary, born: later))
+    #expect(ResourceTransaction.changedAfter(boundary: boundary, modified: later, born: boundary))
+    #expect(!ResourceTransaction.changedAfter(boundary: boundary, modified: boundary, born: boundary))
 }
 
 @Test
@@ -365,4 +386,20 @@ func aCrashDuringPreparationSkipsCompensation() throws {
     #expect(try transactionKeys(store) == [StateKey.resource(ref.destination, .preparation)])
     #expect(try contents(appendPath(plan.transactionDirectory, "staging/resource")) == Data("after\n".utf8))
     #expect(try NativeObservation.snapshot(ref.destination).revision == plan.before)
+}
+
+@Test
+func publishRefusesADestinationRespelledAfterPreparation() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let respelled = root.url.deletingLastPathComponent().appending(path: root.url.lastPathComponent.lowercased())
+    guard FileManager.default.fileExists(atPath: respelled.path) else { return }
+    let ref = try existingDocument(root, "Document")
+    let plan = try storePlan(ref, store: root.store, after: fileRevision("after\n"), previous: nil)
+    let journal = try ResourceTransaction.prepare(plan, store: root.store)
+    try #require(rename(ref.destination.displayString, root.url.appending(path: "document").path) == 0)
+    #expect(kernelError { try ResourceTransaction.publish(journal, store: root.store) } == TargetError(
+        code: .invalidState, message: "resource canonical destination changed",
+    ))
+    #expect(try contents(root.child("document")) == Data("before\n".utf8))
 }

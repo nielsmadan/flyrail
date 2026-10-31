@@ -71,6 +71,15 @@ public func validateStoreKey(_ key: String, label: String = "state key") throws 
     }
 }
 
+package func validateLockTimeout(_ timeout: Duration) throws {
+    guard timeout >= .zero else { throw FlyrailValueError("lock timeout must be finite and nonnegative") }
+}
+
+package func validateLockRequest(_ name: String, timeout: Duration) throws {
+    try validateStoreKey(name, label: "lock name")
+    try validateLockTimeout(timeout)
+}
+
 package func storeSeconds(_ duration: Duration) -> Double {
     Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
 }
@@ -114,8 +123,7 @@ public final class MemoryStore: StateStore, @unchecked Sendable {
     }
 
     public func lock(_ name: String, timeout: Duration) throws -> StoreLock {
-        try validateStoreKey(name, label: "lock name")
-        guard timeout >= .zero else { throw FlyrailValueError("lock timeout must be finite and nonnegative") }
+        try validateLockRequest(name, timeout: timeout)
         let deadline = ContinuousClock.now.advanced(by: timeout)
         condition.lock()
         defer { condition.unlock() }

@@ -11,8 +11,13 @@ written before hierarchy admission, and records survive failed preflight and
 removal. Lock waits are bounded by the store, use a monotonic deadline and never
 infer abandonment; an exhausted wait is reported as busy.
 
+Applying a preview takes these locks, and so writes authority records, before it
+refuses a preview with plan errors or pending recovery, as Python and Rust do.
+Hierarchy admission scans every authority record in the store, so one
+non-canonical authority record blocks whole-tree admission with `invalid_state`.
+
 The resource planner consumes an immutable observation. It binds complete
-preimages, receipt records, state revisions and ancestor evidence, including
+preimages, receipt records, its transaction directory and ancestor evidence, including
 foreign bytes and native identity/security metadata. Acquisition, updates,
 label changes, retirement, shared selections and skill-container directory
 provenance all produce explicit receipt effects. Applying a resource plan
@@ -53,15 +58,15 @@ There is no overwrite or check-then-rename fallback for resource publication.
 Records are written with the store's compare-and-set.
 
 Publishing the intended receipt commits that resource permanently. Cleanup
-deletes only recognized private revisions, in reverse node order, and removes
-the journal last. Index completion follows all resource commits and cleanup.
+deletes only recognized private revisions, in reverse node order, then deletes
+the journal and finally the preparation. Index completion follows all resource commits and cleanup.
 A later failure leaves successful receipts authoritative and pending membership
 discoverable.
 
 ## Source-free recovery
 
 Recovery holds the same locks and checks required committed receipts before
-cleaning resources or prepared index metadata. It acts only on the directory a
+cleaning resources or completing the installation index. It acts only on the directory a
 preparation names, and only when that is one of the two locations for the
 resource and transaction ID; a directory no record names is not attributed to the
 store. It rolls back recognized uncommitted revisions, or performs cleanup only

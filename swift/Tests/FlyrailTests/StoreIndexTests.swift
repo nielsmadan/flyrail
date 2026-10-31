@@ -111,7 +111,7 @@ func aStoreInsideAManagedDestinationIsRefused() throws {
     let result = try install(lifecycleSkills(), targets: [Target.directory(skills)], store: store)[0]
     #expect(result.status == .failed)
     let error = try #require(result.error)
-    #expect(error.message.contains("overlap"))
+    #expect(error == TargetError(code: .invalidState, message: "state store overlaps a resource or authority"))
     #expect(result.observation.state == .unknown)
     #expect(result.observation.error == error)
     #expect(try store.keys(prefix: "") == [])

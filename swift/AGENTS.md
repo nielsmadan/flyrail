@@ -16,6 +16,10 @@ in `../python/docs/development.md` under "CI and maintenance".
 and package QA; CI runs them nightly and on dispatch, and `CI result` requires
 them. Tests build stores and targets with `NativeTestRoot.store` and `target()`.
 
+State-store behaviour follows Rust (`../rust/src`) where Python and Rust differ.
+Skill convenience functions report every failure, including a store that
+overlaps a bundle source, as a failed per-target result instead of throwing.
+
 Tests use checkout-local fixtures and temporary roots. Do not read or write real
 agent configuration. Shared conformance fixtures live in `../spec/fixtures`.
 Prefer immutable transformations, clear names, and terse caller-facing DocC.

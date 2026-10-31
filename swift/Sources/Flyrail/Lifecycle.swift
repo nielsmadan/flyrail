@@ -36,13 +36,12 @@ public func applyPreview(_ preview: LifecyclePreview, lockTimeout: Duration = .z
                                              notices: preview.rendered.notices)
     }
     guard preview.rendered.supported else {
-        return InstallationInspection.failed(preview.bundleID,
-                                             target: preview.target,
-                                             error: TargetError(code: .unsupported,
-                                                                message: "rendered target has unsupported requirements"),
+        return InstallationInspection.failed(preview.bundleID, target: preview.target,
+                                             error: LifecyclePlanning.unsupportedRequirements,
                                              notices: preview.rendered.notices)
     }
     do {
+        try validateLockTimeout(lockTimeout)
         _ = try LifecyclePlanning.fresh(preview, created: [])
         let locks = try LifecycleExecution.locks(bundleID: preview.bundleID, target: preview.target,
                                                  expected: preview.index, resources: preview.resources.map(\.resource),
@@ -58,6 +57,7 @@ public func sync(bundle: FlyrailBundle, rendered: RenderedBundle, target: Instal
                  acquisition: Acquisition = .conflict, replaceModified: Bool = false,
                  lockTimeout: Duration = .zero) throws -> InstallationResult
 {
+    try validateLockTimeout(lockTimeout)
     do {
         let group = try NativeTransactionPlanning.group(rendered)
         _ = try LifecyclePlanning.references(rendered, index: nil, target: target, bundle: bundle, group: group)
@@ -89,6 +89,7 @@ public func remove(bundleID: String, target: InstallationTarget, replaceModified
 {
     do {
         try validateIdentifier(bundleID, label: "bundle id")
+        try validateLockTimeout(lockTimeout)
         return try LifecycleExecution.synchronize(bundleID: bundleID, bundle: nil, rendered: .empty, target: target,
                                                   acquisition: .conflict, replaceModified: replaceModified,
                                                   lockTimeout: lockTimeout)
@@ -105,6 +106,7 @@ public func recoverInstallation(bundleID: String, target: InstallationTarget,
 {
     do {
         try validateIdentifier(bundleID, label: "bundle id")
+        try validateLockTimeout(lockTimeout)
     } catch {
         return InstallationResult(status: .failed,
                                   observation: InstallationObservation(failedBundleID: bundleID, target: target,

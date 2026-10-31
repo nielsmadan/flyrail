@@ -245,3 +245,17 @@ func storeFailuresDuringAdmissionAreTargetErrors() throws {
     #expect(admissionError { try ResourceAdmission.admit(child, store: ancestor) } == expected)
     #expect(ancestor.recorded.last == "read \(treeKey)")
 }
+
+@Test
+func transactionEntryWalkStopsAtTheDepthLimit() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let limit = NativeLimits.default.maximumDepth
+    let nested = Array(repeating: "d", count: limit + 2).joined(separator: "/")
+    try FileManager.default.createDirectory(at: root.url.appending(path: "tree/\(nested)"),
+                                            withIntermediateDirectories: true)
+    let tree = try root.child("tree")
+    let deepest = try appendPath(tree, Array(repeating: "d", count: limit + 1).joined(separator: "/"))
+    #expect(admissionError { _ = try NativeTransactionDirectory.entries(inside: tree) } ==
+        nativeIO(ENOTSUP, message: "resource exceeds the node limit", path: deepest))
+}

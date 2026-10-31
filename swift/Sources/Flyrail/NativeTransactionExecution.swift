@@ -36,10 +36,7 @@ package enum NativeTransactionExecution {
             return paths
         }
         guard let directory else { return [] }
-        let preparation = try? StateRecords.read(
-            store, key: StateKey.resource(resource.destination, .preparation), as: Preparation.self,
-            tag: "Preparation",
-        )
+        let preparation = try? StateRecords.preparation(store, resource.destination)
         return preparation?.directory == directory ? [directory] : []
     }
 
@@ -95,10 +92,7 @@ package enum NativeTransactionExecution {
                 throw crash
             } catch {
                 if !committed, let journal {
-                    committed = (try? StateRecords.read(
-                        store, key: StateKey.resource(plan.resource.destination, .receipt), as: Receipt.self,
-                        tag: "Receipt",
-                    )) == journal.receipt
+                    committed = (try? StateRecords.receipt(store, plan.resource.destination)) == journal.receipt
                 }
                 let failure = try guarded ? recovered(detail(error), plan.resource, store: store, seam: seam) :
                     detail(error)

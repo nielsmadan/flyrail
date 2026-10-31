@@ -27,6 +27,22 @@ package enum StateKey {
 }
 
 package enum StateRecords {
+    package static func authority(_ store: any StateStore, _ destination: ResourcePath) throws -> ResourceRef? {
+        try read(store, key: StateKey.resource(destination, .authority), as: ResourceRef.self, tag: "ResourceRef")
+    }
+
+    package static func receipt(_ store: any StateStore, _ destination: ResourcePath) throws -> Receipt? {
+        try read(store, key: StateKey.resource(destination, .receipt), as: Receipt.self, tag: "Receipt")
+    }
+
+    package static func preparation(_ store: any StateStore, _ destination: ResourcePath) throws -> Preparation? {
+        try read(store, key: StateKey.resource(destination, .preparation), as: Preparation.self, tag: "Preparation")
+    }
+
+    package static func journal(_ store: any StateStore, _ destination: ResourcePath) throws -> Journal? {
+        try read(store, key: StateKey.resource(destination, .journal), as: Journal.self, tag: "Journal")
+    }
+
     package static func read<T: StateCodable>(
         _ store: any StateStore, key: String, as type: T.Type, tag: String,
     ) throws -> T? {
@@ -48,14 +64,14 @@ package enum StateRecords {
     package static func write<T: StateCodable>(_ store: any StateStore, key: String, value: T, expected: T?) throws {
         let encoded = try StateCodec.encode(value)
         let previous = try expected.map { try StateCodec.encode($0) }
-        guard try converted({ try store.write(key, value: encoded, expected: previous) }) else {
+        guard try converted(store, { try store.write(key, value: encoded, expected: previous) }) else {
             throw failure(store, .concurrentChange, "\(key): state changed")
         }
     }
 
     package static func delete(_ store: any StateStore, key: String, expected: some StateCodable) throws {
         let previous = try StateCodec.encode(expected)
-        guard try converted({ try store.delete(key, expected: previous) }) else {
+        guard try converted(store, { try store.delete(key, expected: previous) }) else {
             throw failure(store, .concurrentChange, "\(key): state changed")
         }
     }
@@ -68,31 +84,37 @@ package enum StateRecords {
     }
 
     package static func lock(_ store: any StateStore, name: String, timeout: Duration) throws -> StoreLock {
-        do {
-            return try store.lock(name, timeout: timeout)
-        } catch let error as StoreError {
-            guard case .busy = error else { throw error.targetError }
-            throw failure(store, .busy, error.description)
+        try converted(store) {
+            do {
+                return try store.lock(name, timeout: timeout)
+            } catch let error as StoreError {
+                guard case .busy = error else { throw error }
+                throw failure(store, .busy, error.description)
+            }
         }
     }
 
     package static func raw(_ store: any StateStore, key: String) throws -> Data? {
-        try converted { try store.read(key) }
+        try converted(store) { try store.read(key) }
     }
 
     package static func keys(_ store: any StateStore, prefix: String) throws -> [String] {
-        try converted { try store.keys(prefix: prefix) }
+        try converted(store) { try store.keys(prefix: prefix) }
     }
 
     package static func failure(_ store: any StateStore, _ code: ErrorCode, _ message: String) -> TargetError {
         TargetError(code: code, message: message, path: store.location)
     }
 
-    private static func converted<T>(_ body: () throws -> T) throws -> T {
+    private static func converted<T>(_ store: any StateStore, _ body: () throws -> T) throws -> T {
         do {
             return try body()
         } catch let error as StoreError {
             throw error.targetError
+        } catch let error as TargetError {
+            throw error
+        } catch {
+            throw failure(store, .ioError, String(describing: error))
         }
     }
 }
@@ -103,12 +125,13 @@ package extension StoreError {
         case .busy:
             TargetError(code: .busy, message: description)
         case let .io(message, path, errno):
-            TargetError(
-                code: errno.map { [ENOTSUP, ENOSYS, EXDEV, EINVAL].contains($0) } == true ? .unsupported : .ioError,
-                message: message, path: path, errno: errno,
-            )
+            TargetError(code: ioErrorCode(errno), message: message, path: path, errno: errno)
         case let .invalidKey(message):
             TargetError(code: .invalidState, message: message)
         }
     }
+}
+
+package func ioErrorCode(_ errno: Int32?) -> ErrorCode {
+    errno.map { [ENOTSUP, ENOSYS, EXDEV, EINVAL].contains($0) } == true ? .unsupported : .ioError
 }

@@ -44,9 +44,7 @@ def driver_name(driver):
     return {id(PYTHON): "python", id(RUST): "rust", id(SWIFT): "swift"}.get(id(driver), " ".join(driver))
 
 
-def driver_error(driver, result):
-    if result.args[len(driver)] == "encode":
-        return result.stderr.decode().strip()
+def driver_error(result):
     return json.loads(result.stdout)["error"]["message"]
 
 

@@ -19,11 +19,12 @@ package enum ResourceTransaction {
     package static let recoveryBoundaries = ["rollback-stage", "rollback-backup", "rollback"]
 
     package static func planAncestors(destination: ResourcePath, directory: ResourcePath) throws -> [Ancestor] {
-        try union([destination, appendPath(directory, "staging")])
+        try union([destination, TransactionLayout.stagingDirectory(directory)])
     }
 
     package static func journalAncestors(destination: ResourcePath, directory: ResourcePath) throws -> [Ancestor] {
-        try union([destination, appendPath(directory, "staging/resource"), appendPath(directory, "backup/resource")])
+        let resources = try TransactionLayout.resources(directory)
+        return try union([destination, resources.staged, resources.backup])
     }
 
     package static func prepare(
@@ -44,9 +45,7 @@ package enum ResourceTransaction {
         if plan.requireExisting, plan.before.nodes.isEmpty {
             throw nativeFailure(.concurrentChange, "required existing resource disappeared", destination)
         }
-        guard try StateRecords.read(
-            store, key: StateKey.resource(destination, .receipt), as: Receipt.self, tag: "Receipt",
-        ) == plan.previous else {
+        guard try StateRecords.receipt(store, destination) == plan.previous else {
             throw nativeFailure(.concurrentChange, "receipt changed during preparation", destination)
         }
         if let retained = try records(resource, store: store).preparation {
@@ -75,12 +74,23 @@ package enum ResourceTransaction {
         var staged: [Revision] = []
         let journal: Journal
         do {
-            journal = try stage(plan, store: store, seam: seam, staged: &staged)
+            let ancestors = try storage(plan)
+            try seam("directory")
+            if plan.after != plan.before {
+                staged = try [NativeTransactionIO.writeRevision(
+                    TransactionLayout.resources(directory).staged, revision: plan.after, seam: seam,
+                )]
+                try seam("staged")
+            }
+            let prepared = try journalFor(plan, store: store, ancestors: ancestors, staged: staged.first ?? plan.before)
+            staged = [prepared.staged, prepared.published]
+            try record(prepared, directory: directory, store: store, seam: seam)
+            journal = prepared
         } catch let crash as NativeSimulatedCrash {
             throw crash
         } catch {
             discard(directory, revisions: staged)
-            if (try? pathExists(directory)) == false {
+            if absent(directory) {
                 release(preparation, store: store)
             }
             throw error
@@ -95,7 +105,7 @@ package enum ResourceTransaction {
     ) throws {
         let destination = journal.resource.destination
         let directory = try transactionDirectory(journal, store: store)
-        let (staged, backup) = try paths(directory)
+        let (staged, backup) = try TransactionLayout.resources(directory)
         try requireJournal(journal, store: store, directory: directory)
         try validateAncestors(journal, store: store, directory: directory)
         try NativeObservation.requireRevision(destination, journal.before)
@@ -130,12 +140,12 @@ package enum ResourceTransaction {
         try requireJournal(journal, store: store, directory: directory)
         try layout(directory)
         try validateAncestors(journal, store: store, directory: directory)
-        let (staged, backup) = try paths(directory)
+        let (staged, backup) = try TransactionLayout.resources(directory)
         let empty = try Revision()
         try NativeObservation.requireRevision(staged, empty)
         try NativeObservation.requireRevision(journal.resource.destination, journal.published)
         try NativeObservation.requireRevision(backup, journal.before == journal.staged ? empty : journal.backup)
-        guard try currentReceipt(journal, store: store) == journal.previous else {
+        guard try StateRecords.receipt(store, journal.resource.destination) == journal.previous else {
             throw nativeFailure(.concurrentChange, "receipt changed before commit", journal.resource.destination)
         }
         try seam("receipt")
@@ -154,7 +164,7 @@ package enum ResourceTransaction {
         try requireJournal(journal, store: store, directory: directory)
         try layout(directory)
         try validateAncestors(journal, store: store, directory: directory)
-        let (staged, backup) = try paths(directory)
+        let (staged, backup) = try TransactionLayout.resources(directory)
         for (path, expected) in [
             (staged, [journal.staged, journal.published]),
             (backup, [journal.backup, journal.before]),
@@ -192,35 +202,24 @@ package enum ResourceTransaction {
         return result
     }
 
-    private static func stage(
-        _ plan: ResourcePlan, store: any StateStore, seam: NativeTransactionSeam, staged: inout [Revision],
-    ) throws -> Journal {
-        let directory = plan.transactionDirectory
-        let ancestors = try storage(plan)
-        try seam("directory")
-        if plan.after != plan.before {
-            let (stagedPath, _) = try paths(directory)
-            try staged.append(NativeTransactionIO.writeRevision(stagedPath, revision: plan.after, seam: seam))
-            try seam("staged")
-        }
-        let journal = try journalFor(plan, store: store, ancestors: ancestors, staged: staged.first ?? plan.before)
-        staged = [journal.staged, journal.published]
+    private static func record(
+        _ journal: Journal, directory: ResourcePath, store: any StateStore, seam: NativeTransactionSeam,
+    ) throws {
         var times = [timespec(tv_sec: 0, tv_nsec: Int(UTIME_NOW)), timespec(tv_sec: 0, tv_nsec: Int(UTIME_NOW))]
         guard try NativeFilesystem.withName(directory.platformBytes, { utimensat(AT_FDCWD, $0, &times, 0) }) == 0 else {
             throw nativeIO(errno, path: directory)
         }
         try seam("journal")
         try StateRecords.write(
-            store, key: StateKey.resource(plan.resource.destination, .journal), value: journal, expected: nil,
+            store, key: StateKey.resource(journal.resource.destination, .journal), value: journal, expected: nil,
         )
-        return journal
     }
 
     private static func storage(_ plan: ResourcePlan) throws -> [Ancestor] {
         let destination = plan.resource.destination
         let directory = plan.transactionDirectory
         try ensurePrivate(directory)
-        let created = try [directory, appendPath(directory, "staging"), appendPath(directory, "backup")]
+        let created = try TransactionLayout.directories(directory)
         var storage: [(ResourcePath, Revision)] = []
         for path in created.dropFirst() {
             guard try NativeFilesystem.withName(path.platformBytes, { Darwin.mkdir($0, 0o700) }) == 0 else {
@@ -267,7 +266,7 @@ package enum ResourceTransaction {
 
     private static func discard(_ directory: ResourcePath, revisions: [Revision]) {
         do {
-            let (staged, _) = try paths(directory)
+            let (staged, _) = try TransactionLayout.resources(directory)
             let current = try NativeObservation.snapshot(staged).revision
             if !current.nodes.isEmpty, revisions.contains(current) {
                 try NativeTransactionIO.destroy(staged, revision: current)
@@ -288,39 +287,23 @@ package enum ResourceTransaction {
         }
     }
 
-    private static func currentReceipt(_ journal: Journal, store: any StateStore) throws -> Receipt? {
-        try StateRecords.read(
-            store, key: StateKey.resource(journal.resource.destination, .receipt), as: Receipt.self, tag: "Receipt",
-        )
-    }
-
     private static func requireJournal(_ journal: Journal, store: any StateStore, directory: ResourcePath) throws {
-        guard try StateRecords.read(
-            store, key: StateKey.resource(journal.resource.destination, .journal), as: Journal.self, tag: "Journal",
-        ) == journal else {
+        guard try StateRecords.journal(store, journal.resource.destination) == journal else {
             throw nativeFailure(.recoveryNeeded, "transaction record changed", directory)
         }
     }
 }
 
 extension ResourceTransaction {
-    static func paths(_ directory: ResourcePath) throws -> (staged: ResourcePath, backup: ResourcePath) {
-        try (appendPath(directory, "staging/resource"), appendPath(directory, "backup/resource"))
-    }
-
     static func records(
         _ resource: ResourceRef, store: any StateStore,
     ) throws -> (preparation: Preparation?, journal: Journal?) {
         let destination = resource.destination
-        let preparation = try StateRecords.read(
-            store, key: StateKey.resource(destination, .preparation), as: Preparation.self, tag: "Preparation",
-        )
+        let preparation = try StateRecords.preparation(store, destination)
         if let preparation, !known(preparation, store: store), !absent(preparation.directory) {
             throw unrecognizedDirectory(store)
         }
-        let journal = try StateRecords.read(
-            store, key: StateKey.resource(destination, .journal), as: Journal.self, tag: "Journal",
-        )
+        let journal = try StateRecords.journal(store, destination)
         if let journal {
             _ = try matching(recognized(preparation, store: store), journal: journal, store: store)
         }
@@ -328,10 +311,7 @@ extension ResourceTransaction {
     }
 
     static func preparation(for journal: Journal, store: any StateStore) throws -> Preparation {
-        let preparation = try StateRecords.read(
-            store, key: StateKey.resource(journal.resource.destination, .preparation), as: Preparation.self,
-            tag: "Preparation",
-        )
+        let preparation = try StateRecords.preparation(store, journal.resource.destination)
         return try matching(recognized(preparation, store: store), journal: journal, store: store)
     }
 
@@ -349,7 +329,9 @@ extension ResourceTransaction {
     static func layout(_ directory: ResourcePath) throws {
         try NativeAuthority.managedSpelling(directory)
         for child in try children(directory) {
-            guard ["staging", "backup"].contains(String(decoding: child.name, as: UTF8.self)) else {
+            guard [TransactionLayout.staging, TransactionLayout.backup]
+                .contains(String(decoding: child.name, as: UTF8.self))
+            else {
                 throw nativeFailure(.recoveryNeeded, "unknown transaction data", child.path)
             }
             guard let metadata = try metadata(child.path) else { throw nativeIO(ENOENT, path: child.path) }
@@ -357,7 +339,7 @@ extension ResourceTransaction {
             guard metadata.st_mode & S_IFMT == S_IFDIR else {
                 throw nativeFailure(.unsafePath, "expected a directory", child.path)
             }
-            guard try children(child.path).allSatisfy({ $0.name == Array("resource".utf8) }) else {
+            guard try children(child.path).allSatisfy({ $0.name == Array(TransactionLayout.resource.utf8) }) else {
                 throw nativeFailure(.recoveryNeeded, "unknown transaction data", child.path)
             }
         }
@@ -372,7 +354,7 @@ extension ResourceTransaction {
         }
         try ensurePrivateStorage(directory)
         let conflicts = try ResourceAdmission.hierarchyConflicts(
-            resource.recordedAuthority, store: store, wholeTree: resource.kind != .document,
+            ResourceAdmission.checkedAuthority(resource), store: store, wholeTree: resource.kind != .document,
         )
         if let first = conflicts.first {
             throw nativeFailure(.conflict, "resource hierarchy reservation changed", first)
@@ -380,7 +362,7 @@ extension ResourceTransaction {
     }
 
     static func removeDirectories(_ directory: ResourcePath, ignoringFailures: Bool) throws {
-        for path in try [appendPath(directory, "staging"), appendPath(directory, "backup"), directory] {
+        for path in try TransactionLayout.directories(directory).dropFirst() + [directory] {
             guard try NativeFilesystem.withName(path.platformBytes, { Darwin.rmdir($0) }) != 0 else { continue }
             let code = errno
             if code != ENOENT, !ignoringFailures {
@@ -390,8 +372,7 @@ extension ResourceTransaction {
     }
 
     static func ensurePrivateStorage(_ directory: ResourcePath) throws {
-        let storage = try [directory, appendPath(directory, "staging"), appendPath(directory, "backup")]
-        for path in try storage.filter(pathExists) {
+        for path in try TransactionLayout.directories(directory).filter(pathExists) {
             try ensurePrivate(path)
         }
     }
@@ -461,5 +442,23 @@ extension ResourceTransaction {
         return try NativeFilesystem.names(descriptor, path: directory).map {
             try ($0, NativeFilesystem.child(directory, $0))
         }
+    }
+}
+
+package enum TransactionLayout {
+    package static let staging = "staging"
+    package static let backup = "backup"
+    package static let resource = "resource"
+
+    package static func stagingDirectory(_ directory: ResourcePath) throws -> ResourcePath {
+        try appendPath(directory, staging)
+    }
+
+    package static func directories(_ directory: ResourcePath) throws -> [ResourcePath] {
+        try [directory, stagingDirectory(directory), appendPath(directory, backup)]
+    }
+
+    package static func resources(_ directory: ResourcePath) throws -> (staged: ResourcePath, backup: ResourcePath) {
+        try (appendPath(directory, "\(staging)/\(resource)"), appendPath(directory, "\(backup)/\(resource)"))
     }
 }

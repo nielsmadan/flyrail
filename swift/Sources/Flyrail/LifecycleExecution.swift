@@ -57,7 +57,7 @@ package enum LifecycleExecution {
     package static func requireReceipts(_ index: Index?, resources: [ResourceRef], store: any StateStore) throws {
         for resource in resources {
             if InstallationIndex.expectsReceipt(index, resource: resource),
-               try ResourceAdmission.storedReceipt(resource, store: store) == nil
+               try StateRecords.receipt(store, resource.destination) == nil
             {
                 throw LifecyclePlanning.missingReceipt(resource)
             }
@@ -68,6 +68,13 @@ package enum LifecycleExecution {
                                 locks: NativeTransactionLocks,
                                 seam: NativeTransactionSeam = .none) throws -> InstallationResult
     {
+        try recoveryResult(recoverResources(bundleID: bundleID, target: target, locks: locks, seam: seam),
+                           bundleID: bundleID, target: target)
+    }
+
+    private static func recoverResources(
+        bundleID: String, target: InstallationTarget, locks: NativeTransactionLocks, seam: NativeTransactionSeam,
+    ) throws -> (resources: [ResourceResult], error: TargetError?) {
         let store = target.store
         let index = try InstallationIndex.read(bundleID: bundleID, target: target)
         try requireReceipts(index, resources: locks.resources, store: store)
@@ -85,22 +92,20 @@ package enum LifecycleExecution {
                     resource: resource, status: .incomplete, error: detail,
                     recoveryPaths: NativeTransactionExecution.recoveryPaths(store, resource, directory: nil),
                 ))
-                return try InstallationResult(status: .incomplete,
-                                              observation: InstallationInspection.observe(
-                                                  bundleID: bundleID,
-                                                  target: target,
-                                              ),
-                                              resources: results, error: detail)
+                return (results, detail)
             }
             try results.append(ResourceResult(resource: resource, status: pending ? .applied : .unchanged))
         }
-        let changed = results.contains { $0.status == .applied }
-        return try InstallationResult(status: changed ? .applied : .unchanged,
-                                      observation: InstallationInspection.observe(
-                                          bundleID: bundleID,
-                                          target: target,
-                                      ),
-                                      resources: results)
+        return (results, nil)
+    }
+
+    private static func recoveryResult(
+        _ recovered: (resources: [ResourceResult], error: TargetError?), bundleID: String, target: InstallationTarget,
+    ) throws -> InstallationResult {
+        let changed = recovered.resources.contains { $0.status == .applied }
+        return try InstallationResult(status: recovered.error != nil ? .incomplete : (changed ? .applied : .unchanged),
+                                      observation: InstallationInspection.observe(bundleID: bundleID, target: target),
+                                      resources: recovered.resources, error: recovered.error)
     }
 
     // swiftlint:disable:next function_parameter_count
@@ -111,12 +116,8 @@ package enum LifecycleExecution {
     {
         do {
             guard rendered.supported else {
-                return InstallationInspection.failed(bundleID,
-                                                     target: target,
-                                                     error: TargetError(
-                                                         code: .unsupported,
-                                                         message: "rendered target has unsupported requirements",
-                                                     ),
+                return InstallationInspection.failed(bundleID, target: target,
+                                                     error: LifecyclePlanning.unsupportedRequirements,
                                                      notices: rendered.notices)
             }
             let index = try InstallationIndex.read(bundleID: bundleID, target: target)
@@ -131,9 +132,9 @@ package enum LifecycleExecution {
             let locks = try locks(bundleID: bundleID, target: target, expected: index,
                                   resources: references, timeout: lockTimeout)
             defer { locks.release() }
-            let recovered = try recover(bundleID: bundleID, target: target, locks: locks, seam: seam)
+            let recovered = try recoverResources(bundleID: bundleID, target: target, locks: locks, seam: seam)
             if recovered.error != nil {
-                return recovered
+                return try recoveryResult(recovered, bundleID: bundleID, target: target)
             }
             let preview = try LifecyclePlanning.build(
                 bundleID: bundleID,

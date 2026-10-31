@@ -23,8 +23,16 @@ func interopRejectsMalformedCommandsBeforeWriting() throws {
         (base + ["--large", "1048577"], "large payload size must not exceed 1048576"),
         (base + ["--mode", "unknown"], "invalid mode"),
         (base + ["--acquisition", "unknown"], "invalid destination or acquisition"),
-        (base + ["--lock-timeout", "nan"], "timeout must be finite and nonnegative"),
-        (base + ["--lock-timeout", "-1"], "timeout must be finite and nonnegative"),
+        (
+            base + ["--lock-timeout", "nan"],
+            "invalid --lock-timeout: cannot convert float seconds to Duration: value is either too big or NaN",
+        ),
+        (
+            base + ["--lock-timeout", "-1"],
+            "invalid --lock-timeout: cannot convert float seconds to Duration: value is negative",
+        ),
+        (["write", "--state", state, "--destination", state + "/inner.md"],
+         "state store overlaps a resource or authority"),
         (base + ["--fault-phase", "unknown"], "unknown transaction seam"),
         (base + ["--fail-index-completion", "--fault-phase", "publish"], "fault options cannot be combined"),
         (base + ["--fail-index-completion", "--barrier-timeout", "1"],
@@ -37,8 +45,14 @@ func interopRejectsMalformedCommandsBeforeWriting() throws {
          "large payload size must be nonnegative"),
         (["update", "--state", state, "--destination", destination, "--mode", "unknown"], "invalid mode"),
         (["hold", "--state", state], "missing required argument: --destination"),
-        (["remove", "--state", state, "--lock-timeout", "nan"], "timeout must be finite and nonnegative"),
-        (["recover", "--state", state, "--lock-timeout", "-1"], "timeout must be finite and nonnegative"),
+        (
+            ["remove", "--state", state, "--lock-timeout", "nan"],
+            "invalid --lock-timeout: cannot convert float seconds to Duration: value is either too big or NaN",
+        ),
+        (
+            ["recover", "--state", state, "--lock-timeout", "-1"],
+            "invalid --lock-timeout: cannot convert float seconds to Duration: value is negative",
+        ),
         (base + ["--source", destination, "--version", "2", "--lock-timeout", "nan"],
          "--version cannot be combined with --source"),
     ]
@@ -82,6 +96,70 @@ func interopRejectsSyntheticOptionsWithSourceBeforeWriting() throws {
         #expect(!FileManager.default.fileExists(atPath: state))
         #expect(!FileManager.default.fileExists(atPath: destination))
     }
+}
+
+@Test
+func interopChecksStoreAgainstSourceBeforeResolvingArtifacts() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let source = root.url.appending(path: "source")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+    try Data(#"{"schema_version":2,"id":"team","version":"1","artifacts":[{"kind":"instruction","id":"guide","text":"safe"}]}"#
+        .utf8).write(to: source.appending(path: "flyrail.json"))
+    let real = root.url.appending(path: "real")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: false)
+    let link = root.url.appending(path: "link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+    for command in ["write", "install", "update"] {
+        let result = try invokeInterop([
+            command, "--state", source.appending(path: "state").path,
+            "--destination", link.appending(path: "project").path, "--source", source.path,
+        ], input: Data(), root: root.url)
+        #expect(result.status == 1, "\(command)")
+        #expect(result.output == interopFailure("state store overlaps bundle source"), "\(command)")
+        #expect(result.error == Data(), "\(command)")
+    }
+}
+
+@Test
+func interopDurationsMatchRustRange() throws {
+    let root = try NativeTestRoot()
+    defer { try? root.cleanup() }
+    let state = root.stateURL.path
+    let tooBig = "invalid --lock-timeout: cannot convert float seconds to Duration: value is either too big or NaN"
+    let big = try invokeInterop(["inspect", "--state", state, "--lock-timeout", "1e20"], input: Data(), root: root.url)
+    #expect(big.status == 0)
+    let write = try invokeInterop(
+        ["write", "--state", state, "--destination", root.url.appending(path: "document").path,
+         "--lock-timeout", "2e9"],
+        input: Data(), root: root.url,
+    )
+    #expect(write.status == 0)
+    #expect(try stateField(JSONParser.parse(write.output), "status") == .string("applied"))
+    let rejected = try invokeInterop(
+        ["remove", "--state", state, "--lock-timeout", "1e20"], input: Data(), root: root.url,
+    )
+    #expect(rejected.status == 1)
+    #expect(rejected.output == interopFailure(tooBig))
+    let inspected = try invokeInterop(["inspect", "--state", state, "--lock-timeout", "-1"], input: Data(),
+                                      root: root.url)
+    #expect(inspected.status == 0)
+    #expect(inspected.error == Data())
+    let destination = root.url.appending(path: "held").path
+    let barrier = root.url.appending(path: "barrier").path
+    let hold = ["hold", "--state", state, "--destination", destination, "--barrier", barrier]
+    let both = try invokeInterop(
+        hold + ["--lock-timeout", "-1", "--wait-timeout", "nan"],
+        input: Data(),
+        root: root.url,
+    )
+    #expect(both.output == interopFailure(
+        "invalid --wait-timeout: cannot convert float seconds to Duration: value is either too big or NaN",
+    ))
+    let large = try invokeInterop(hold + ["--wait-timeout", "1e19"], input: Data(), root: root.url)
+    #expect(large.status == 1)
+    #expect(large.output == Data(#"{"status":"reserved"}"#.utf8) + Data([10]) +
+        interopFailure("invalid --wait-timeout: duration is too large"))
 }
 
 @Test

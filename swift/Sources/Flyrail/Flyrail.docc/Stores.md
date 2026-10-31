@@ -8,13 +8,14 @@ transient `.flyrail-*.txn` transaction directories.
 ## Contract
 
 ``StateStore`` has `read`, `write(_:value:expected:)`, `delete(_:expected:)`,
-`keys(prefix:)` and `lock(_:timeout:)`. Writes and deletes are compare-and-set: an
-absent `expected` means the key must be absent, and a mismatch returns `false`
-and leaves the value unchanged. `keys` is a plain UTF-8 prefix match in ascending
-order. `lock` waits up to `timeout`, throws ``StoreError/busy(name:)`` when it
-expires and never treats a held lock as abandoned. Release the returned
-``StoreLock`` explicitly. Values are opaque bytes and round-trip exactly,
-including empty values.
+`keys(prefix:)` and `lock(_:timeout:)`. Throw ``StoreError`` for store failures;
+any other error a store throws is reported as an `io_error` at the store's
+`location`. Writes and deletes are compare-and-set: an absent `expected` means
+the key must be absent, and a mismatch returns `false` and leaves the value
+unchanged. `keys` is a plain UTF-8 prefix match in ascending order. `lock` waits
+up to `timeout`, throws ``StoreError/busy(name:)`` when it expires and never
+treats a held lock as abandoned. Release the returned ``StoreLock`` explicitly.
+Values are opaque bytes and round-trip exactly, including empty values.
 
 Optional `location` and `stagingDirectory` describe the store's filesystem
 footprint; both default to `nil`. A staging directory on the destination's mount

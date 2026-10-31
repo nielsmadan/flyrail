@@ -114,12 +114,11 @@ func reserveBeforeProbeRetainsBothAuthorityRecordsInEitherOrder() throws {
     }
 }
 
-@Test
+@Test(.enabled(if: FileManager.default.fileExists(atPath: stateRepositoryRoot().appending(path: ".CACHE").path)))
 func admissionRejectsAChangedCanonicalDestination() throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
     try FileManager.default.createDirectory(at: root.url.appending(path: "Config"), withIntermediateDirectories: false)
-    guard FileManager.default.fileExists(atPath: root.url.appending(path: "config").path) else { return }
     let recorded = try ResourceRef(destination: root.child("config/AGENTS.md"), kind: .document)
     let store = MemoryStore()
     #expect(authorityError { try ResourceAdmission.admit(recorded, store: store) } == TargetError(

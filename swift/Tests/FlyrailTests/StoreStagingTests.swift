@@ -54,7 +54,7 @@ func aSameMountDirectoryStoreLeavesNothingBesideTheDestination(_ boundary: Strin
         NativeTransactionDirectory.physicalLocation(staging).displayString + "/",
     ))
     #expect(FileManager.default.fileExists(atPath: preparation.directory.displayString))
-    #expect(try names(root.path).allSatisfy { $0 == "document" })
+    #expect(try names(root.path) == (boundary == "backup" ? [] : ["document"]))
 
     #expect(try transactionWrite(transactionBundle("2"), rendered: transactionRendered(path, "two\n"),
                                  target: target).status == .applied)
@@ -77,7 +77,8 @@ func aMemoryStoreFallsBackToATransactionDirectoryBesideTheDestination() throws {
     let preparation = try #require(try storedPreparation(path, store: store))
     #expect(try preparation.directory == transactionPath(destination: path, transactionID: preparation.transactionID))
     #expect(FileManager.default.fileExists(atPath: preparation.directory.displayString))
-    #expect(try names(root.path).count == 2)
+    let directoryName = URL(fileURLWithPath: preparation.directory.displayString).lastPathComponent
+    #expect(try names(root.path) == [directoryName, "document"].sorted())
 
     #expect(try transactionWrite(transactionBundle("2"), rendered: transactionRendered(path, "two\n"),
                                  target: target).status == .applied)

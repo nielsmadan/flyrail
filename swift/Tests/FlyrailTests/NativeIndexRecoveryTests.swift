@@ -78,7 +78,7 @@ func nativeTransactionLocksAreIndexFirstThenSortedPermanentAuthorities() throws 
     for resource in references {
         let name = try StateKey.resourceLock(resource.destination)
         #expect(throws: StoreError.busy(name: name)) { _ = try competing.lock(name, timeout: .zero) }
-        #expect(try root.store.read(StateKey.resource(resource.destination, .authority)) != nil)
+        #expect(try root.store.read(StateKey.resource(resource.destination, .authority)) == StateCodec.encode(resource))
     }
 }
 

@@ -27,7 +27,7 @@ func nativeSameGenerationRepairRollbackRetainsModifiedPreimage() throws {
     )
     #expect(plan.receipt.transactionID != previous.transactionID)
     let journal = try ResourceTransaction.prepare(plan, store: store)
-    let (staged, backup) = try ResourceTransaction.paths(plan.transactionDirectory)
+    let (staged, backup) = try TransactionLayout.resources(plan.transactionDirectory)
     let publishFault = NativeTransactionSeam {
         if $0 == "backup" {
             throw TargetError(code: .ioError, message: "backup interrupted")

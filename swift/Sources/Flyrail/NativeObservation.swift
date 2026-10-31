@@ -5,13 +5,6 @@ package struct NativeResourceSnapshot: Sendable, Equatable {
     package let revision: Revision
     package let ancestors: [Ancestor]
     package let stamps: [NativeStamp]
-
-    package func hasReplacementEvidence(after journal: NativeStamp) -> Bool {
-        stamps.contains { stamp in
-            (stamp.modifiedSeconds, stamp.modifiedNanos) > (journal.modifiedSeconds, journal.modifiedNanos) ||
-                (stamp.createdSeconds, stamp.createdNanos) > (journal.modifiedSeconds, journal.modifiedNanos)
-        }
-    }
 }
 
 package enum NativeObservation {

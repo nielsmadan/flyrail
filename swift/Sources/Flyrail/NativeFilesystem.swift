@@ -316,12 +316,11 @@ package func nativeFailure(_ code: ErrorCode, _ message: String, _ path: Resourc
 }
 
 package func nativeIO(_ code: Int32, message: String? = nil, path: ResourcePath) -> TargetError {
-    let unsupported = [ENOTSUP, ENOSYS, EXDEV, EINVAL].contains(code)
     let detail = message ?? String(cString: strerror(code))
     let filename = pythonStringRepr(path.displayString)
     let framed = message == nil ? filename : "PosixPath(\(filename))"
     return TargetError(
-        code: unsupported ? .unsupported : .ioError,
+        code: ioErrorCode(code),
         message: "[Errno \(code)] \(detail): \(framed)", path: path, errno: code,
     )
 }

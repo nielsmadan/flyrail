@@ -18,11 +18,6 @@ func transactionPlan(
     )
 }
 
-private let documentPublicationPhases = [
-    "preparation", "directory", "staged", "journal", "prepare", "backup-move", "backup", "staging", "publish",
-    "publish-receipt", "receipt", "receipt-reread", "receipt-committed", "cleanup",
-]
-
 private func existingDocument(_ root: NativeTestRoot, _ name: String = "document") throws -> ResourceRef {
     let path = try root.child(name)
     try NativeTransactionIO.createFile(path, data: Data("original\n".utf8))
@@ -65,7 +60,7 @@ func nativeTransactionPublishesAndRemovesAnExclusiveResource() throws {
     #expect(try FileManager.default.contentsOfDirectory(atPath: root.url.path) == [])
 }
 
-@Test(arguments: documentPublicationPhases)
+@Test(arguments: kernelForwardBoundaries)
 func nativeRecoveryRecognizesEveryDocumentPublicationPhase(_ phase: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
@@ -81,7 +76,7 @@ func nativeRecoveryRecognizesEveryDocumentPublicationPhase(_ phase: String) thro
     try #require(fired())
     try ResourceTransaction.recover(ref, store: store)
     try ResourceTransaction.recover(ref, store: store)
-    let committed = ["receipt-reread", "receipt-committed", "cleanup"].contains(phase)
+    let committed = ["receipt-reread", "receipt-committed", "cleanup-node", "cleanup"].contains(phase)
     let observed = try ResourceAdmission.observe(ref, store: store)
     #expect(observed.revision.data == Data((committed ? "generated\n" : "original\n").utf8))
     #expect(observed.receipt == (committed ? plan.receipt : nil))
@@ -100,11 +95,13 @@ func nativeRecoveryRetainsUnknownReplacementAndCommittedForeignEdits() throws {
         transactionPlan(ref, store: store, acquisition: .takeover), store: store,
     )
     let directory = try ResourceTransaction.transactionDirectory(journal, store: store)
-    let (staged, backup) = try ResourceTransaction.paths(directory)
+    let (staged, backup) = try TransactionLayout.resources(directory)
     try NativeTransactionIO.move(ref.destination, to: backup, revision: journal.backup)
     try NativeTransactionIO.move(staged, to: ref.destination, revision: journal.staged)
     try Data("foreign\n".utf8).write(to: URL(fileURLWithPath: ref.destination.displayString))
-    expectNativeError(.recoveryNeeded) { try ResourceTransaction.recover(ref, store: store) }
+    #expect(kernelError { try ResourceTransaction.recover(ref, store: store) } == TargetError(
+        code: .recoveryNeeded, message: "unrecognized published revision", path: ref.destination,
+    ))
     #expect(try StateRecords.read(
         store, key: StateKey.resource(ref.destination, .journal), as: Journal.self, tag: "Journal",
     ) == journal)
@@ -135,7 +132,9 @@ func nativePlansNeverRefreshAChangedPreimage() throws {
     let ref = try existingDocument(root)
     let plan = try transactionPlan(ref, store: store, acquisition: .takeover)
     try Data("foreign".utf8).write(to: URL(fileURLWithPath: ref.destination.displayString))
-    expectNativeError(.concurrentChange) { _ = try ResourceTransaction.prepare(plan, store: store) }
+    #expect(kernelError { _ = try ResourceTransaction.prepare(plan, store: store) } == TargetError(
+        code: .concurrentChange, message: "complete resource revision changed", path: ref.destination,
+    ))
     #expect(try ResourceAdmission.observe(ref, store: store).revision.data == Data("foreign".utf8))
     #expect(try ResourceAdmission.observe(ref, store: store).recoveryPaths.isEmpty)
     #expect(try transactionRecordKeys(store) == [])

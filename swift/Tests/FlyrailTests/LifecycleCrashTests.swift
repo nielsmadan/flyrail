@@ -2,15 +2,9 @@
 import Foundation
 import Testing
 
-private let lifecycleBoundaries = [
-    "resource-precondition", "index-require", "guard-lookup", "preparation", "directory", "stage-node", "staged",
-    "journal", "prepare", "backup-move", "backup", "rename", "staging", "publish", "publish-receipt", "receipt",
-    "receipt-reread", "receipt-committed", "cleanup-node", "cleanup", "index-completion",
-]
-
 @Test(arguments: [false, true])
 func lifecycleSyncRecoversFromACrashAtEveryForwardBoundary(_ directoryStore: Bool) throws {
-    for boundary in lifecycleBoundaries {
+    for boundary in lifecycleForwardBoundaries {
         let root = try NativeTestRoot()
         defer { try? root.cleanup() }
         let store: any StateStore = directoryStore ? root.store : MemoryStore()
@@ -40,6 +34,43 @@ func lifecycleSyncRecoversFromACrashAtEveryForwardBoundary(_ directoryStore: Boo
 
 private func names(_ path: ResourcePath) throws -> [String] {
     try FileManager.default.contentsOfDirectory(atPath: path.displayString).sorted()
+}
+
+private func firstInstall(_ path: ResourcePath, tree: Bool) throws -> RenderedBundle {
+    guard tree else { return try transactionRendered(path, "one\n") }
+    return try RenderedBundle(artifacts: [
+        RenderedArtifact(id: "guide", family: .skills, destination: path, content: .tree(TreeContent(entries: [
+            BundleEntry(path: "nested/file", data: Data("one\n".utf8)),
+        ]))),
+    ])
+}
+
+@Test(arguments: [false, true], lifecycleForwardBoundaries.filter { !existingResourceBoundaries.contains($0) })
+func lifecycleFirstInstallRecoversFromACrashAtEveryForwardBoundary(_ directoryStore: Bool,
+                                                                   _ boundary: String) throws
+{
+    for tree in [false, true] {
+        let root = try NativeTestRoot()
+        defer { try? root.cleanup() }
+        let store: any StateStore = directoryStore ? root.store : MemoryStore()
+        let target = try InstallationTarget(store: store)
+        let path = try root.child(tree ? "tree" : "document")
+        let rendered = try firstInstall(path, tree: tree)
+        let (seam, fired) = crashSeam(at: boundary)
+        #expect(throws: NativeSimulatedCrash(boundary)) {
+            try transactionWrite(transactionBundle(), rendered: rendered, target: target, seam: seam)
+        }
+        try #require(fired())
+        #expect(try sync(bundle: transactionBundle(), rendered: rendered, target: target).status == .applied)
+        let file = try tree ? appendPath(path, "nested/file") : path
+        #expect(FileManager.default.contents(atPath: file.displayString) == Data("one\n".utf8))
+        #expect(try storedReceipt(path, store: store)?.claims.first?.version == "1")
+        #expect(try transactionRecordKeys(store) == [])
+        #expect(try names(root.path) == [tree ? "tree" : "document"])
+        if directoryStore {
+            #expect(try names(ResourcePath(root.stateURL.appending(path: "staging").path)) == [])
+        }
+    }
 }
 
 @Test(arguments: [false, true])
@@ -74,7 +105,7 @@ func aCrashAfterCreatingTheTransactionDirectoryIsCleanedUpByTheNextRun(_ directo
         .contains("two"))
 }
 
-@Test(arguments: [false, true], lifecycleBoundaries.filter { !["stage-node", "staging"].contains($0) })
+@Test(arguments: [false, true], lifecycleForwardBoundaries.filter { !["stage-node", "staging"].contains($0) })
 func lifecycleRemovalRecoversFromACrashAtEveryForwardBoundary(_ directoryStore: Bool, _ boundary: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }
@@ -98,7 +129,7 @@ func lifecycleRemovalRecoversFromACrashAtEveryForwardBoundary(_ directoryStore: 
     }
 }
 
-@Test(arguments: [false, true], lifecycleBoundaries)
+@Test(arguments: [false, true], lifecycleForwardBoundaries)
 func lifecycleTreeSyncRecoversFromACrashAtEveryForwardBoundary(_ directoryStore: Bool, _ boundary: String) throws {
     let root = try NativeTestRoot()
     defer { try? root.cleanup() }

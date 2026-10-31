@@ -91,7 +91,7 @@ package enum NativeAuthority {
                 throw nativeFailure(.unsafePath, "nonportable resource path", path)
             }
             try validateRelativePath(name, label: "resource path component")
-            if managementName(name) {
+            if NativeTransactionDirectory.isTransactionName(name) {
                 throw FlyrailValueError("resource destination enters reserved management state")
             }
         }
@@ -167,9 +167,5 @@ package enum NativeAuthority {
         guard type != S_IFREG || metadata.st_nlink == 1 else {
             throw nativeFailure(.unsafePath, "hard-linked resources are ambiguous: \(path.displayString)", path)
         }
-    }
-
-    package static func managementName(_ name: String) -> Bool {
-        NativeTransactionDirectory.isTransactionName(name)
     }
 }

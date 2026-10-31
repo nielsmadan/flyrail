@@ -128,6 +128,27 @@ func storePlan(_ ref: ResourceRef, store: any StateStore, after: Revision, previ
     )
 }
 
+let lifecycleForwardBoundaries = ResourceTransaction.boundaries.filter {
+    !ResourceTransaction.recoveryBoundaries.contains($0)
+}
+
+let kernelForwardBoundaries = lifecycleForwardBoundaries.filter {
+    !["resource-precondition", "index-require", "guard-lookup", "index-completion"].contains($0)
+}
+
+let existingResourceBoundaries = ["backup-move", "backup", "cleanup-node"]
+
+func kernelError(_ body: () throws -> Void) -> TargetError? {
+    do {
+        try body()
+        return nil
+    } catch let error as TargetError {
+        return error
+    } catch {
+        return nil
+    }
+}
+
 private final class CrashRecord {
     var fired = false
 }

@@ -14,13 +14,20 @@ extension NativeInterop {
         let target = try InstallationTarget(store: DirectoryStore(ResourcePath(state)))
         let owner = options["--bundle-id"] ?? "team"
         try validateIdentifier(owner, label: "bundle id")
-        let timeout = try duration(options["--lock-timeout"] ?? "0")
         let seam = try seam(options)
         let prepared = try writes ? prepareWrite(options: options, owner: owner) : nil
         if command == .inspect {
             try output.write(contentsOf: StateCodec.encodeRecord(observationValue(
                 inspectInstallation(bundleID: owner, target: target),
             )))
+            return
+        }
+        let timeout = try duration("--lock-timeout", options["--lock-timeout"] ?? "0")
+        if let (bundle, rendered, _) = prepared,
+           let failure = try requestFailure(bundle: bundle, rendered: rendered, target: target)
+        {
+            let result = InstallationInspection.failed(owner, target: target, error: failure, notices: rendered.notices)
+            try output.write(contentsOf: StateCodec.encodeRecord(resultValue(result)))
             return
         }
         let result: InstallationResult
@@ -63,6 +70,28 @@ extension NativeInterop {
         try output.write(contentsOf: StateCodec.encodeRecord(resultValue(result)))
     }
 
+    private static func requestFailure(
+        bundle: FlyrailBundle, rendered: RenderedBundle, target: InstallationTarget,
+    ) throws -> TargetError? {
+        do {
+            try LifecyclePlanning.requireStoreOutsideSources(bundle: bundle, target: target)
+        } catch let error as TargetError {
+            return error
+        }
+        let group: NativeTransactionPlanning.Group
+        do {
+            group = try NativeTransactionPlanning.group(rendered)
+        } catch {
+            return NativeTransactionExecution.detail(error)
+        }
+        do {
+            _ = try LifecyclePlanning.references(rendered, index: nil, target: target, bundle: bundle, group: group)
+        } catch let error as TargetError {
+            return error
+        }
+        return nil
+    }
+
     private static func prepareWrite(
         options: [String: String], owner: String,
     ) throws -> (FlyrailBundle, RenderedBundle, Acquisition) {
@@ -92,13 +121,6 @@ extension NativeInterop {
             platform: .macOS, surface: .cli,
         ).hookRuntime(HookRuntime(node: options["--node"].map(ResourcePath.init)))
         return try (bundle, render(bundle, for: context), acquisition)
-    }
-
-    private static func duration(_ value: String) throws -> Duration {
-        guard let seconds = Double(value), seconds.isFinite, seconds >= 0, seconds <= 1e9 else {
-            throw FlyrailValueError("timeout must be finite and nonnegative")
-        }
-        return .seconds(seconds)
     }
 
     private static func rendered(_ options: [String: String], destination: ResourcePath) throws -> RenderedBundle {
@@ -176,7 +198,7 @@ extension NativeInterop {
         guard let ready, let release else {
             throw FlyrailValueError("--barrier-phase requires --barrier-ready and --barrier-release")
         }
-        let wait = try duration(options["--barrier-timeout"] ?? "30")
+        let wait = try duration("--barrier-timeout", options["--barrier-timeout"] ?? "30")
         let readyPath = try NativeAuthority.absolute(ResourcePath(ready))
         let releasePath = try NativeAuthority.absolute(ResourcePath(release))
         var visited = false

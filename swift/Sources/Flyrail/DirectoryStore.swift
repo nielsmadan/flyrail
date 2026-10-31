@@ -68,8 +68,7 @@ public final class DirectoryStore: StateStore {
     }
 
     public func lock(_ name: String, timeout: Duration) throws -> StoreLock {
-        try validateStoreKey(name, label: "lock name")
-        guard timeout >= .zero else { throw FlyrailValueError("lock timeout must be finite and nonnegative") }
+        try validateLockRequest(name, timeout: timeout)
         return try holdFileLock(locks, name: name, timeout: timeout)
     }
 
@@ -174,19 +173,12 @@ public final class DirectoryStore: StateStore {
         return try ResourcePath(platformBytes: prefix + parts.joined(separator: [47]))
     }
 
-    private static func parent(_ path: ResourcePath) throws -> ResourcePath? {
-        let bytes = path.platformBytes
-        guard let slash = bytes.lastIndex(of: 47), bytes.contains(where: { $0 != 47 }) else { return nil }
-        let head = Array(bytes[..<slash])
-        return try ResourcePath(platformBytes: head.contains(where: { $0 != 47 }) ? head : Array(bytes[...slash]))
-    }
-
     private static func privateDirectory(_ path: ResourcePath) throws {
         var missing: [ResourcePath] = []
         var probe: ResourcePath? = path
         while let current = probe, !exists(current) {
             missing.append(current)
-            probe = try parent(current)
+            probe = parentPath(current)
         }
         for directory in missing.reversed() {
             guard call(directory, { mkdir($0, 0o700) }) == 0 else {
@@ -194,7 +186,7 @@ public final class DirectoryStore: StateStore {
                 guard code == EEXIST else { throw failure(code, directory) }
                 continue
             }
-            if let parent = try parent(directory) {
+            if let parent = parentPath(directory) {
                 try syncDirectory(parent)
             }
         }

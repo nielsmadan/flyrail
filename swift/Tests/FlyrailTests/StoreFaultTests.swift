@@ -155,7 +155,8 @@ func aPartialCleanupRetainsThePreparationUntilTheNextRecover(_ directoryStore: B
     #expect(try transactionRecover(target).status == .applied)
     #expect(try storedPreparation(path, store: store) == nil)
     #expect(try transactionRecordKeys(store) == [])
-    #expect(try [.unchanged, .applied].contains(second(path, target: target).status))
+    let repeated = try second(path, target: target)
+    #expect(repeated.status == .applied)
     #expect(try names(root) == ["document"])
 }
 
