@@ -13,6 +13,8 @@ Use relative or computed paths. Do not commit developer home directories, tempor
 run identifiers or local environment details. Keep generated outputs and caches
 ignored. Do not alter HOME, global tools, hooks or real agent installations.
 
-The root Justfile delegates to implemented languages. Run the affected language's
+The root Justfile delegates to implemented languages. Each language releases
+independently from `<language>/scripts/release.json` through `just release
+<language>`; `python/scripts/release_workflow.py` serves all release workflows. Run the affected language's
 checks and package verification after changes; test shared fixtures in each
 available implementation when their contract changes.

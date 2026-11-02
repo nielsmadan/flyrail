@@ -153,7 +153,9 @@ release workflow runs both tiers on every supported platform, so no release
 publishes without integration results.
 
 Workflows use pinned action commits, pinned uv, checksum-pinned actionlint,
-SwiftFormat and SwiftLint archives, and read-only repository permissions.
+SwiftFormat and SwiftLint archives, and read-only repository permissions. The
+SwiftFormat and SwiftLint pins live once, in the
+[`setup-swift-tools`](../../.github/actions/setup-swift-tools/action.yml) action.
 
 [Dependabot](../../.github/dependabot.yml) groups weekly updates per ecosystem:
 Python under `/python`, Cargo under `/rust`, Swift packages at the root, and
@@ -176,18 +178,18 @@ Releases use [`curtains`](https://github.com/nielsmadan/curtaincall); install it
 first with `brew install nielsmadan/tap/curtaincall`. Run releases from a clean,
 complete `main` checkout. Every historical `python-vX.Y.Z` tag must exist both
 locally and on origin and point to the same commit. Curtains never fetches: the
-fetched `origin/main` must be an ancestor of `HEAD`. The recipes select the nested
-policy in [`scripts/release.json`](../scripts/release.json) explicitly:
+fetched `origin/main` must be an ancestor of `HEAD`. The root recipe selects the
+nested policy in [`scripts/release.json`](../scripts/release.json) explicitly:
 
 ```sh
-just release --dry-run
-just release
-just release patch
-just release 0.2.0
+just release python --dry-run
+just release python
+just release python patch
+just release python 0.2.0
 ```
 
 Curtains considers commits touching `python/` or `spec/`, proposes a semantic
-version from conventional commit subjects, then runs the complete check,
+version from conventional commit subjects, then runs the Python check,
 dependency audit and workflow validation. `--dry-run` reads local and origin
 state but skips the tool check and every policy command. After confirmation
 [`prepare_release.py`](../scripts/prepare_release.py) updates the project and
@@ -203,7 +205,9 @@ and wheel, and saves one verified artifact bundle. A separate OIDC-only job
 publishes the bundle to PyPI. Only after PyPI succeeds does a `contents: write`
 job create the GitHub Release and attach the same artifacts. Curtains prints the
 workflow and release locations; it does not require the GitHub CLI and does not
-wait for publication. Follow the printed workflow link to confirm it.
+wait for publication. Follow the printed workflow link to confirm it. The GitHub
+Release is marked as a pre-release while the project's Development Status
+classifier is Pre-Alpha, Alpha or Beta.
 
 If publication fails after the tag is pushed, fix the workflow on `main` and
 retry the existing tag from the workflow's Actions page with **Run workflow** on
@@ -214,8 +218,14 @@ CLI available the same retry is:
 gh workflow run release-python.yml --ref main -f tag=python-v0.1.0
 ```
 
-Future implementations use independent ecosystem-aware tags: Python
-`python-vX.Y.Z`, Go under `go/` uses `go/vX.Y.Z`, Swift uses bare `X.Y.Z`, Rust
-uses `rust-vX.Y.Z` and TypeScript uses `typescript-vX.Y.Z`. A shared `spec/`
+Implementations use independent ecosystem-aware tags: Python `python-vX.Y.Z`,
+Rust `rust-vX.Y.Z` and Swift `vX.Y.Z`, which SwiftPM reads as plain versions.
+Future Go under `go/` uses `go/vX.Y.Z` and TypeScript `typescript-vX.Y.Z`. See
+[Releasing Rust](../../rust/docs/development.md#releasing-rust) and
+[Releasing Swift](../../swift/README.md#releasing-swift).
+[`release_workflow.py`](../scripts/release_workflow.py) validates and publishes
+all three tag families; each workflow passes `--component` so a tag from another
+family is rejected. Release tags are permanent, so protect `python-v*`, `rust-v*`
+and `v*` with a GitHub tag ruleset that limits who can create them. A shared `spec/`
 change must pass every available implementation's conformance tests, but it does
 not force simultaneous registry publication.

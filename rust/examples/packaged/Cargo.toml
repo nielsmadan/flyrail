@@ -5,6 +5,7 @@ edition.workspace = true
 license = "MIT"
 description = "A SHA-256 utility embedding Flyrail package resources"
 readme = "README.md"
+publish = false
 include = ["src/**", "resources/**", "README.md", "Cargo.toml"]
 
 [[bin]]

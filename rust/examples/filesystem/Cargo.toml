@@ -5,6 +5,7 @@ edition.workspace = true
 license = "MIT"
 description = "A notes word counter using Flyrail filesystem bundles"
 readme = "README.md"
+publish = false
 
 [[bin]]
 name = "flyrail-notes"

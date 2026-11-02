@@ -10,8 +10,8 @@ let package = Package(
         .library(name: "Flyrail", targets: ["Flyrail"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-system", exact: "1.8.1"),
-        .package(url: "https://github.com/swiftlang/swift-docc-plugin", exact: "1.5.0"),
+        .package(url: "https://github.com/apple/swift-system", from: "1.8.1"),
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.5.0"),
     ],
     targets: [
         .target(

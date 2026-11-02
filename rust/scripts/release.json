@@ -1,0 +1,46 @@
+{
+  "branch": "main",
+  "initial_version": "0.1.0",
+  "tag_prefix": "rust-v",
+  "paths": ["rust", "rust-toolchain.toml"],
+  "checks": [
+    ["just", "-f", "rust/Justfile", "check"],
+    ["just", "check-workflow"]
+  ],
+  "tools": ["git", "just", "cargo", "uvx"],
+  "stages": [
+    {
+      "files": [
+        "rust/Cargo.toml",
+        "rust/examples/filesystem/Cargo.toml",
+        "rust/examples/packaged/Cargo.toml",
+        "rust/Cargo.lock",
+        "rust/CHANGELOG.md"
+      ],
+      "commands": [
+        ["{python}", "rust/scripts/prepare_release.py", "{version}"],
+        ["just", "-f", "rust/Justfile", "lock"],
+        [
+          "uvx",
+          "git-cliff@2.13.1",
+          "--config",
+          "rust/cliff.toml",
+          "--include-path",
+          "rust/**",
+          "--include-path",
+          "rust-toolchain.toml",
+          "--tag",
+          "rust-v{version}",
+          "-o",
+          "rust/CHANGELOG.md"
+        ]
+      ],
+      "checks": [["{python}", "rust/scripts/package_qa.py"]],
+      "message": "chore: release Rust {version}"
+    }
+  ],
+  "name": "Flyrail for Rust",
+  "repository": "nielsmadan/flyrail",
+  "workflow": "release-rust.yml",
+  "publication": "the flyrail crate on crates.io and a Rust GitHub release"
+}

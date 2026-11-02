@@ -15,6 +15,9 @@ git-hook gate and must stay fast. Use `just check-integration` for the full
 suite with fixtures, interop pairs and the hook runtime. `just format` formats
 Rust code, `just lint` runs Clippy, and `just test` runs the whole suite.
 Supported platforms are macOS and Linux; Windows is unsupported.
+`just release rust --dry-run` (from the repository root) previews a Rust release;
+creating a release commit or tag, pushing, and publishing require explicit user
+authorization.
 
 Keep caches, temporary files, downloaded tools, and test installations inside
 this checkout; cargo runs with CARGO_HOME at the repository-root

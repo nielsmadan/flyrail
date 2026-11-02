@@ -11,14 +11,16 @@ receipt and transaction formats in `spec/`.
 | --- | --- | --- |
 | Python | Alpha; Python 3.11+ | [API and quickstart](python/README.md) |
 | Rust | Alpha; Rust stable | [API and quickstart](rust/README.md) |
+| Swift | Alpha; macOS 13+, Swift 6.2+ | [Installation and quickstart](swift/README.md) |
 
-Additional Swift, Go and TypeScript implementations can use the same contracts
-and conformance fixtures. Their public APIs should be native to each language.
+Additional Go and TypeScript implementations can use the same contracts and
+conformance fixtures. Their public APIs should be native to each language.
 
 ## Repository
 
 - `python/`: package, tests, examples, documentation and Python tooling.
 - `rust/`: Rust crate and tooling.
+- `swift/`: Swift package sources, tests and tooling; `Package.swift` is at the root.
 - `spec/`: language-independent formats, recovery protocol and shared fixtures.
 - `.github/`: repository CI and dependency maintenance.
 
@@ -41,7 +43,9 @@ content and reports host prerequisites and activation separately.
 ## Development
 
 `just setup` synchronizes the locked environment and installs the Git hooks.
-The root check commands run both implementations:
+`just check` runs the fast Python and Rust gates; `check-integration` and
+`check-package` also cover Swift, and `audit-dependencies` and `check-workflow`
+are repository-wide:
 
 ```sh
 just check
@@ -51,13 +55,15 @@ just audit-dependencies
 just check-workflow
 ```
 
-Install the published Python distribution with `python -m pip install pyflyrail`;
-the import package is `flyrail`.
+Install the published packages with `python -m pip install pyflyrail` (import
+package `flyrail`), `cargo add flyrail`, or a SwiftPM dependency on
+`https://github.com/nielsmadan/flyrail`. Each implementation is versioned and
+released separately with `just release <python|rust|swift>`.
 
 Without just, run `python3 python/scripts/check.py check` from this directory.
-See [Python development](python/docs/development.md) and
-[Rust development](rust/docs/development.md) for tool setup and the individual
-build/test commands. Generated logs, test installations, reports and build
-outputs stay in ignored local directories.
+See [Python development](python/docs/development.md),
+[Rust development](rust/docs/development.md) and [Swift](swift/README.md) for
+tool setup and the individual build/test commands. Generated logs, test
+installations, reports and build outputs stay in ignored local directories.
 
 Licensed under the [MIT License](LICENSE).

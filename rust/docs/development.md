@@ -72,5 +72,64 @@ package updates at the root, and GitHub Actions updates separately. The root
 without installing or activating anything itself.
 
 The package QA script creates archives and vendored consumers below ignored cache
-directories. It does not publish a crate. This repository has no Rust publishing
-automation.
+directories. It reads the crate version from `Cargo.toml` and never publishes.
+
+## Releasing Rust
+
+The `flyrail` crate is published to crates.io from
+[`release-rust.yml`](../../.github/workflows/release-rust.yml). The example crates
+set `publish = false`. Rust versions are independent of the Python and Swift
+packages; tags are `rust-vX.Y.Z`. Releases use
+[`curtains`](https://github.com/nielsmadan/curtaincall) from a clean, complete
+`main` checkout at the repository root:
+
+```sh
+just release rust --dry-run
+just release rust
+just release rust patch
+just release rust 0.2.0
+```
+
+Curtains considers commits touching `rust/` or `rust-toolchain.toml`, runs the
+Rust `just check` and the workflow validation, then
+[`prepare_release.py`](../scripts/prepare_release.py) sets the workspace version
+and the examples' `flyrail` requirements, `just lock` refreshes `Cargo.lock`, and
+git-cliff writes [`CHANGELOG.md`](../CHANGELOG.md). Package QA runs against the
+prepared version before curtains commits, tags and atomically pushes `main` with
+the tag.
+
+The workflow validates the annotated tag and crate version, reruns formatting,
+Clippy, the full test suite with the Python differential, package QA and
+`cargo publish --dry-run` on Ubuntu, repeats Clippy and tests on macOS, and saves
+the verified `.crate`. The publish job runs in the `crates-io` environment,
+holds only `id-token: write`, skips an already published version, repackages the tagged source and requires it
+to be byte-identical to the verified crate, publishes, and then checks that
+crates.io serves the verified checksum. A `contents: write` job finally creates
+the "Flyrail for Rust" GitHub release with the crate attached. Releases below 1.0
+are marked as pre-releases.
+
+Before the first release, create the `crates-io` environment under the
+repository's **Settings → Environments** and limit its deployment branches and
+tags to the tag pattern `rust-v*` and the `main` branch, which retries run from.
+Other branches can then not reach the publish credentials. crates.io trusted publishing only works for a crate that already
+exists, so the first release authenticates with a token:
+
+1. On crates.io, create an API token limited to the `flyrail` crate name with the
+   `publish-new` scope and a short expiry.
+2. Store it as the `CARGO_REGISTRY_TOKEN` secret of the `crates-io` environment,
+   not as a repository secret. The publish job uses that secret whenever it is set.
+3. After the first version is published, delete the secret and the token, then
+   add a trusted publisher on the crate's crates.io settings page: owner
+   `nielsmadan`, repository `flyrail`, workflow `release-rust.yml`, environment
+   `crates-io`. Later releases exchange the workflow's OIDC identity for a
+   short-lived token through `rust-lang/crates-io-auth-action`.
+
+If publication fails after the tag is pushed, fix the workflow on `main` and rerun
+it from the Actions page with **Run workflow** on `main`, supplying the existing
+tag, or with the GitHub CLI:
+
+```sh
+gh workflow run release-rust.yml --ref main -f tag=rust-v0.1.0
+```
+
+A version already on crates.io is not uploaded again. Never move a published tag.

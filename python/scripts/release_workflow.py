@@ -7,30 +7,47 @@ import sys
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, NamedTuple
 
-SEMVER_TAG = re.compile(r"python-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+PREFIXES = {"python-v": "python", "rust-v": "rust", "v": "swift"}
+ASSETLESS_COMPONENTS = frozenset({"swift"})
+TAG = re.compile(r"(?P<prefix>python-v|rust-v|v)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 
 
 class WorkflowError(Exception):
     pass
 
 
-def version(tag: str) -> tuple[int, int, int] | None:
-    match = SEMVER_TAG.fullmatch(tag)
+class ReleaseTag(NamedTuple):
+    component: str
+    version: tuple[int, int, int]
+
+
+def parse_tag(tag: str) -> ReleaseTag | None:
+    match = TAG.fullmatch(tag)
     if match is None:
         return None
-    major, minor, patch = match.groups()
-    return int(major), int(minor), int(patch)
+    prefix, major, minor, patch = match.groups()
+    return ReleaseTag(PREFIXES[prefix], (int(major), int(minor), int(patch)))
+
+
+def _require_tag(tag: str, component: str | None = None) -> ReleaseTag:
+    parsed = parse_tag(tag)
+    if parsed is None:
+        raise WorkflowError(f"Invalid release tag: {tag!r}")
+    if component is not None and parsed.component != component:
+        raise WorkflowError(f"Release tag {tag!r} is a {parsed.component} tag, not {component}.")
+    return parsed
 
 
 def previous_tag(current: str, tags: Sequence[str]) -> str | None:
-    current_version = version(current)
-    if current_version is None:
-        raise WorkflowError(f"Invalid Python release tag: {current!r}")
+    release = _require_tag(current)
     candidates = [
-        (parsed, tag)
+        (parsed.version, tag)
         for tag in tags
-        if (parsed := version(tag)) is not None and parsed < current_version
+        if (parsed := parse_tag(tag)) is not None
+        and parsed.component == release.component
+        and parsed.version < release.version
     ]
     return max(candidates)[1] if candidates else None
 
@@ -43,9 +60,8 @@ def command(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def validate_tag(tag: str, event_sha: str | None = None) -> str:
-    if version(tag) is None:
-        raise WorkflowError(f"Invalid Python release tag: {tag!r}")
+def validate_tag(tag: str, component: str, event_sha: str | None = None) -> str:
+    _require_tag(tag, component)
     ref = f"refs/tags/{tag}"
     object_type = command("git", "cat-file", "-t", ref).stdout.strip()
     if object_type != "tag":
@@ -70,8 +86,7 @@ def validate_tag(tag: str, event_sha: str | None = None) -> str:
 
 
 def verify_remote_tag(tag: str, target: str) -> None:
-    if version(tag) is None:
-        raise WorkflowError(f"Invalid Python release tag: {tag!r}")
+    _require_tag(tag)
     ref = f"refs/tags/{tag}"
     peeled = f"{ref}^{{}}"
     refs = command("git", "ls-remote", "--exit-code", "--tags", "origin", ref, peeled)
@@ -81,19 +96,17 @@ def verify_remote_tag(tag: str, target: str) -> None:
         )
 
 
-def project_metadata(tag: str, path: Path) -> tuple[str, bool]:
-    if version(tag) is None:
-        raise WorkflowError(f"Invalid Python release tag: {tag!r}")
+def _require_version(expected: str, actual: object) -> None:
+    if actual != expected:
+        raise WorkflowError(f"Tag version {expected!r} does not match project version {actual!r}.")
+
+
+def _python_prerelease(expected: str, path: Path) -> bool:
     project = tomllib.loads(path.read_text(encoding="utf-8"))["project"]
-    expected_version = tag.removeprefix("python-v")
     if project["name"] != "pyflyrail":
         raise WorkflowError(f"Expected pyflyrail distribution, got {project['name']!r}.")
-    if project["version"] != expected_version:
-        raise WorkflowError(
-            f"Tag version {expected_version!r} does not match project version "
-            f"{project['version']!r}."
-        )
-    prerelease = any(
+    _require_version(expected, project["version"])
+    return any(
         classifier in project.get("classifiers", [])
         for classifier in (
             "Development Status :: 2 - Pre-Alpha",
@@ -101,7 +114,44 @@ def project_metadata(tag: str, path: Path) -> tuple[str, bool]:
             "Development Status :: 4 - Beta",
         )
     )
-    return expected_version, prerelease
+
+
+def _crate_version(manifest: dict[str, Any]) -> object:
+    version = manifest["package"]["version"]
+    return (
+        manifest["workspace"]["package"]["version"] if version == {"workspace": True} else version
+    )
+
+
+def _rust_prerelease(expected: str, path: Path) -> bool:
+    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    name = manifest["package"]["name"]
+    if name != "flyrail":
+        raise WorkflowError(f"Expected flyrail crate, got {name!r}.")
+    _require_version(expected, _crate_version(manifest))
+    return expected.startswith("0.")
+
+
+def _swift_prerelease(expected: str, path: Path) -> bool:
+    if re.search(r'Package\(\s*name:\s*"Flyrail"\s*,', path.read_text(encoding="utf-8")) is None:
+        raise WorkflowError(f"Expected the Flyrail Swift package in {path}.")
+    return expected.startswith("0.")
+
+
+PRERELEASE = {
+    "python": _python_prerelease,
+    "rust": _rust_prerelease,
+    "swift": _swift_prerelease,
+}
+
+
+def project_metadata(tag: str, path: Path) -> tuple[str, bool]:
+    component, version = _require_tag(tag)
+    expected = ".".join(map(str, version))
+    try:
+        return expected, PRERELEASE[component](expected, path)
+    except (KeyError, TypeError, tomllib.TOMLDecodeError) as error:
+        raise WorkflowError(f"{path} is not a valid {component} manifest: {error!r}") from error
 
 
 def _sha256(path: Path) -> str:
@@ -120,7 +170,7 @@ def _expected_assets(assets: Sequence[str]) -> dict[str, tuple[Path, int, str]]:
     return expected
 
 
-def _release(tag: str) -> dict[str, object] | None:
+def _github_release(tag: str) -> dict[str, object] | None:
     fields = "tagName,name,body,isDraft,isPrerelease,isImmutable,assets"
     result = command("gh", "release", "view", tag, "--json", fields, check=False)
     if result.returncode == 0:
@@ -200,9 +250,11 @@ def publish(
     if re.fullmatch(r"[0-9a-f]{40}", target) is None:
         raise WorkflowError(f"Release target must be a full commit SHA, got {target!r}.")
     body = notes.read_text(encoding="utf-8")
+    if not assets and _require_tag(tag).component not in ASSETLESS_COMPONENTS:
+        raise WorkflowError(f"Release {tag} requires at least one asset.")
     expected = _expected_assets(assets)
     verify_remote_tag(tag, target)
-    release = _release(tag)
+    release = _github_release(tag)
     if release is None:
         command(
             "gh",
@@ -237,6 +289,7 @@ def main() -> None:
     validation = subparsers.add_parser("validate-tag")
     validation.add_argument("tag")
     validation.add_argument("event_sha", metavar="event-sha", nargs="?")
+    validation.add_argument("--component", required=True, choices=sorted(PREFIXES.values()))
     metadata = subparsers.add_parser("project-metadata")
     metadata.add_argument("tag")
     metadata.add_argument("project", type=Path)
@@ -245,7 +298,7 @@ def main() -> None:
     publication.add_argument("title")
     publication.add_argument("notes", type=Path)
     publication.add_argument("target")
-    publication.add_argument("assets", nargs="+")
+    publication.add_argument("assets", nargs="*")
     publication.add_argument("--prerelease", action="store_true")
     args = parser.parse_args()
     if args.operation == "previous-tag":
@@ -254,7 +307,7 @@ def main() -> None:
             print(selected)
         return
     if args.operation == "validate-tag":
-        print(validate_tag(args.tag, args.event_sha))
+        print(validate_tag(args.tag, args.component, args.event_sha))
         return
     if args.operation == "project-metadata":
         project_version, prerelease = project_metadata(args.tag, args.project)

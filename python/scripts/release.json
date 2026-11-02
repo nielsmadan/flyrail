@@ -4,8 +4,8 @@
   "tag_prefix": "python-v",
   "paths": ["python", "spec"],
   "checks": [
-    ["just", "check"],
-    ["just", "audit-dependencies"],
+    ["just", "-f", "python/Justfile", "check"],
+    ["just", "-f", "python/Justfile", "audit-dependencies"],
     ["just", "check-workflow"]
   ],
   "tools": ["git", "just", "uvx"],
@@ -36,7 +36,7 @@
           "python/CHANGELOG.md"
         ]
       ],
-      "checks": [["just", "check-package"]],
+      "checks": [["just", "-f", "python/Justfile", "check-package"]],
       "message": "chore: release Python {version}"
     }
   ],

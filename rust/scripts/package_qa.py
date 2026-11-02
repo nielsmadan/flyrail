@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+import tomllib
 from pathlib import Path
 
 
@@ -60,7 +61,13 @@ def cargo_config(root: Path, vendor: Path) -> Path:
     return config
 
 
+def crate_version() -> str:
+    manifest = tomllib.loads((RUST / "Cargo.toml").read_text())
+    return manifest["workspace"]["package"]["version"]
+
+
 def main() -> None:
+    version = crate_version()
     qa = REPO / ".cache" / "tmp" / f"rust-package-qa-{time.time_ns()}"
     target = qa / "target"
     extracted = qa / "extracted"
@@ -79,10 +86,10 @@ def main() -> None:
             str(target),
         ]
         run([*common, "-p", "flyrail"])
-        root_archive = target / "package" / "flyrail-0.1.0.crate"
+        root_archive = target / "package" / f"flyrail-{version}.crate"
         package_checksum = hashlib.sha256(root_archive.read_bytes()).hexdigest()
         with tarfile.open(root_archive) as package:
-            license_member = package.extractfile("flyrail-0.1.0/LICENSE")
+            license_member = package.extractfile(f"flyrail-{version}/LICENSE")
             assert license_member is not None
             assert license_member.read() == (RUST / "LICENSE").read_bytes()
         run(["cargo", "vendor", "--offline", str(vendor)])

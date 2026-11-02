@@ -11,8 +11,8 @@ prompt, print, start bundled commands, or contact a network service.
 
 ## Quickstart
 
-Add the crate from this workspace, then construct or load a bundle and select a
-destination:
+Add the crate with `cargo add flyrail`, then construct or load a bundle and
+select a destination:
 
 ```rust
 use flyrail::{Bundle, DirectoryStore, OperationStatus, StateStore, Target, install, uninstall};

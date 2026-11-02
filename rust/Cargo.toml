@@ -24,8 +24,10 @@ version.workspace = true
 edition.workspace = true
 description = "Reversible skills, instructions, MCP registrations, and hooks for AI agents"
 readme = "README.md"
-license-file = "LICENSE"
+license = "MIT"
 repository = "https://github.com/nielsmadan/flyrail"
+keywords = ["ai", "agents", "skills", "mcp", "hooks"]
+categories = ["development-tools", "filesystem"]
 
 [features]
 interop-test-seams = []

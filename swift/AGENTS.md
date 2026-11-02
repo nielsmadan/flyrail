@@ -9,12 +9,16 @@ Use `just check` for formatting, lint, warnings-as-errors build, unit tests, and
 the value differential. SwiftPM commands run through the root package and keep
 build outputs under the repository `.cache`. Set
 `FLYRAIL_SWIFT_DISABLE_SANDBOX=1` under nono. CI pins SwiftFormat 0.64.0 and
-SwiftLint 0.65.1; use the same versions locally. CI path selection is described
+SwiftLint 0.65.1 in `../.github/actions/setup-swift-tools`; use the same versions
+locally. CI path selection is described
 in `../python/docs/development.md` under "CI and maintenance".
 
 `just check-integration` and `just check-package` run the cross-language scripts
 and package QA; CI runs them nightly and on dispatch, and `CI result` requires
 them. Tests build stores and targets with `NativeTestRoot.store` and `target()`.
+`just release swift --dry-run` (from the repository root) previews a Swift release;
+creating a release commit or tag, pushing, and publishing require explicit user
+authorization. A pushed `vX.Y.Z` tag is the release, so it is never moved.
 
 State-store behaviour follows Rust (`../rust/src`) where Python and Rust differ.
 Skill convenience functions report every failure, including a store that

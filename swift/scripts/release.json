@@ -1,0 +1,41 @@
+{
+  "branch": "main",
+  "initial_version": "0.1.0",
+  "tag_prefix": "v",
+  "paths": ["swift", "Package.swift", "Package.resolved"],
+  "checks": [
+    ["just", "-f", "swift/Justfile", "check"],
+    ["just", "-f", "swift/Justfile", "check-integration"],
+    ["just", "check-workflow"]
+  ],
+  "tools": ["git", "just", "swift", "cargo", "node", "bun", "uvx", "python/.venv/bin/python"],
+  "stages": [
+    {
+      "files": ["swift/CHANGELOG.md"],
+      "commands": [
+        [
+          "uvx",
+          "git-cliff@2.13.1",
+          "--config",
+          "swift/cliff.toml",
+          "--include-path",
+          "swift/**",
+          "--include-path",
+          "Package.swift",
+          "--include-path",
+          "Package.resolved",
+          "--tag",
+          "v{version}",
+          "-o",
+          "swift/CHANGELOG.md"
+        ]
+      ],
+      "checks": [["just", "-f", "swift/Justfile", "check-package"]],
+      "message": "chore: release Swift {version}"
+    }
+  ],
+  "name": "Flyrail for Swift",
+  "repository": "nielsmadan/flyrail",
+  "workflow": "release-swift.yml",
+  "publication": "the Swift package tag and a Swift GitHub release"
+}

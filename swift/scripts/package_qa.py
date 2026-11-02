@@ -180,10 +180,13 @@ def verify_manifest(package, scratch):
     assert manifest["swiftLanguageVersions"] == ["6"]
     dependencies = {
         item["sourceControl"][0]["identity"]:
-        item["sourceControl"][0]["requirement"]["exact"][0]
+        item["sourceControl"][0]["requirement"]["range"]
         for item in manifest["dependencies"]
     }
-    assert dependencies == {"swift-system": "1.8.1", "swift-docc-plugin": "1.5.0"}
+    assert dependencies == {
+        "swift-system": [{"lowerBound": "1.8.1", "upperBound": "2.0.0"}],
+        "swift-docc-plugin": [{"lowerBound": "1.5.0", "upperBound": "2.0.0"}],
+    }
     targets = {target["name"]: target for target in manifest["targets"]}
     assert set(targets) == {"Flyrail", "FlyrailInteropSupport", "FlyrailInterop", "FlyrailTests"}
     assert targets["Flyrail"]["path"] == "swift/Sources/Flyrail"
@@ -242,8 +245,8 @@ def main():
         package_checkout = next(path for path in checkouts if (path / "swift/Sources/Flyrail").is_dir())
         assert committed_files(package_checkout) == repository_files
         assert (package_checkout / "Package.swift").read_bytes() == (ROOT / "Package.swift").read_bytes()
-        print(f"Swift package QA: {len(files)} tracked Swift package files archived and verified; exact "
-              "manifest/dependency/resource pins; the extracted archive builds and tests without sibling "
+        print(f"Swift package QA: {len(files)} tracked Swift package files archived and verified; manifest "
+              "dependency ranges, exact resolved pins and resources; the extracted archive builds and tests without sibling "
               f"sources; an external SwiftPM consumer of a {len(repository_files)}-file Git snapshot of the "
               "tracked repository rendered, installed, executed and removed hooks")
     assert not qa.exists(), "package QA temporary files were retained"

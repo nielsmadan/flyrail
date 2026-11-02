@@ -28,6 +28,9 @@ package-list:
 format:
     cargo fmt
 
+lock:
+    cargo update --workspace
+
 test:
     cargo test --workspace
 
