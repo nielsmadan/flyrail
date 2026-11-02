@@ -1,5 +1,6 @@
 import os
 import re
+import select
 import subprocess
 import threading
 
@@ -19,7 +20,7 @@ def check_corpus_limits(root, driver, environment):
             try:
                 os.write(descriptor, chunk)
             except BlockingIOError:
-                stop.wait(0.001)
+                select.select([], [descriptor], [], 0.05)
 
     writer = threading.Thread(target=feed)
     writer.start()
