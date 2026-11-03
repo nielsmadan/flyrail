@@ -1,32 +1,73 @@
 version: 2
 updates:
-  - package-ecosystem: uv
-    directory: /python
+  - package-ecosystem: "uv"
+    directory: "/python"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    assignees:
+      - "nielsmadan"
     groups:
-      python-tooling:
-        patterns: ['*']
-  - package-ecosystem: cargo
-    directory: /rust
+      non-breaking:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "cargo"
+    directory: "/rust"
     schedule:
-      interval: weekly
-      day: monday
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    assignees:
+      - "nielsmadan"
     groups:
-      rust-tooling:
-        patterns: ['*']
-        update-types: ['patch', 'minor']
-  - package-ecosystem: github-actions
-    directory: /
+      non-breaking:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    assignees:
+      - "nielsmadan"
     groups:
-      github-actions:
-        patterns: ['*']
-  - package-ecosystem: swift
-    directory: /
+      non-breaking:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "swift"
+    directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    assignees:
+      - "nielsmadan"
     groups:
-      swift-packages:
-        patterns: ['*']
+      non-breaking:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
