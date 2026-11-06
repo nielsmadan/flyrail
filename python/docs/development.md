@@ -58,10 +58,10 @@ uv run --no-sync mypy --platform linux
 | Command | Work performed |
 | --- | --- |
 | `just check` | Locked sync, Ruff format/lint/security checks, interpreter verification, strict mypy, and the unit test tier. Runs in seconds; this is the git-hook and local release gate. |
-| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 95% gate, and package/consumer checks. Needs Node, npm and Bun. Also runs the Rust and Swift integration tiers. |
+| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 95% gate, and package/consumer checks. Needs Node, npm and Bun. Also runs the Rust, Swift and Go integration tiers. |
 | `just audit-dependencies` | Audit every locked registry package/version with pip-audit. |
 | `just check-workflow` | Validate all repository workflows with actionlint. |
-| `just check-package` | Build and verify distributions and installed example applications, then the Rust and Swift package checks. |
+| `just check-package` | Build and verify distributions and installed example applications, then the Rust, Swift and Go package checks. |
 | `just build` | Build the wheel and source archive into `python/dist/`. |
 | `just format` | Format Python code with Ruff. |
 | `just sync` | Synchronize `python/.venv` to the locked environment. |
@@ -129,16 +129,18 @@ not in the matrix: the suite has never passed there, so Windows is unsupported.
 
 Pushes to `main`, the nightly schedule and workflow dispatch run every fast-tier
 job. Pull requests run only the jobs their changed paths affect, and a newer push
-to the same pull request cancels the older run. Rust tests compare against Python
-and Swift tests against Python and Rust, so a change runs its own language and
+to the same pull request cancels the older run. Rust tests compare against Python,
+and Swift and Go tests against Python and Rust, so a change runs its own language and
 every language that depends on it. The path filters in the workflow's `changes`
 job are the source of truth:
 
 | Changed paths | Jobs |
 | --- | --- |
-| `python/**`, `spec/**`, `Justfile`, `lefthook.yml` | Python, dependency audit, Rust, Swift |
-| `rust/**`, `rust-toolchain.toml` | Rust, Swift |
+| `python/**`, `spec/**`, `Justfile`, `lefthook.yml` | Python, dependency audit, Rust, Swift, Go |
+| `rust/**`, `rust-toolchain.toml` | Rust, Swift, Go |
 | `swift/**`, `Package.swift`, `Package.resolved` | Swift |
+| `swift/scripts/**` | Swift, Go |
+| `go/**` | Go |
 | `.github/workflows/**` | all, including workflow validation |
 | other `.github/**` | workflow validation |
 
@@ -146,9 +148,12 @@ Pull requests listing 3000 or more files run every job, because the pull request
 files API stops there. The `CI result` job passes when every selected job passed
 or was skipped; make it the single required status check. The Swift job runs on
 macOS 26 with pinned SwiftFormat and SwiftLint and counts toward `CI result`.
-The integration matrix and the Swift integration job (macOS 26: differential and
-interop scripts, packaged hook runtime and package QA) run on the nightly
-schedule and on workflow dispatch, and `CI result` requires them too. The
+The Go job runs on Ubuntu 24.04 and macOS 26 with Go 1.27.3 and also counts.
+The integration matrix, the Swift integration job (macOS 26: differential and
+interop scripts, packaged hook runtime and package QA) and the Go integration
+job (Ubuntu 24.04 and macOS 26: race-enabled tests, differential and interop
+scripts and package QA) run on the nightly schedule and on workflow dispatch,
+and `CI result` requires them too. The
 release workflow runs both tiers on every supported platform, so no release
 publishes without integration results.
 
@@ -159,8 +164,8 @@ SwiftFormat and SwiftLint pins live once, in the
 [`setup-swift-tools`](../../.github/actions/setup-swift-tools/action.yml) action.
 
 [Dependabot](../../.github/dependabot.yml) groups weekly updates per ecosystem, with a
-7-day cooldown: Python under `/python`, Cargo under `/rust`, Swift packages at the root, and
-GitHub Actions. Its action bump pull requests update the lockfile; run `gh actions-lock` after
+7-day cooldown: Python under `/python`, Cargo under `/rust`, Go modules under `/go`, Swift
+packages at the root, and GitHub Actions. Its action bump pull requests update the lockfile; run `gh actions-lock` after
 adding a workflow or an action. Keep Hatchling's build and dev pins consistent. Update the uv,
 actionlint, SwiftFormat and SwiftLint versions and checksums explicitly; they are
 embedded tool versions, separate from action versions.
@@ -221,10 +226,12 @@ gh workflow run release-python.yml --ref main -f tag=python-v0.1.0
 ```
 
 Implementations use independent ecosystem-aware tags: Python `python-vX.Y.Z`,
-Rust `rust-vX.Y.Z` and Swift `vX.Y.Z`, which SwiftPM reads as plain versions.
-Future Go under `go/` uses `go/vX.Y.Z` and TypeScript `typescript-vX.Y.Z`. See
+Rust `rust-vX.Y.Z`, Swift `vX.Y.Z`, which SwiftPM reads as plain versions, and
+Go `go/vX.Y.Z`, which the Go module proxy reads for the module under `go/`. A
+future TypeScript implementation would use `typescript-vX.Y.Z`. See
 [Releasing Rust](../../rust/docs/development.md#releasing-rust) and
-[Releasing Swift](../../swift/README.md#releasing-swift).
+[Releasing Swift](../../swift/README.md#releasing-swift), and
+[Releasing Go](../../go/docs/development.md#releasing-go).
 Each release workflow installs `curtains` with the pinned `nielsmadan/curtaincall`
 action, whose pin is the `curtains` version CI runs, and passes its language's
 policy to `curtains ci validate-tag`, `previous-tag` and `publish` with
@@ -233,7 +240,7 @@ publication never marks a release as GitHub's latest. A policy key added in a ne
 `curtains` needs that version on both sides, so update the local install and the
 action pin together.
 [`release_workflow.py`](../scripts/release_workflow.py) checks the tagged project
-version and pre-release state. Release tags are permanent, so protect `python-v*`, `rust-v*`
-and `v*` with a GitHub tag ruleset that limits who can create them. A shared `spec/`
+version and pre-release state. Release tags are permanent, so protect `python-v*`, `rust-v*`,
+`go/v*` and `v*` with a GitHub tag ruleset that limits who can create them. A shared `spec/`
 change must pass every available implementation's conformance tests, but it does
 not force simultaneous registry publication.

@@ -1,0 +1,39 @@
+{
+  "branch": "main",
+  "initial_version": "0.1.0",
+  "sign": true,
+  "tag_prefix": "go/v",
+  "paths": ["go"],
+  "checks": [
+    ["just", "-f", "go/Justfile", "check"],
+    ["just", "-f", "go/Justfile", "check-integration"],
+    ["just", "-f", "go/Justfile", "audit-dependencies"],
+    ["just", "check-workflow"]
+  ],
+  "tools": ["git", "just", "go", "cargo", "node", "bun", "uv", "uvx", "python/.venv/bin/python"],
+  "stages": [
+    {
+      "files": ["go/CHANGELOG.md"],
+      "commands": [
+        [
+          "uvx",
+          "git-cliff@2.13.1",
+          "--config",
+          "go/cliff.toml",
+          "--include-path",
+          "go/**",
+          "--tag",
+          "go/v{version}",
+          "-o",
+          "go/CHANGELOG.md"
+        ]
+      ],
+      "checks": [["just", "-f", "go/Justfile", "check-package"]],
+      "message": "chore: release Go {version}"
+    }
+  ],
+  "name": "Flyrail for Go",
+  "repository": "nielsmadan/flyrail",
+  "workflow": "release-go.yml",
+  "publication": "the Go module tag and a Go GitHub release"
+}

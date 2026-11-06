@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "id": "example-notes",
+  "version": "notes-2026-09",
+  "skills": [{"name": "notes-summary", "path": "skills/notes-summary"}]
+}

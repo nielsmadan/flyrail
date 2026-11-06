@@ -26,3 +26,10 @@ resource creation provenance. `fixtures/edits.json` supplies portable edit vecto
 Portable hooks and their runtime/ownership boundaries are specified in
 [hook-protocol.md](hook-protocol.md); positive wire vectors live in
 `fixtures/hooks.json`.
+
+`fixtures/interop-source-options.json` lists the generated-content options that
+every interop driver's `write --source` must reject before touching the store.
+The Python, Rust, Swift and Go interop drivers, and the harness that compares
+them, are described under "Interop drivers" in [porting guidance](porting.md#interop-drivers).
+`fixtures/differential.tsv` is the shared differential corpus that the
+implementations' differential drivers consume.

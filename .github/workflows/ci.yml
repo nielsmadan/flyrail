@@ -27,9 +27,10 @@ jobs:
       python: ${{ steps.select.outputs.python }}
       rust: ${{ steps.select.outputs.rust }}
       swift: ${{ steps.select.outputs.swift }}
+      go: ${{ steps.select.outputs.go }}
       workflow: ${{ steps.select.outputs.workflow }}
     steps:
-      # Rust tests compare against Python, and Swift tests against Python and Rust.
+      # Rust tests compare against Python, and Swift and Go tests against Python and Rust.
       - uses: dorny/paths-filter@v4.0.3
         if: github.event_name == 'pull_request'
         id: filter
@@ -53,6 +54,10 @@ jobs:
               - 'swift/**'
               - 'Package.swift'
               - 'Package.resolved'
+            go:
+              - *rust
+              - 'go/**'
+              - 'swift/scripts/**'
             workflow:
               - '.github/**'
       - name: Select affected checks
@@ -63,15 +68,17 @@ jobs:
           PYTHON: ${{ steps.filter.outputs.python }}
           RUST: ${{ steps.filter.outputs.rust }}
           SWIFT: ${{ steps.filter.outputs.swift }}
+          GO: ${{ steps.filter.outputs.go }}
           WORKFLOW: ${{ steps.filter.outputs.workflow }}
         run: |
           if [ "$RUN_ALL" = true ]; then
-            PYTHON=true RUST=true SWIFT=true WORKFLOW=true
+            PYTHON=true RUST=true SWIFT=true GO=true WORKFLOW=true
           fi
           {
             echo "python=$PYTHON"
             echo "rust=$RUST"
             echo "swift=$SWIFT"
+            echo "go=$GO"
             echo "workflow=$WORKFLOW"
           } >> "$GITHUB_OUTPUT"
 
@@ -389,6 +396,173 @@ jobs:
       - name: Integration tests, coverage gate and package QA
         run: python python/scripts/check.py check-integration
 
+  go-check:
+    name: Go (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    env:
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOMODCACHE: ${{ github.workspace }}/.cache/go/mod
+      GOCACHE: ${{ github.workspace }}/.cache/go/build
+      GOFLAGS: -modcacherw
+      GOTOOLCHAIN: local
+      GOLANGCI_LINT_CACHE: ${{ github.workspace }}/.cache/go/lint
+      FLYRAIL_REQUIRE_FIXTURES: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.14'
+      - name: Require pinned Go prerequisites
+        run: |
+          test "$(go env GOVERSION)" = go1.27.3
+          python -c "import sys; assert sys.version_info[:2] == (3, 14)"
+      - name: Install pinned golangci-lint locally
+        working-directory: go
+        run: |
+          set -euo pipefail
+          lint="$(python -I scripts/tools.py golangci-lint)"
+          dirname "$lint" >> "$GITHUB_PATH"
+      - name: Go generated tables
+        working-directory: go
+        run: |
+          go run ./internal/unicodex/gen -check \
+            internal/unicodex/testdata/CaseFolding-16.0.0.txt internal/unicodex/casefold_table.go
+          python -I scripts/generate_errno_text.py --check
+          python -I scripts/check_case_folding.py
+      - name: Go formatting
+        working-directory: go
+        run: golangci-lint fmt --diff
+      - name: Go vet
+        working-directory: go
+        run: go vet ./...
+      - name: Go lint
+        working-directory: go
+        run: golangci-lint run ./...
+      - name: Go cross-platform builds
+        working-directory: go
+        run: |
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build ./...
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go vet ./...
+          done
+          for os in windows freebsd; do
+            GOOS="$os" GOARCH=amd64 go vet ./...
+            GOOS="$os" GOARCH=amd64 go build ./...
+          done
+      - name: Go tests
+        working-directory: go
+        run: go test -short ./...
+      - name: Go vulnerability audit
+        working-directory: go
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  go-integration:
+    name: Go integration (${{ matrix.os }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    env:
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOMODCACHE: ${{ github.workspace }}/.cache/go/mod
+      GOCACHE: ${{ github.workspace }}/.cache/go/build
+      GOFLAGS: -modcacherw
+      GOTOOLCHAIN: local
+      GOLANGCI_LINT_CACHE: ${{ github.workspace }}/.cache/go/lint
+      FLYRAIL_REQUIRE_FIXTURES: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: '0.12.13'
+          enable-cache: false
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: rust
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.21.0'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: '1.4.2'
+          no-cache: true
+      # The Go interop scripts build the Swift driver through swift/Justfile on macOS.
+      - name: Install pinned just locally
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p .cache/tools/just
+          curl --fail --silent --show-error --location \
+            https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-aarch64-apple-darwin.tar.gz \
+            --output .cache/tools/just/archive.tar.gz
+          printf '%s  %s\n' \
+            6574cea774ed4cae12e24b6aa11857de33e80dab4667cf628fd5840df96a2a9d \
+            .cache/tools/just/archive.tar.gz | shasum -a 256 --check --strict
+          tar -xzf .cache/tools/just/archive.tar.gz -C .cache/tools/just just
+          echo "$GITHUB_WORKSPACE/.cache/tools/just" >> "$GITHUB_PATH"
+      - name: Require pinned Go and runtime prerequisites
+        run: |
+          test "$(go env GOVERSION)" = go1.27.3
+          python -c "import sys; assert sys.version_info[:2] == (3, 14)"
+          npm install --global npm@11.19.0
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
+          test "$(bun --version)" = "1.4.2"
+          if [ "$RUNNER_OS" = macOS ]; then
+            swift --version
+            just --version
+          fi
+      - name: Provision pinned Python differential environment
+        run: python python/scripts/check.py sync
+      - name: Assert differential Python prerequisites
+        run: python/.venv/bin/python -c "import flyrail, tomlkit"
+      - name: Go state vectors
+        run: |
+          python/.venv/bin/python -B go/scripts/extract_state_vectors.py > "$RUNNER_TEMP/state_vectors.tsv"
+          diff "$RUNNER_TEMP/state_vectors.tsv" go/flyrail/testdata/state_vectors.tsv
+      - name: Go integration tests
+        working-directory: go
+        env:
+          FLYRAIL_DIFFERENTIAL_PYTHON: ../python/.venv/bin/python
+        run: go test -race -count=1 -tags integration ./...
+      - name: Go differential and interop scripts
+        run: |
+          python/.venv/bin/python -B go/scripts/check_differential.py
+          python/.venv/bin/python -B go/scripts/check_transaction_interop.py
+          python/.venv/bin/python -B go/scripts/check_native_interop.py
+      - name: Go package QA
+        run: |
+          (cd go && go mod verify)
+          python -I -B go/scripts/package_qa.py
+
   audit-dependencies:
     name: Dependency audit
     needs: changes
@@ -447,6 +621,8 @@ jobs:
       - integration
       - swift-check
       - swift-integration
+      - go-check
+      - go-integration
       - audit-dependencies
       - check-workflow
     runs-on: ubuntu-24.04

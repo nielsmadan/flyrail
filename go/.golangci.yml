@@ -1,0 +1,82 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+        - name: package-comments
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: unexported-return
+        - name: blank-imports
+        - name: context-as-argument
+        - name: errorf
+    gosec:
+      excludes:
+        # Flyrail operates on caller-supplied paths; path safety is enforced by its own checks.
+        - G304
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+      - path: internal/darwin/
+        linters:
+          - gosec
+        text: G103
+      # Test archives truncate sizes on purpose to build malformed headers.
+      - path: internal/zipx/ziptest/
+        linters:
+          - gosec
+        text: G115
+      - path: internal/darwin/
+        linters:
+          - revive
+        text: "(var-naming|don't use underscores)"
+      # The interop driver opens caller-supplied corpus paths by design; gosec's taint result here is unstable across unrelated edits.
+      - path: internal/cmd/flyrail-interop/
+        linters:
+          - gosec
+        text: G703
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/nielsmadan/flyrail/go

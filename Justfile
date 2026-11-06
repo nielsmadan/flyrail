@@ -9,11 +9,13 @@ setup:
 check:
     {{python}} python/scripts/check.py check
     cd rust && just check
+    cd go && just check
 
 check-integration:
     {{python}} python/scripts/check.py check-integration
     cd rust && just check-integration
     cd swift && just check-integration
+    cd go && just check-integration
 
 format:
     {{python}} python/scripts/check.py format
@@ -31,22 +33,24 @@ check-package:
     {{python}} python/scripts/check.py check-package
     cd rust && just check-package
     cd swift && just check-package
+    cd go && just check-package
 
 audit-dependencies:
     {{python}} python/scripts/check.py audit-dependencies
+    cd go && just audit-dependencies
 
 check-workflow:
     {{python}} python/scripts/check.py check-workflow
 
 [positional-arguments]
 release component *args:
-    @case "$1" in python|rust|swift) ;; *) echo "usage: just release <python|rust|swift> [curtains arguments]" >&2; exit 2 ;; esac
+    @case "$1" in python|rust|swift|go) ;; *) echo "usage: just release <python|rust|swift|go> [curtains arguments]" >&2; exit 2 ;; esac
     @component="$1"; shift; \
         UV_TOOL_DIR="${UV_TOOL_DIR:-{{justfile_directory()}}/.cache/uv/tools}" \
         UV_CACHE_DIR="${UV_CACHE_DIR:-{{justfile_directory()}}/.cache/uv/cache}" \
         curtains --config "$component/scripts/release.json" "$@"
 
-changelog: changelog-python changelog-rust changelog-swift
+changelog: changelog-python changelog-rust changelog-swift changelog-go
 
 changelog-python:
     uvx git-cliff@2.13.1 --config python/cliff.toml --include-path "python/**" --include-path "spec/**" -o python/CHANGELOG.md
@@ -56,3 +60,6 @@ changelog-rust:
 
 changelog-swift:
     uvx git-cliff@2.13.1 --config swift/cliff.toml --include-path "swift/**" --include-path "Package.swift" --include-path "Package.resolved" -o swift/CHANGELOG.md
+
+changelog-go:
+    uvx git-cliff@2.13.1 --config go/cliff.toml --include-path "go/**" -o go/CHANGELOG.md

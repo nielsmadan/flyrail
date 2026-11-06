@@ -214,8 +214,11 @@ def main():
             package.extractall(extracted, filter="data")
         assert {str(path.relative_to(extracted)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in extracted.rglob("*") if path.is_file()} == hashes
-        for fixture in (ROOT / "spec/fixtures").glob("*.json"):
-            assert (extracted / "swift/Tests/FlyrailTests/Fixtures" / fixture.name).read_bytes() == fixture.read_bytes()
+        shared = sorted((ROOT / "spec/fixtures").glob("*.json"))
+        mirrored = extracted / "swift/Tests/FlyrailTests/Fixtures"
+        assert sorted(path.name for path in mirrored.iterdir()) == [fixture.name for fixture in shared]
+        for fixture in shared:
+            assert (mirrored / fixture.name).read_bytes() == fixture.read_bytes()
         runtime = extracted / "swift/Sources/Flyrail/Resources/runtime"
         assert sorted(path.name for path in runtime.iterdir()) == ["bridge.mts", "process.mts", "runner.mts"]
         for path in runtime.iterdir():

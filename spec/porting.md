@@ -1,8 +1,9 @@
 # Native implementation notes
 
-Python is the first implementation. Swift, Rust, Go and TypeScript ports should
-embed naturally in their hosts while sharing the contracts in this directory.
-Keep implementation and tooling under the corresponding language directory.
+Python is the first implementation. Rust, Swift and Go ports exist, and a
+TypeScript port should embed naturally in its host while sharing the contracts
+in this directory. Keep implementation and tooling under the corresponding
+language directory.
 
 ## Shared contracts
 
@@ -90,3 +91,37 @@ cleanup/rollback, plus two applications in different implementations sharing one
 document through separate stores. None of the
 ports may infer cross-resource atomicity or power-loss durability from shared
 receipt formats.
+
+## Interop drivers
+
+Each implementation ships a command-line driver that performs one lifecycle
+operation per invocation against a state directory and prints one JSON record,
+so a harness can run the same scenario through every language. There is no
+separate protocol document: the subcommands and options are the shared contract,
+defined by the drivers and exercised by the Python harness in
+[`swift/scripts/harness.py`](../swift/scripts/harness.py), whose `REGISTRY` names
+them. The shared contract is the set of subcommands that
+`python/scripts/interop_driver.py` and `rust/examples/interop.rs` both
+implement: `encode`, `write`, `install`, `update`, `inspect`, `remove`,
+`recover`, `records` and `hold`. `encode` has no single invocation both
+reference drivers accept: Python's takes no options, and Rust's requires
+`--type TYPE`. Go and Swift accept both forms, and the harness passes `--type`
+only to Rust. Add a new language by providing a driver with those subcommands,
+registering it there, and adding it to the scripts that compare it with the
+others.
+
+Some drivers carry extensions beyond that contract: `observe` (Go and Swift),
+`differential` (Go and Swift), `render-hooks` and `decode` (Swift) and `edits`
+(Go). Swift's `records` also reads path and byte records from stdin. Python and
+Rust run the value and document-editing comparisons through the separate
+`differential_driver.py` and `differential.rs` entry points instead.
+
+| Language | Driver |
+| --- | --- |
+| Python | `python/scripts/interop_driver.py`, `python/scripts/differential_driver.py` |
+| Rust | `rust/examples/interop.rs`, `rust/examples/differential.rs` |
+| Swift | `swift/Sources/FlyrailInterop` |
+| Go | `go/internal/cmd/flyrail-interop`, driven by the scripts in `go/scripts/` |
+
+`spec/fixtures/interop-source-options.json` lists the options every driver's
+`write --source` must reject before touching the store.

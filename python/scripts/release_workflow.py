@@ -5,8 +5,10 @@ import tomllib
 from pathlib import Path
 from typing import Any, NamedTuple
 
-PREFIXES = {"python-v": "python", "rust-v": "rust", "v": "swift"}
-TAG = re.compile(r"(?P<prefix>python-v|rust-v|v)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+PREFIXES = {"python-v": "python", "rust-v": "rust", "v": "swift", "go/v": "go"}
+TAG = re.compile(
+    r"(?P<prefix>python-v|rust-v|go/v|v)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+)
 
 
 class WorkflowError(Exception):
@@ -75,10 +77,18 @@ def _swift_prerelease(expected: str, path: Path) -> bool:
     return expected.startswith("0.")
 
 
+def _go_prerelease(expected: str, path: Path) -> bool:
+    module = re.search(r"^module\s+(\S+)\s*$", path.read_text(encoding="utf-8"), re.MULTILINE)
+    if module is None or module.group(1) != "github.com/nielsmadan/flyrail/go":
+        raise WorkflowError(f"Expected the github.com/nielsmadan/flyrail/go module in {path}.")
+    return expected.startswith("0.")
+
+
 PRERELEASE = {
     "python": _python_prerelease,
     "rust": _rust_prerelease,
     "swift": _swift_prerelease,
+    "go": _go_prerelease,
 }
 
 

@@ -25,7 +25,7 @@ real agent configuration.
 | `just test` | Run the complete workspace test suite. |
 
 The repository root also provides `just check`, `just check-integration`, and
-`just check-package` across both implementations. Git hooks run the fast gate;
+`just check-package` across all implementations. Git hooks run the fast gate;
 the complete integration suite belongs in CI and before accepting a release.
 
 ## Interop and runtime prerequisites
@@ -66,8 +66,9 @@ operational interop pairs, packaged hook runtime, examples, and native security
 tests on both supported operating systems.
 
 Workflow actions are commit-pinned. [Dependabot](../../.github/dependabot.yml)
-groups weekly Cargo updates under `/rust`, Python updates under `/python`, Swift
-package updates at the root, and GitHub Actions updates separately. The root
+groups weekly Cargo updates under `/rust`, Python updates under `/python`, Go
+module updates under `/go`, Swift package updates at the root, and GitHub
+Actions updates separately. The root
 [lefthook](../../lefthook.yml) runs the shared fast gate and Rustfmt/Clippy checks
 without installing or activating anything itself.
 
@@ -78,8 +79,8 @@ directories. It reads the crate version from `Cargo.toml` and never publishes.
 
 The `flyrail` crate is published to crates.io from
 [`release-rust.yml`](../../.github/workflows/release-rust.yml). The example crates
-set `publish = false`. Rust versions are independent of the Python and Swift
-packages; tags are `rust-vX.Y.Z`. Releases use
+set `publish = false`. Rust versions are independent of the Python, Swift and
+Go packages; tags are `rust-vX.Y.Z`. Releases use
 [`curtains`](https://github.com/nielsmadan/curtaincall) from a clean, complete
 `main` checkout at the repository root:
 

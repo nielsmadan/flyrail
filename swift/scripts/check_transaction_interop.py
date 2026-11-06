@@ -16,7 +16,7 @@ from harness import (
     compare_languages, driver_error, driver_name, kill, store_delete, store_write, tree_snapshot, wait_for,
 )
 
-SOURCE_OPTIONS = ROOT / "swift/Tests/FlyrailTests/Fixtures/interop-source-options.json"
+SOURCE_OPTIONS = ROOT / "spec/fixtures/interop-source-options.json"
 KERNEL = ROOT / "swift/Sources/Flyrail/ResourceTransaction.swift"
 INCOMPLETE = ["preparation", "directory", "stage-node", "staged", "journal"]
 RECOVERY_KILLS = ["rollback-stage", "rollback-backup", "rollback", "cleanup-node", "cleanup"]

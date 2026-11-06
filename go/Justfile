@@ -1,0 +1,107 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+root := clean(justfile_directory() + "/..")
+golangci_lint := root + "/.cache/tools/golangci-lint/golangci-lint"
+govulncheck := "golang.org/x/vuln/cmd/govulncheck@v1.9.0"
+linux_image := "golang:1.27.3"
+
+export GOPATH := root + "/.cache/go"
+export GOMODCACHE := root + "/.cache/go/mod"
+export GOCACHE := root + "/.cache/go/build"
+export GOFLAGS := "-modcacherw"
+export GOTOOLCHAIN := "go1.27.3+auto"
+export GOLANGCI_LINT_CACHE := root + "/.cache/go/lint"
+export FLYRAIL_REQUIRE_FIXTURES := "1"
+
+default:
+    @just --list
+
+check: generated-check format-check vet lint cross-build test-short case-folding
+
+generated-check:
+    go run ./internal/unicodex/gen -check internal/unicodex/testdata/CaseFolding-16.0.0.txt internal/unicodex/casefold_table.go
+    python3 -I scripts/generate_errno_text.py --check
+
+generate:
+    go generate ./...
+
+case-folding:
+    UV_CACHE_DIR="{{root}}/.cache/uv/cache" UV_PYTHON_INSTALL_DIR="{{root}}/.cache/uv/python" \
+        uv run --python 3.14 --no-project python -I scripts/check_case_folding.py
+
+state-vectors-check:
+    cd "{{root}}" && tmp="$(mktemp)" && trap 'rm -f "$tmp"' EXIT && python/.venv/bin/python -B go/scripts/extract_state_vectors.py > "$tmp" && diff "$tmp" go/flyrail/testdata/state_vectors.tsv
+
+check-integration: check state-vectors-check && differential transaction-interop native-interop
+    FLYRAIL_DIFFERENTIAL_PYTHON=../python/.venv/bin/python go test -race -count=1 -tags integration ./...
+
+check-package:
+    go mod verify
+    cd "{{root}}" && python3 -I -B go/scripts/package_qa.py
+
+check-linux:
+    docker run --rm --user "$(id -u):$(id -g)" \
+        --volume "{{root}}:/flyrail:ro" --workdir /flyrail/go \
+        --env GOTOOLCHAIN=local --env GOFLAGS=-modcacherw \
+        --env HOME=/tmp/home --env GOCACHE=/tmp/go/build --env GOMODCACHE=/tmp/go/mod \
+        --env TMPDIR=/tmp/go/tmp --env FLYRAIL_REQUIRE_FIXTURES=1 \
+        {{linux_image}} bash -euo pipefail -c 'mkdir -p "$HOME" "$TMPDIR" && go version && python3 -I scripts/generate_errno_text.py --check && go test -short -count=1 ./...'
+
+check-linux-integration:
+    docker run --rm --user "$(id -u):$(id -g)" \
+        --volume "{{root}}:/flyrail:ro" --workdir /flyrail/go \
+        --env GOTOOLCHAIN=local --env GOFLAGS=-modcacherw --env CGO_ENABLED=1 \
+        --env HOME=/tmp/home --env GOCACHE=/tmp/go/build --env GOMODCACHE=/tmp/go/mod \
+        --env TMPDIR=/tmp/go/tmp --env FLYRAIL_REQUIRE_FIXTURES=1 \
+        {{linux_image}} bash -euo pipefail -c 'mkdir -p "$HOME" "$TMPDIR" && go version && python3 -I scripts/generate_errno_text.py --check && go test -race -count=1 -tags integration ./...'
+
+differential:
+    cd "{{root}}" && python/.venv/bin/python -B go/scripts/check_differential.py
+
+transaction-interop:
+    cd "{{root}}" && python/.venv/bin/python -B go/scripts/check_transaction_interop.py
+
+native-interop:
+    cd "{{root}}" && python/.venv/bin/python -B go/scripts/check_native_interop.py
+
+format: tools
+    {{golangci_lint}} fmt
+
+format-check: tools
+    {{golangci_lint}} fmt --diff
+
+vet:
+    go vet ./...
+
+lint: tools
+    for os in darwin linux; do \
+        echo "lint $os"; \
+        GOOS="$os" {{golangci_lint}} run ./...; \
+    done
+
+cross-build:
+    for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do \
+        echo "build $target"; \
+        GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build ./...; \
+        GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go vet ./...; \
+    done
+    for os in windows freebsd; do \
+        echo "build $os/amd64"; \
+        GOOS="$os" GOARCH=amd64 go vet ./...; \
+        GOOS="$os" GOARCH=amd64 go build ./...; \
+    done
+
+test-short:
+    go test -short ./...
+
+test:
+    go test -race -count=1 -tags integration ./...
+
+audit-dependencies:
+    go run {{govulncheck}} ./...
+
+lock:
+    go mod tidy
+
+tools:
+    @python3 -I scripts/tools.py golangci-lint > /dev/null

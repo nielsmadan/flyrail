@@ -20,6 +20,9 @@ them. Tests build stores and targets with `NativeTestRoot.store` and `target()`.
 creating a release commit or tag, pushing, and publishing require explicit user
 authorization. A pushed `vX.Y.Z` tag is the release, so it is never moved.
 
+The `scripts/` interop harness also drives the Go implementation's cross-language
+checks, so changes there select the Go CI job too.
+
 State-store behaviour follows Rust (`../rust/src`) where Python and Rust differ.
 Skill convenience functions report every failure, including a store that
 overlaps a bundle source, as a failed per-target result instead of throwing.

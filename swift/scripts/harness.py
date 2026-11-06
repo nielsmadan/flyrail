@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SWIFT = [str(ROOT / ".cache/swift/debug/FlyrailInterop")]
 PYTHON = [sys.executable, "-B", str(ROOT / "python/scripts/interop_driver.py")]
 RUST = [str(ROOT / "rust/target/debug/examples/interop")]
+GO = [str(ROOT / ".cache/go/bin/flyrail-interop")]
 DRIVERS = (PYTHON, RUST, SWIFT)
+REGISTRY = {"python": PYTHON, "rust": RUST, "swift": SWIFT, "go": GO}
 ENV = os.environ | {"PYTHONPATH": str(ROOT / "python/src"), "PYTHONDONTWRITEBYTECODE": "1"}
 ZERO_ID = "0" * 32
 TRANSACTION_DIRECTORY = re.compile(r"((?:^|/)(?:\.flyrail-)?[0-9a-f]{64}-)[0-9a-f]{32}(?=\.txn|/|$)")
@@ -41,7 +43,11 @@ def run(driver, *arguments, input=None, timeout=60):
 
 
 def driver_name(driver):
-    return {id(PYTHON): "python", id(RUST): "rust", id(SWIFT): "swift"}.get(id(driver), " ".join(driver))
+    return {id(command): name for name, command in REGISTRY.items()}.get(id(driver), " ".join(driver))
+
+
+def available_drivers(*names):
+    return tuple(REGISTRY[name] for name in names or REGISTRY if Path(REGISTRY[name][-1]).is_file())
 
 
 def driver_error(result):
@@ -55,6 +61,19 @@ def build_rust_examples(*names):
          "--features", "interop-test-seams"],
         env=ENV | {"CARGO_HOME": str(ROOT / ".cache/cargo-home")}, cwd=ROOT, check=True, timeout=240,
     )
+
+
+def build_go_driver():
+    cache = ROOT / ".cache/go"
+    subprocess.run(
+        ["go", "build", "-o", GO[0], "./internal/cmd/flyrail-interop"],
+        env=ENV | {
+            "GOPATH": str(cache), "GOMODCACHE": str(cache / "mod"), "GOCACHE": str(cache / "build"),
+            "GOFLAGS": "-modcacherw", "GOTOOLCHAIN": ENV.get("GOTOOLCHAIN", "go1.27.3+auto"),
+        },
+        cwd=ROOT / "go", check=True, timeout=600,
+    )
+    return GO
 
 
 def tree_snapshot(root, modes=False):

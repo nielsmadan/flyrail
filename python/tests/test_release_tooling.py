@@ -38,8 +38,10 @@ workflow = load_script("release_workflow.py")
         ("python-v12.3.45", ("python", (12, 3, 45))),
         ("rust-v0.1.0", ("rust", (0, 1, 0))),
         ("v2.0.1", ("swift", (2, 0, 1))),
+        ("go/v1.0.0", ("go", (1, 0, 0))),
         ("python-v01.0.0", None),
-        ("go/v1.0.0", None),
+        ("go-v1.0.0", None),
+        ("go/v1.0", None),
         ("0.1.0", None),
         ("vv0.1.0", None),
     ],
@@ -86,6 +88,7 @@ LANGUAGE_RELEASES = [
         ["swift", "Package.swift", "Package.resolved"],
         ["swift/CHANGELOG.md"],
     ),
+    ("go", "go/v", "release-go.yml", ["go"], ["go/CHANGELOG.md"]),
 ]
 
 
@@ -251,11 +254,34 @@ def test_project_metadata_rejects_other_swift_packages(tmp_path: Path, manifest:
         workflow.project_metadata("v0.3.0", path)
 
 
+def test_project_metadata_takes_go_version_from_tag(tmp_path: Path) -> None:
+    manifest = tmp_path / "go.mod"
+    manifest.write_text("module github.com/nielsmadan/flyrail/go\n\ngo 1.27\n")
+    assert workflow.project_metadata("go/v0.3.0", manifest) == ("0.3.0", True)
+    assert workflow.project_metadata("go/v1.0.0", manifest) == ("1.0.0", False)
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "module github.com/nielsmadan/flyrail\n",
+        "module github.com/nielsmadan/flyrail/go/v2\n",
+        "go 1.27\n",
+    ],
+)
+def test_project_metadata_rejects_other_go_modules(tmp_path: Path, manifest: str) -> None:
+    path = tmp_path / "go.mod"
+    path.write_text(manifest)
+    with pytest.raises(workflow.WorkflowError, match="flyrail/go module"):
+        workflow.project_metadata("go/v0.3.0", path)
+
+
 def test_repository_manifests_match_their_own_release_tags() -> None:
     manifest = tomllib.loads((REPOSITORY / "rust/Cargo.toml").read_text())
     rust = manifest["workspace"]["package"]["version"]
     assert workflow.project_metadata(f"rust-v{rust}", REPOSITORY / "rust/Cargo.toml")[0] == rust
     assert workflow.project_metadata("v0.1.0", REPOSITORY / "Package.swift")[0] == "0.1.0"
+    assert workflow.project_metadata("go/v0.1.0", REPOSITORY / "go/go.mod") == ("0.1.0", True)
 
 
 EXAMPLE_MANIFEST = (
@@ -451,6 +477,7 @@ def assert_cacheless(content: str) -> None:
         "astral-sh/setup-uv": "enable-cache: false",
         "actions/setup-node": "package-manager-cache: false",
         "oven-sh/setup-bun": "no-cache: true",
+        "actions/setup-go": "cache: false",
     }
     for action, setting in cache_settings.items():
         steps = re.findall(rf"uses: {re.escape(action)}@.*\n(?:\s+(?!- ).*\n)*", content)
@@ -587,4 +614,58 @@ def test_swift_release_workflow_runs_swift_gates_and_publishes_notes() -> None:
 def test_swift_release_runs_integration_gates_before_pushing_the_tag() -> None:
     config = json.loads((REPOSITORY / "swift/scripts/release.json").read_text())
     assert ["just", "-f", "swift/Justfile", "check-integration"] in config["checks"]
+    assert "python/.venv/bin/python" in config["tools"]
+
+
+def test_go_release_workflow_runs_go_gates_and_publishes_notes() -> None:
+    content = read_workflow("release-go.yml")
+    assert_cacheless(content)
+    assert_curtains_jobs_install_the_action(content)
+    verify = job_section(content, "verify")
+    github = job_section(content, "publish-github")
+    assert 'tags: ["go/v*"]' in content
+    assert "curtains ci validate-tag --config go/scripts/release.json" in workflow_step(
+        verify, "Validate annotated tag and ancestry"
+    )
+    assert '"$RELEASE_TAG" go/go.mod >> "$GITHUB_OUTPUT"' in workflow_step(
+        verify, "Validate module metadata"
+    )
+    assert 'go-version: "1.27.3"' in verify
+    gates = "\n".join(
+        workflow_step(verify, name)
+        for name in ("Run full release gates", "Run integration gates", "Verify extracted module")
+    )
+    for gate in (
+        "check_case_folding.py",
+        "golangci-lint",
+        "go vet ./...",
+        "go test -short ./...",
+        "go test -race -count=1 -tags integration ./...",
+        "golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...",
+        "check_differential.py",
+        "check_native_interop.py",
+        "check_transaction_interop.py",
+        "go/scripts/package_qa.py",
+    ):
+        assert gate in gates
+    assert "contents: write" not in verify
+    assert "id-token: write" not in content
+    assert "needs: verify" in github
+    assert "contents: write" in github
+    assert "curtains ci validate-tag --config go/scripts/release.json" in workflow_step(
+        github, "Revalidate trusted publication code"
+    )
+    publish = workflow_step(github, "Publish Go GitHub release")
+    assert "args=(--not-latest)" in publish
+    assert publish.endswith(
+        'curtains ci publish --config go/scripts/release.json "${args[@]}" \\\n'
+        '            "$RELEASE_TAG" "$RELEASE_COMMIT" \\\n'
+        "            --notes release-bundle/release-notes.md\n"
+    )
+
+
+def test_go_release_runs_integration_gates_before_pushing_the_tag() -> None:
+    config = json.loads((REPOSITORY / "go/scripts/release.json").read_text())
+    assert ["just", "-f", "go/Justfile", "check-integration"] in config["checks"]
+    assert ["just", "-f", "go/Justfile", "audit-dependencies"] in config["checks"]
     assert "python/.venv/bin/python" in config["tools"]

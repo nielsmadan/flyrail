@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "example-checksum",
+  "version": "checksum-2026-09",
+  "skills": [{
+    "name": "checksum-review",
+    "path": "skills/checksum-review",
+    "executables": ["scripts/verify_checksum.py"]
+  }]
+}
