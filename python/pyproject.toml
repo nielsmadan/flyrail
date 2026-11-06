@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -24,7 +24,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = ["tomlkit==0.15.1"]
+dependencies = ["tomlkit==0.15.2"]
 
 [project.urls]
 Documentation = "https://github.com/nielsmadan/flyrail/tree/main/python/docs"
@@ -34,11 +34,11 @@ Repository = "https://github.com/nielsmadan/flyrail"
 [dependency-groups]
 audit = ["pip-audit==2.10.1"]
 dev = [
-  "hatchling==1.32.4",
-  "mypy==2.4.0",
-  "pytest==9.1.1",
+  "hatchling==1.33.0",
+  "mypy==2.4.1",
+  "pytest==9.2.0",
   "pytest-cov==7.1.0",
-  "ruff==0.17.0",
+  "ruff==0.17.3",
 ]
 
 [tool.uv]
