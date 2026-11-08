@@ -223,9 +223,15 @@ Rust `rust-vX.Y.Z` and Swift `vX.Y.Z`, which SwiftPM reads as plain versions.
 Future Go under `go/` uses `go/vX.Y.Z` and TypeScript `typescript-vX.Y.Z`. See
 [Releasing Rust](../../rust/docs/development.md#releasing-rust) and
 [Releasing Swift](../../swift/README.md#releasing-swift).
-[`release_workflow.py`](../scripts/release_workflow.py) validates and publishes
-all three tag families; each workflow passes `--component` so a tag from another
-family is rejected. Release tags are permanent, so protect `python-v*`, `rust-v*`
+Each release workflow installs `curtains` with the pinned `nielsmadan/curtaincall`
+action, whose pin is the `curtains` version CI runs, and passes its language's
+policy to `curtains ci validate-tag`, `previous-tag` and `publish` with
+`--config`. The policy's tag prefix rejects a tag from another family, and
+publication never marks a release as GitHub's latest. A policy key added in a newer
+`curtains` needs that version on both sides, so update the local install and the
+action pin together.
+[`release_workflow.py`](../scripts/release_workflow.py) checks the tagged project
+version and pre-release state. Release tags are permanent, so protect `python-v*`, `rust-v*`
 and `v*` with a GitHub tag ruleset that limits who can create them. A shared `spec/`
 change must pass every available implementation's conformance tests, but it does
 not force simultaneous registry publication.

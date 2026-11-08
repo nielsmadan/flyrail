@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 60
     outputs:
       release-commit: ${{ steps.identity.outputs.release-commit }}
-      version: ${{ steps.project.outputs.version }}
       prerelease: ${{ steps.project.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,6 +34,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
+
+      - uses: nielsmadan/curtaincall@970d648bc9aaf685b4c924e05c7edf359948b209 # v1.2.0
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -48,11 +49,10 @@ jobs:
               echo "Release retries must run from main" >&2
               exit 1
             fi
-            RELEASE_COMMIT=$(python python/scripts/release_workflow.py \
-              validate-tag --component swift "$RELEASE_TAG")
+            RELEASE_COMMIT=$(curtains ci validate-tag --config swift/scripts/release.json "$RELEASE_TAG")
           else
-            RELEASE_COMMIT=$(python python/scripts/release_workflow.py \
-              validate-tag --component swift "$RELEASE_TAG" "$GITHUB_SHA")
+            RELEASE_COMMIT=$(curtains ci validate-tag --config swift/scripts/release.json \
+              "$RELEASE_TAG" "$GITHUB_SHA")
           fi
           echo "RELEASE_COMMIT=$RELEASE_COMMIT" >> "$GITHUB_ENV"
           echo "release-commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
@@ -146,8 +146,8 @@ jobs:
             --current --strip all \
             -o .cache/release/bundle/release-notes.md
           sed -i '' '/^## \[/d' .cache/release/bundle/release-notes.md
-          PREVIOUS_TAG=$(python ../python/scripts/release_workflow.py \
-            previous-tag "$RELEASE_TAG")
+          PREVIOUS_TAG=$(curtains ci previous-tag --directory "$GITHUB_WORKSPACE" \
+            --config swift/scripts/release.json "$RELEASE_TAG")
           if [ -n "$PREVIOUS_TAG" ]; then
             printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
               "$GITHUB_REPOSITORY" "$PREVIOUS_TAG" "$RELEASE_TAG" \
@@ -174,11 +174,13 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
+      - uses: nielsmadan/curtaincall@970d648bc9aaf685b4c924e05c7edf359948b209 # v1.2.0
+
       - name: Revalidate trusted publication code
         env:
           RELEASE_COMMIT: ${{ needs.verify.outputs.release-commit }}
         run: |
-          test "$(python python/scripts/release_workflow.py validate-tag --component swift \
+          test "$(curtains ci validate-tag --config swift/scripts/release.json \
             "$RELEASE_TAG" "$RELEASE_COMMIT")" = "$RELEASE_COMMIT"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -191,15 +193,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
           RELEASE_COMMIT: ${{ needs.verify.outputs.release-commit }}
-          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          args=()
+          args=(--not-latest)
           if [ "$PRERELEASE" = "true" ]; then
             args+=(--prerelease)
           fi
-          python python/scripts/release_workflow.py publish \
-            "$RELEASE_TAG" \
-            "Flyrail for Swift $VERSION" \
-            release-bundle/release-notes.md \
-            "$RELEASE_COMMIT" \
-            "${args[@]}"
+          curtains ci publish --config swift/scripts/release.json "${args[@]}" \
+            "$RELEASE_TAG" "$RELEASE_COMMIT" \
+            --notes release-bundle/release-notes.md
