@@ -10,6 +10,10 @@ updates:
     open-pull-requests-limit: 5
     assignees:
       - "nielsmadan"
+    ignore:
+      # 0.15.2 reports column 0 for parse errors at end of input
+      - dependency-name: "tomlkit"
+        versions: ["0.15.2"]
     groups:
       non-breaking:
         patterns:

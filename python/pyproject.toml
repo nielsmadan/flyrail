@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -34,11 +34,11 @@ Repository = "https://github.com/nielsmadan/flyrail"
 [dependency-groups]
 audit = ["pip-audit==2.10.1"]
 dev = [
-  "hatchling==1.32.4",
-  "mypy==2.4.0",
-  "pytest==9.1.1",
+  "hatchling==1.33.0",
+  "mypy==2.4.1",
+  "pytest==9.2.0",
   "pytest-cov==7.1.0",
-  "ruff==0.17.0",
+  "ruff==0.17.3",
 ]
 
 [tool.uv]
