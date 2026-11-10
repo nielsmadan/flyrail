@@ -399,9 +399,9 @@ def job_section(content: str, name: str) -> str:
     return match.group("body")
 
 
-def test_release_workflow_uses_pinned_actions_and_split_permissions() -> None:
+def test_release_workflow_runs_cacheless_with_split_permissions() -> None:
     content = read_workflow("release-python.yml")
-    assert_pinned_and_cacheless(content)
+    assert_cacheless(content)
     verify = job_section(content, "verify")
     platform_checks = job_section(content, "platform-checks")
     pypi = job_section(content, "publish-pypi")
@@ -446,10 +446,7 @@ def read_workflow(name: str) -> str:
     return (REPOSITORY / ".github" / "workflows" / name).read_text()
 
 
-def assert_pinned_and_cacheless(content: str) -> None:
-    references = re.findall(r"uses:\s+([^@\s]+)@([^\s#]+)", content)
-    assert references
-    assert all(re.fullmatch(r"[0-9a-f]{40}", reference) for _action, reference in references)
+def assert_cacheless(content: str) -> None:
     cache_settings = {
         "astral-sh/setup-uv": "enable-cache: false",
         "actions/setup-node": "package-manager-cache: false",
@@ -477,7 +474,7 @@ def workflow_step(job: str, name: str) -> str:
 
 def test_rust_release_workflow_publishes_verified_crate_with_split_permissions() -> None:
     content = read_workflow("release-rust.yml")
-    assert_pinned_and_cacheless(content)
+    assert_cacheless(content)
     verify = job_section(content, "verify")
     platform_checks = job_section(content, "platform-checks")
     crates = job_section(content, "publish-crates")
@@ -541,7 +538,7 @@ def test_rust_release_workflow_publishes_verified_crate_with_split_permissions()
 
 def test_swift_release_workflow_runs_swift_gates_and_publishes_notes() -> None:
     content = read_workflow("release-swift.yml")
-    assert_pinned_and_cacheless(content)
+    assert_cacheless(content)
     verify = job_section(content, "verify")
     github = job_section(content, "publish-github")
     assert 'tags: ["v*"]' in content

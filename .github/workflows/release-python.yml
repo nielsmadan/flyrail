@@ -28,15 +28,15 @@ jobs:
       release-commit: ${{ steps.identity.outputs.release-commit }}
       prerelease: ${{ steps.project.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - uses: nielsmadan/curtaincall@970d648bc9aaf685b4c924e05c7edf359948b209 # v1.2.0
+      - uses: nielsmadan/curtaincall@v1.2.0
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.11"
 
@@ -57,24 +57,24 @@ jobs:
           echo "release-commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Check out exact release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ steps.identity.outputs.release-commit }}
           path: release-source
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.13"
           enable-cache: false
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: "24.21.0"
           package-manager-cache: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.4.2"
           no-cache: true
@@ -159,7 +159,7 @@ jobs:
           fi
 
       - name: Save verified release bundle
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: python-release-bundle
           path: release-source/.cache/release/bundle
@@ -186,26 +186,26 @@ jobs:
       UV_MANAGED_PYTHON: "1"
       FLYRAIL_TEST_CODEX_LOGIN_SHELL: "1"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.verify.outputs.release-commit }}
 
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.14"
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.13"
           enable-cache: false
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: "24.21.0"
           package-manager-cache: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.4.2"
           no-cache: true
@@ -221,12 +221,12 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: python-release-bundle
           path: release-bundle
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.13"
           enable-cache: false
@@ -244,13 +244,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - uses: nielsmadan/curtaincall@970d648bc9aaf685b4c924e05c7edf359948b209 # v1.2.0
+      - uses: nielsmadan/curtaincall@v1.2.0
 
       - name: Revalidate trusted publication code
         env:
@@ -259,7 +259,7 @@ jobs:
           test "$(curtains ci validate-tag --config python/scripts/release.json \
             "$RELEASE_TAG" "$RELEASE_COMMIT")" = "$RELEASE_COMMIT"
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: python-release-bundle
           path: release-bundle

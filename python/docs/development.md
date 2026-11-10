@@ -152,14 +152,16 @@ schedule and on workflow dispatch, and `CI result` requires them too. The
 release workflow runs both tiers on every supported platform, so no release
 publishes without integration results.
 
-Workflows use pinned action commits, pinned uv, checksum-pinned actionlint,
+Workflows use exact action tags locked to commits in
+[`actions.lock`](../../.github/workflows/actions.lock), pinned uv, checksum-pinned actionlint,
 SwiftFormat and SwiftLint archives, and read-only repository permissions. The
 SwiftFormat and SwiftLint pins live once, in the
 [`setup-swift-tools`](../../.github/actions/setup-swift-tools/action.yml) action.
 
-[Dependabot](../../.github/dependabot.yml) groups weekly updates per ecosystem:
-Python under `/python`, Cargo under `/rust`, Swift packages at the root, and
-GitHub Actions. Keep Hatchling's build and dev pins consistent. Update the uv,
+[Dependabot](../../.github/dependabot.yml) groups weekly updates per ecosystem, with a
+7-day cooldown: Python under `/python`, Cargo under `/rust`, Swift packages at the root, and
+GitHub Actions. Its action bump pull requests update the lockfile; run `gh actions-lock` after
+adding a workflow or an action. Keep Hatchling's build and dev pins consistent. Update the uv,
 actionlint, SwiftFormat and SwiftLint versions and checksums explicitly; they are
 embedded tool versions, separate from action versions.
 
