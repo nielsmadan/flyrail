@@ -1,6 +1,7 @@
 {
   "branch": "main",
   "initial_version": "0.1.0",
+  "sign": true,
   "tag_prefix": "v",
   "paths": ["swift", "Package.swift", "Package.resolved"],
   "checks": [

@@ -1,6 +1,7 @@
 {
   "branch": "main",
   "initial_version": "0.1.0",
+  "sign": true,
   "tag_prefix": "rust-v",
   "paths": ["rust", "rust-toolchain.toml"],
   "checks": [

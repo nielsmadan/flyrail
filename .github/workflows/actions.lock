@@ -21,7 +21,7 @@ workflows:
         - 'actions/setup-python@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
-        - 'nielsmadan/curtaincall@v1.2.0'
+        - 'nielsmadan/curtaincall@v1.3.0'
         - 'oven-sh/setup-bun@v2.2.0'
     '.github/workflows/release-rust.yml':
         - 'actions/checkout@v7.0.1'
@@ -31,7 +31,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'dtolnay/rust-toolchain@v1'
-        - 'nielsmadan/curtaincall@v1.2.0'
+        - 'nielsmadan/curtaincall@v1.3.0'
         - 'oven-sh/setup-bun@v2.2.0'
         - 'rust-lang/crates-io-auth-action@v1.0.6'
     '.github/workflows/release-swift.yml':
@@ -42,7 +42,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'dtolnay/rust-toolchain@v1'
-        - 'nielsmadan/curtaincall@v1.2.0'
+        - 'nielsmadan/curtaincall@v1.3.0'
         - 'oven-sh/setup-bun@v2.2.0'
 dependencies:
     'actions/checkout@v7.0.1':
@@ -60,11 +60,6 @@ dependencies:
         commit: 'sha1-949feb2413d6458794dcd2491c4babbbce0c15c1'
         owner_id: 44036562
         repo_id: 189476904
-    'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0':
-        ref: 'v7.1.0'
-        commit: 'sha1-6d4fd22b20465ccc0f7354476588e8df7c9ca0e0'
-        owner_id: 44036562
-        repo_id: 192625525
     'actions/setup-python@v7.1.0':
         ref: 'v7.1.0'
         commit: 'sha1-6d4fd22b20465ccc0f7354476588e8df7c9ca0e0'
@@ -95,13 +90,13 @@ dependencies:
         commit: 'sha1-683b588c487a69d01f6c6ddf40f036ff682cc2c8'
         owner_id: 1940490
         repo_id: 260749683
-    'nielsmadan/curtaincall@v1.2.0':
-        ref: 'v1.2.0'
-        commit: 'sha1-970d648bc9aaf685b4c924e05c7edf359948b209'
+    'nielsmadan/curtaincall@v1.3.0':
+        ref: 'v1.3.0'
+        commit: 'sha1-8362e71ffa86422960d7e356f620085bcc62f925'
         owner_id: 701154
         repo_id: 1418051787
         uses:
-            - 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0'
+            - 'actions/setup-python@v7.1.0'
     'oven-sh/setup-bun@v2.2.0':
         ref: 'v2.2.0'
         commit: 'sha1-0c5077e51419868618aeaa5fe8019c62421857d6'
