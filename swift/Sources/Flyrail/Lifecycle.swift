@@ -16,7 +16,7 @@ public func previewRemoval(bundleID: String, target: InstallationTarget,
 }
 
 // swiftlint:disable:next function_parameter_count
-private func lifecyclePreview(bundleID: String, bundle: FlyrailBundle?, rendered: RenderedBundle,
+package func lifecyclePreview(bundleID: String, bundle: FlyrailBundle?, rendered: RenderedBundle,
                               target: InstallationTarget, acquisition: Acquisition,
                               replaceModified: Bool) throws -> LifecyclePreview
 {

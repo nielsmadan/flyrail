@@ -114,3 +114,24 @@ edges. The renderer binds each reference to a content-addressed installed revisi
 See the shared contract for validation and failure ordering. No install step runs
 scripts, installs Pi's required external MCP adapter, contacts servers or activates
 an agent. Current registration does not prove the host loaded it.
+
+## Global Loadout source mappings
+
+The Loadout destination targets the source format in Loadout 0.11.0. Planning
+uses the active profile's enabled harness slices and the selected source's
+`use` filter. Preview rejects disabled slices, unsupported mappings, and
+collisions across participating sources before making any source edits.
+
+| Bundle content | Loadout mapping and limits |
+| --- | --- |
+| Skills | `skills/<name>/` holds authored files and assets. The profile's skill policy selects the requested harnesses and sets `render = false`. Competing skills, overrides and files that Loadout would filter out are refused. |
+| Instructions | Stable bundle-qualified fragments in `instructions/` are appended by `source/fragment` to existing selector arrays, preserving order and substitutions. Shared `[all]` and legacy `instructions.<name>.order` selectors are supported. Shadowed entries are refused. |
+| MCP | `mcp.toml` has one named table per server. Stdio uses command, arguments, and literal environment values. HTTP supports a URL and an optional bearer environment variable name (`auth_env_var`). Stdio cwd, stdio `EnvRef`, and literals that an affected harness would interpret as interpolation are refused. Each definition reaches every configured MCP slice. |
+| Hooks | Claude, Codex and Cursor use JSON fragments selected by their hook arrays. OpenCode and Pi use bridge modules through `module-config`. Shared hook arrays and scalar hook selectors are refused. The ordinary runtime and protocol restrictions still apply. |
+| Native artifacts | A user-scoped CLI file for an OpenCode plugin or Pi extension can map to `module-config`. Supported input destinations are `.config/opencode/plugins/<file>` and `.pi/agent/extensions/<file>` with a single `.ts`, `.js`, or `.mjs` file. Other native paths and reserved Loadout bridge names are refused. |
+
+Copilot is outside the Loadout harness set. Droid hooks have no supported
+mapping. A declaration inherited from another profile or a route that reaches
+more harnesses than requested needs explicit shared-scope acceptance. See the
+[Loadout contract](../../spec/loadout.md) and
+[consumer walkthrough](integration.md#install-into-a-global-loadout-source).

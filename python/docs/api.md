@@ -1,6 +1,6 @@
 # Public Python API
 
-[Bundles and rendered content](#bundles-and-rendered-content) · [State stores](#state-stores) · [Configuration lifecycle](#configuration-lifecycle) · [Agent discovery](#agent-discovery) · [Plan summaries](#plan-summaries) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
+[Bundles and rendered content](#bundles-and-rendered-content) · [State stores](#state-stores) · [Configuration lifecycle](#configuration-lifecycle) · [Agent discovery](#agent-discovery) · [Global Loadout](#global-loadout) · [Plan summaries](#plan-summaries) · [Skill convenience API](#skill-convenience-api) · [Errors and host handling](#errors-and-host-handling)
 
 Import supported names from `flyrail`. Bundles, previews, observations and results
 are immutable snapshots. The library is synchronous; the application chooses
@@ -209,6 +209,31 @@ for the routes that would otherwise have rendered. Passing a `droid` context
 alongside a Claude one therefore yields zero artifacts. A host seeding its context
 list from `detect_agents` should filter out agents `capabilities` reports as
 unsupported before calling `render_many`.
+
+## Global Loadout
+
+Call `discover_loadout` with an absolute home and an optional environment snapshot
+or absolute `config_home` override. It reads `loadout/config.toml` under the
+override, a nonempty `XDG_CONFIG_HOME` from the supplied snapshot, or
+`<home>/.config`, in that order. It returns a `LoadoutDiscovery` with status
+`ABSENT` for a missing registration, `INVALID` with a diagnostic for an unusable
+setup, or `AVAILABLE` with a `LoadoutSetup`. The setup reports the active
+profile chain, declared sources, active harnesses and slices, and where each
+effective selector was declared. The registration's harness list supplies
+defaults for new projects.
+
+`setup.eligible_sources(bundle, harnesses)` filters declared sources by required
+categories and enabled harness slices. `setup.select` takes the named source
+and requested `Agent` values. `preview_loadout` checks the actual mappings and
+returns a `LoadoutPreview` with a target location, a standard lifecycle preview,
+scope impacts and any Loadout diagnostic. Diagnostics carry a code, message and
+path. Use `summarize(plan.lifecycle)` for the planned resource edits.
+
+`apply_loadout` and `recover_loadout` return a `LoadoutResult` with the recorded
+location, lifecycle result, and `sync_required` flag. `inspect_loadout`,
+`recover_loadout` and `preview_loadout_removal` use the recorded location.
+See the [consumer workflow](integration.md#install-into-a-global-loadout-source)
+and [public types and functions](../src/flyrail/loadout.py).
 
 ## Plan summaries
 

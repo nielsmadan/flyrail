@@ -42,6 +42,17 @@ There is no default state store. Construct one explicitly, for example a
 lifecycle call. `MemoryStore` suits tests and dry runs. Skill lifecycle functions
 report each target's outcome as a `TargetResult` and never throw.
 
+## Global Loadout
+
+Apps can offer an existing global Loadout source as a separate installation
+destination. After the user chooses a declared source and approves the preview,
+Flyrail applies the source changes. The app or user runs `loadout sync` to publish
+them to the configured harnesses. See the [Swift Loadout example and support
+table](Sources/Flyrail/Flyrail.docc/Loadout.md) and the [shared Loadout
+specification](../spec/loadout.md).
+
+## Documentation
+
 The DocC catalog in [`Sources/Flyrail/Flyrail.docc`](Sources/Flyrail/Flyrail.docc)
 documents state stores, transactions, authority and editing. The shared formats
 are described in the [specifications](../spec/README.md).

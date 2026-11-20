@@ -161,7 +161,11 @@ def _config(
 
 
 def hook_artifacts(
-    bundle: Bundle, context: RenderContext, assets: dict[str, Path]
+    bundle: Bundle,
+    context: RenderContext,
+    assets: dict[str, Path],
+    *,
+    revision_launcher: bool = False,
 ) -> tuple[list[RenderedArtifact], list[Dependency], list[Notice]]:
     hooks = [artifact for artifact in bundle.artifacts if isinstance(artifact, HookArtifact)]
     if not hooks:
@@ -262,7 +266,7 @@ def hook_artifacts(
             )
             edges.append(Dependency(artifact.id, runtime_id))
     else:
-        launcher = base / "entry.mjs"
+        launcher = (base / "launchers" / digest if revision_launcher else base) / "entry.mjs"
         code = (
             f"try {{ const {{ native }} = await import({bridge_url}); "
             f"const {{ default: config }} = await import({config_url}); "
@@ -336,7 +340,8 @@ def hook_artifacts(
                     else (),
                 )
             )
-            edges.append(Dependency(artifact.id, launcher_id, DependencyMode.STABLE_REFERENCE))
+            mode = DependencyMode.REVISION if revision_launcher else DependencyMode.STABLE_REFERENCE
+            edges.append(Dependency(artifact.id, launcher_id, mode))
     notices = [
         Notice(
             hooks[0].id,

@@ -115,6 +115,7 @@ package enum LifecyclePlanning {
     }
 
     package static func fresh(_ preview: LifecyclePreview, created: [Ancestor]) throws -> LifecyclePreview {
+        try preview.loadoutReads.forEach { try $0.require() }
         let store = preview.target.store
         try StateRecords.requireIndex(
             store, key: InstallationIndex.key(bundleID: preview.bundleID, target: preview.target),
@@ -150,6 +151,7 @@ package enum LifecyclePlanning {
             acquisition: preview.acquisition, replaceModified: preview.replaceModified, index: preview.index,
             generation: preview.generation,
             resources: plans, error: preview.error, artifactsByResource: preview.artifactsByResource,
+            loadoutReads: preview.loadoutReads,
         )
     }
 

@@ -12,7 +12,9 @@ use crate::stores::StateStore;
 use std::collections::HashMap;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read as _, Write as _};
-use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
+use std::os::unix::fs::{
+    DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
+};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -127,8 +129,20 @@ fn metadata_signature(metadata: &Metadata) -> MetadataSignature {
     }
 }
 
-fn read_file(path: &Path, before: &Metadata) -> Result<Vec<u8>, TargetError> {
-    let mut file = match File::open(path) {
+pub(crate) fn read_file(
+    path: &Path,
+    before: &Metadata,
+    maximum: Option<u64>,
+) -> Result<Vec<u8>, TargetError> {
+    let opened = if maximum.is_some() {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+    } else {
+        File::open(path)
+    };
+    let mut file = match opened {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Err(failure(
@@ -150,8 +164,18 @@ fn read_file(path: &Path, before: &Metadata) -> Result<Vec<u8>, TargetError> {
         ));
     }
     let mut data = Vec::new();
-    file.read_to_end(&mut data)
-        .map_err(|error| io_failure_at(&error, None))?;
+    match maximum {
+        Some(limit) => (&mut file).take(limit + 1).read_to_end(&mut data),
+        None => file.read_to_end(&mut data),
+    }
+    .map_err(|error| io_failure_at(&error, None))?;
+    if maximum.is_some_and(|limit| data.len() as u64 > limit) {
+        return Err(failure(
+            ErrorCode::InvalidState,
+            "file exceeds the byte limit",
+            path,
+        ));
+    }
     let completed = file
         .metadata()
         .map_err(|error| io_failure_at(&error, None))?;
@@ -236,7 +260,7 @@ fn observe_path(
     let data = if metadata.is_dir() {
         None
     } else {
-        Some(read_file(path, &metadata)?)
+        Some(read_file(path, &metadata, None)?)
     };
     nodes.push(
         Node::new(
@@ -344,7 +368,8 @@ fn verify_observed(
             ));
         }
         if node.data().is_some() {
-            if read_file(&selected, &metadata)?.as_slice() != node.data().unwrap_or_default() {
+            if read_file(&selected, &metadata, None)?.as_slice() != node.data().unwrap_or_default()
+            {
                 return Err(failure(
                     ErrorCode::ConcurrentChange,
                     "file changed while reading",

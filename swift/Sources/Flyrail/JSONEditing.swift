@@ -609,7 +609,7 @@ private enum JSONEditingOutput {
     case raw(Data)
 }
 
-private func encodeJSONValue(_ value: SemanticValue) throws -> Data {
+package func encodeJSONValue(_ value: SemanticValue) throws -> Data {
     var pending = [JSONEditingOutput.value(value, 0)]
     var output = Data()
     while let token = pending.popLast() {

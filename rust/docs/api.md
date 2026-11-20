@@ -1,6 +1,6 @@
 # Public Rust API
 
-[Bundles and rendering](#bundles-and-rendering) · [State stores](#state-stores) · [Configuration lifecycle](#configuration-lifecycle) · [Skill convenience API](#skill-convenience-api) · [Errors and results](#errors-and-results)
+[Bundles and rendering](#bundles-and-rendering) · [State stores](#state-stores) · [Configuration lifecycle](#configuration-lifecycle) · [Global Loadout](#global-loadout) · [Skill convenience API](#skill-convenience-api) · [Errors and results](#errors-and-results)
 
 Import the supported surface from `flyrail`; the crate root re-exports the
 consumer-facing types and functions. Bundles, renderings, previews, observations,
@@ -155,6 +155,31 @@ let _removed = remove(bundle.id(), &target, false, Duration::ZERO)?;
 generation and current resources. `InstallationObservation::matches` additionally
 checks bundle identity, label, bundle digest, render digest, and rendering support.
 It is a pure comparison against the captured observation.
+
+## Global Loadout
+
+`discover_loadout` takes an absolute home path, an optional absolute configuration
+directory, and an environment snapshot. The configuration directory takes
+precedence over a nonempty `XDG_CONFIG_HOME`, with `<home>/.config` as the default.
+`LoadoutDiscovery` distinguishes a missing registration (`Absent`) from an
+unusable registration or profile (`Invalid`) and an `Available` setup.
+
+`LoadoutSetup::eligible_sources` filters by the selected harnesses' slices and
+source `use` declarations. `LoadoutSetup::select` takes a declared source name,
+distinct harnesses, and explicit shared-scope acceptance. The preview checks
+whether the requested content can be represented.
+
+| Function | Purpose |
+| --- | --- |
+| `preview_loadout` | Plan an install or update and report diagnostics and scope impact. |
+| `apply_loadout` | Apply an accepted source preview with a bounded lock wait. |
+| `inspect_loadout` | Read the recorded source installation by bundle ID, `LoadoutLocation`, and state store. |
+| `recover_loadout` | Recover interrupted source writes at the recorded location. |
+| `preview_loadout_removal` | Propose source-free removal at the recorded location for `apply_loadout`. |
+
+See the [Loadout lifecycle](lifecycle.md#global-loadout-sources) for state and
+sync responsibilities and the [consumer example](examples.md#offer-a-global-loadout-source)
+for the selection and confirmation flow.
 
 ## Skill convenience API
 

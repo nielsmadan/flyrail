@@ -598,12 +598,18 @@ fn parse_simple_key(scanner: &mut Scanner<'_>) -> Result<KeyPart, ValueError> {
 }
 
 fn push_byte(value: &mut String, byte: u8, scanner: &mut Scanner<'_>) {
-    let start = scanner.pos;
-    scanner.step();
     if byte.is_ascii() {
+        scanner.step();
         value.push(byte as char);
+    } else if let Some(character) = scanner
+        .src
+        .get(scanner.pos..)
+        .and_then(|tail| tail.chars().next())
+    {
+        scanner.pos += character.len_utf8();
+        value.push(character);
     } else {
-        value.push_str(&scanner.slice(start, scanner.pos));
+        scanner.step();
     }
 }
 

@@ -1,6 +1,6 @@
 # Installation, update, and removal
 
-[Planning and applying](#planning-and-applying) · [Results and errors](#results-and-errors) · [Contexts and lock timeouts](#contexts-and-lock-timeouts) · [Ownership and replacement](#ownership-and-replacement) · [Current state](#current-state-and-results) · [Filesystem boundary](#filesystem-boundary)
+[Planning and applying](#planning-and-applying) · [Global Loadout](#global-loadout-source-lifecycle) · [Results and errors](#results-and-errors) · [Contexts and lock timeouts](#contexts-and-lock-timeouts) · [Ownership and replacement](#ownership-and-replacement) · [Current state](#current-state-and-results) · [Filesystem boundary](#filesystem-boundary)
 
 Flyrail synchronizes an immutable `*Bundle` and explicit `*RenderedBundle` into a
 logical `*InstallationTarget`, backed by the application's `store.Store`. One
@@ -66,6 +66,44 @@ and binds the observed file through publication.
 The skill convenience functions `Install`, `Update`, `Uninstall` and `Inspect`
 take `[]Target` and return one result per target, in request order. They accept
 only skill-only bundles without support dependencies.
+
+## Global Loadout source lifecycle
+
+`DiscoverLoadout` reads `loadout/config.toml` under the supplied `configHome`,
+the supplied `XDG_CONFIG_HOME` when `configHome` is empty, or `<home>/.config`.
+Only a missing registration yields `LoadoutAbsent`. Unreadable or unusable
+registrations yield `LoadoutInvalid` with a diagnostic. The effective profile
+and its inheritance determine active harnesses, slices, sources and selectors.
+The registry's `harnesses` field gives defaults for new projects.
+
+Offer global Loadout as a destination after `LoadoutAvailable`. Present the
+eligible source choices and let the user choose the source and harness coverage.
+`PreviewLoadout` checks that choice against the bundle and effective routes.
+Show its planned changes and declared impact. Request explicit acceptance when
+an edit reaches an inherited or shared declaration or additional harnesses.
+Other profiles and projects using the source may also receive its content.
+See the [host integration example](examples.md#global-loadout).
+
+`ApplyLoadout` checks the observed registration, profile and source inputs as
+well as the lifecycle and ownership preconditions. If routing changed,
+rediscover the setup and show a fresh preview. Source files, skill policies
+and individual selector members use the normal resource transaction and
+recovery rules.
+
+Before applying, save the bundle ID, store identity and the canonical root,
+profile, source name and canonical source path from `preview.Location()`. Keep the locator whenever
+the operation leaves recorded resources, including after partial application.
+Recreate it with `NewLoadoutLocation` to call `InspectLoadout`, `RecoverLoadout`
+or `PreviewLoadoutRemoval`. These calls use the recorded installation even if
+the bundle is unavailable or a different profile is now active. Review the
+removal preview and pass it to `ApplyLoadout` to retire the owned source edits.
+
+Honor `LoadoutResult.SyncRequired()` after install, update or removal. It
+can also be true on unchanged or partially applied results. The host reports
+that the user needs to run `loadout sync` for generated configuration to
+reflect the source state. An update or removal can retire assets still referenced
+by the last generated hook or MCP configuration. Coordinate those changes and sync
+before relying on the affected registrations.
 
 ## Results and errors
 

@@ -11,6 +11,7 @@ These contracts are independent of implementation language:
 - [Translation](translation.md): destinations, semantic capabilities and explicit asset references.
 - [Configuration state](configuration-state.md): resource receipts, indexes and recovery contract.
 - [State store](state-store.md): host-supplied persistence for indexes, receipts, journals and locks.
+- [Global Loadout](loadout.md): registration discovery, explicit source selection, and source lifecycle.
 
 `fixtures/bundles.json`, `fixtures/edits.json`, `fixtures/configurations.json`
 and `fixtures/translations.json`
@@ -31,5 +32,6 @@ Portable hooks and their runtime/ownership boundaries are specified in
 every interop driver's `write --source` must reject before touching the store.
 The Python, Rust, Swift and Go interop drivers, and the harness that compares
 them, are described under "Interop drivers" in [porting guidance](porting.md#interop-drivers).
+`fixtures/loadout.json` supplies the global registration, profile and MCP preview vectors.
 `fixtures/differential.tsv` is the shared differential corpus that the
 implementations' differential drivers consume.

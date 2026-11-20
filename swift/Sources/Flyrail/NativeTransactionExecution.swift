@@ -42,7 +42,7 @@ package enum NativeTransactionExecution {
 
     package static func execute(
         _ locks: NativeTransactionLocks, plans: [ResourcePlan], previous: Index?, pending: Index, completed: Index,
-        seam: NativeTransactionSeam = .none,
+        seam: NativeTransactionSeam = .none, loadoutReads: [LoadoutRead] = [],
     ) throws -> NativeTransactionOutcome {
         let store = locks.target.store
         let key = try InstallationIndex.key(bundleID: locks.bundleID, target: locks.target)
@@ -66,6 +66,7 @@ package enum NativeTransactionExecution {
         }
         try StateRecords.write(store, key: key, value: pending, expected: previous)
         var results: [ResourceResult] = []
+        var changed: [ResourcePath: Revision] = [:]
         for plan in plans {
             if plan.previous == plan.receipt, plan.before == plan.after {
                 try results.append(ResourceResult(resource: plan.resource, status: .unchanged))
@@ -86,8 +87,19 @@ package enum NativeTransactionExecution {
                 let prepared = try ResourceTransaction.prepare(plan, store: store, seam: seam)
                 journal = prepared
                 try StateRecords.requireIndex(store, key: key, expected: pending)
+                for input in loadoutReads {
+                    if let revision = changed[input.physical] {
+                        try input.requireBinding()
+                        try NativeObservation.requireRevision(input.physical, revision)
+                    } else {
+                        try input.require()
+                    }
+                }
                 try ResourceTransaction.publish(prepared, store: store, seam: seam) { committed = true }
                 try ResourceTransaction.cleanup(prepared, store: store, seam: seam)
+                if !loadoutReads.isEmpty {
+                    changed[plan.resource.destination] = prepared.published
+                }
             } catch let crash as NativeSimulatedCrash {
                 throw crash
             } catch {

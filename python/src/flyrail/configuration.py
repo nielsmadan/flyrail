@@ -1,7 +1,8 @@
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from flyrail._read_preconditions import ReadPrecondition
 from flyrail._resource_models import (
     Ancestor,
     Generation,
@@ -218,6 +219,7 @@ class LifecyclePreview:
     generation: Generation | None
     resources: tuple[ResourcePlan, ...]
     error: TargetError | None = None
+    _read_preconditions: tuple[ReadPrecondition, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
         if self.bundle is not None and not isinstance(self.bundle, Bundle):
@@ -236,6 +238,9 @@ class LifecyclePreview:
             raise TypeError("invalid preview metadata")
         validate_identifier(self.bundle_id, "bundle id")
         object.__setattr__(self, "resources", sequence(self.resources, ResourcePlan))
+        object.__setattr__(
+            self, "_read_preconditions", sequence(self._read_preconditions, ReadPrecondition)
+        )
 
     @property
     def applicable(self) -> bool:

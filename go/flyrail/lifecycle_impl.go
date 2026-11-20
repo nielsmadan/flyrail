@@ -716,6 +716,11 @@ func freshPlan(ctx context.Context, t *InstallationTarget, plan ResourcePlan, cr
 }
 
 func fresh(ctx context.Context, preview *LifecyclePreview, created []ancestor) (*LifecyclePreview, *TargetError) {
+	for _, observed := range preview.readPreconditions {
+		if failed := observed.require(); failed != nil {
+			return nil, failed
+		}
+	}
 	t := preview.target
 	if failed := requireIndex(ctx, t.store, installationKey(preview.bundleID, t), preview.index); failed != nil {
 		return nil, failed
@@ -851,7 +856,7 @@ func runLocked(ctx context.Context, preview *LifecyclePreview, locks *transactio
 	if err != nil {
 		return failedResult(ctx, identifier, t, stateFailure(t.store, CodeInvalidState, err.Error()), nil)
 	}
-	outcome, failed := executeTransaction(ctx, locks, refreshed.resources, refreshed.index, pending, completed)
+	outcome, failed := executeTransaction(ctx, locks, refreshed.resources, refreshed.index, pending, completed, refreshed.readPreconditions...)
 	ctx = context.WithoutCancel(ctx)
 	if failed != nil {
 		return failedResult(ctx, identifier, t, failed, nil)

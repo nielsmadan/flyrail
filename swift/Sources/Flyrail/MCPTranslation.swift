@@ -27,7 +27,7 @@ private func hasCopilotEnvironmentSubstitution(_ value: String) -> Bool {
     }
 }
 
-private func literal(
+package func literal(
     _ value: String,
     context: RenderContext,
     field: String,

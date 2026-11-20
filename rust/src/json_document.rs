@@ -353,7 +353,7 @@ impl DocumentBackend for JsonDocument {
     }
 }
 
-fn encode_value(value: &Value, out: &mut String, depth: usize) -> Result<(), ValueError> {
+pub fn encode_value(value: &Value, out: &mut String, depth: usize) -> Result<(), ValueError> {
     if depth > MAX_DEPTH {
         return Err(ValueError::nesting(NESTING));
     }

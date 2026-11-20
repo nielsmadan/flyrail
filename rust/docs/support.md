@@ -10,8 +10,9 @@ OpenCode, Pi, Cursor, Copilot, and Droid, subject to the exact
 [translation matrix](../../spec/translation.md).
 
 `detect_agents` reports executable and supported macOS application evidence in
-declaration order. Detection does not select an agent. Droid is detectable but
-has no supported translation or lifecycle destination.
+declaration order. Detection does not select an agent. Droid has no supported
+direct rendering destination. See the [Loadout source mappings](translation.md#global-loadout-source-mappings)
+for the global source workflow.
 
 Flyrail does not manage cloud configuration, execute bundled commands during
 installation, or contact MCP servers. A current installation does not prove host

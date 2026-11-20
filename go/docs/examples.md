@@ -1,5 +1,7 @@
 # Embedding Flyrail in a Go host CLI
 
+[Combined configuration](#combined-configuration) · [Global Loadout](#global-loadout)
+
 The module contains two independent example applications under `go/examples/`,
 each a `main` package that uses only Flyrail's public API and the standard
 library. Each keeps its host version separate from its configuration bundle
@@ -73,3 +75,81 @@ removes.
 tier. `just check-package` extracts the module outside the repository and builds
 and runs both CLIs there; see
 [development](development.md#package-qa).
+
+## Global Loadout
+
+The host supplies its bundle, state store, platform, home and environment
+snapshot. When discovery succeeds, `choose` presents the eligible sources for
+the requested harnesses and returns the chosen source name. An empty name
+means the user declined. `review` shows `Summarize(preview.Lifecycle())`,
+`Impact()`, `ScopeNotice()` and any `Diagnostic()` before asking for approval.
+An empty lifecycle status means the example stopped before apply.
+
+```go
+package mycli
+
+import (
+	"context"
+	"time"
+
+	"github.com/nielsmadan/flyrail/go/flyrail"
+	"github.com/nielsmadan/flyrail/go/flyrail/store"
+)
+
+func installIntoLoadout(
+	ctx context.Context,
+	bundle *flyrail.Bundle,
+	st store.Store,
+	home string,
+	env map[string]string,
+	agents []flyrail.Agent,
+	opts flyrail.LoadoutOptions,
+	choose func([]flyrail.LoadoutSource) string,
+	review func(*flyrail.LoadoutPreview) bool,
+	remember func(flyrail.LoadoutLocation) error,
+) (flyrail.LoadoutResult, error) {
+	var result flyrail.LoadoutResult
+	found, err := flyrail.DiscoverLoadout(home, "", env)
+	if err != nil {
+		return result, err
+	}
+	if found.Status == flyrail.LoadoutInvalid {
+		return result, found.Diagnostic
+	}
+	if found.Status == flyrail.LoadoutAbsent {
+		return result, nil
+	}
+	sources := found.Setup.EligibleSources(bundle, agents)
+	if len(sources) == 0 {
+		return result, nil
+	}
+	name := choose(sources)
+	if name == "" {
+		return result, nil
+	}
+	destination, err := found.Setup.Select(name, agents, false)
+	if err != nil {
+		return result, err
+	}
+	preview, err := flyrail.PreviewLoadout(ctx, bundle, destination, st, opts)
+	if err != nil {
+		return result, err
+	}
+	if !review(preview) || !preview.Applicable() {
+		return result, nil
+	}
+	if err := remember(preview.Location()); err != nil {
+		return result, err
+	}
+	result = flyrail.ApplyLoadout(ctx, preview, flyrail.LockOptions{LockTimeout: time.Second})
+	return result, result.Lifecycle.Failure()
+}
+```
+
+For `shared-scope`, show the reported declaration and harness reach. After the
+user accepts that impact, call `Select` again with `acceptSharedScope` set to
+`true` and review the new preview before applying. Have `remember` persist the
+locator with the bundle ID and store identity. After apply, tell the user to
+run `loadout sync` when `result.SyncRequired()` is true. See
+[inspection and removal](lifecycle.md#global-loadout-source-lifecycle) for
+using the saved locator.

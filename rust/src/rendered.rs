@@ -370,6 +370,11 @@ pub struct RenderedArtifact {
 }
 
 impl RenderedArtifact {
+    pub(crate) fn with_id(mut self, id: String) -> Self {
+        self.id = id;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,

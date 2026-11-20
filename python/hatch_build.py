@@ -17,5 +17,6 @@ class CustomBuildHook(BuildHookInterface[SdistBuilderConfig]):
             "edits.json",
             "translations.json",
             "hooks.json",
+            "loadout.json",
         ):
             build_data["force_include"][str(fixtures / name)] = f"spec/fixtures/{name}"

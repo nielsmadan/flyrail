@@ -1,0 +1,370 @@
+{
+  "compatibility_revision": "057725af7b7c3d162addc88c843fb17b8805429a",
+  "discovery": [
+    {
+      "name": "absent",
+      "files": {},
+      "status": "absent"
+    },
+    {
+      "name": "invalid-toml",
+      "files": {
+        "home/.config/loadout/config.toml": "source = ["
+      },
+      "status": "invalid",
+      "code": "invalid-registry"
+    },
+    {
+      "name": "relative-registration",
+      "files": {
+        "home/.config/loadout/config.toml": "source = 'setup'"
+      },
+      "status": "invalid",
+      "code": "invalid-registry"
+    },
+    {
+      "name": "broken-registration",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '~/no-setup'"
+      },
+      "status": "invalid",
+      "code": "invalid-source"
+    },
+    {
+      "name": "xdg-does-not-fall-back",
+      "env": {
+        "XDG_CONFIG_HOME": "{root}/xdg"
+      },
+      "files": {
+        "home/.config/loadout/config.toml": "source = ["
+      },
+      "status": "absent"
+    },
+    {
+      "name": "registry-defaults-do-not-enable-harnesses",
+      "env": {
+        "XDG_CONFIG_HOME": "{root}/xdg"
+      },
+      "files": {
+        "home/.config/loadout/config.toml": "source = [",
+        "xdg/loadout/config.toml": "source = '~/setup'\nharnesses = ['pi']\n",
+        "home/setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n[codex]\nskills = false\n"
+      },
+      "status": "available",
+      "profile": "default",
+      "chain": [
+        "home/setup/loadout.toml"
+      ],
+      "sources": [
+        "local"
+      ],
+      "harnesses": [
+        "claude",
+        "codex"
+      ]
+    },
+    {
+      "name": "inherit-remove-and-replace",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\nprofile = 'work'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'old'\npath = '.'\n[all]\ninstructions = []\n[claude]\n[codex]\n",
+        "setup/work.toml": "extends = 'default'\nremove = ['codex']\n[[source]]\nname = 'new'\npath = '.'\nuse = ['instructions']\n[claude]\nmcp = false\n"
+      },
+      "status": "available",
+      "profile": "work",
+      "chain": [
+        "setup/work.toml",
+        "setup/loadout.toml"
+      ],
+      "sources": [
+        "new"
+      ],
+      "harnesses": [
+        "claude"
+      ],
+      "instruction_path": "setup/loadout.toml",
+      "instruction_key": [
+        "all",
+        "instructions"
+      ]
+    },
+    {
+      "name": "legacy-named-profile",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\nprofile = 'work'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[instructions.claude]\nprofile = 'work'\norder = []\noutput = 'CLAUDE.md'\n[instructions.codex]\nprofile = 'personal'\norder = []\noutput = 'AGENTS.md'\n"
+      },
+      "status": "available",
+      "profile": "work",
+      "chain": [
+        "setup/loadout.toml"
+      ],
+      "sources": [
+        "local"
+      ],
+      "harnesses": [
+        "claude"
+      ],
+      "instruction_path": "setup/loadout.toml",
+      "instruction_key": [
+        "instructions",
+        "claude",
+        "order"
+      ]
+    },
+    {
+      "name": "invalid-profile",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\nprofile = '../other'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n"
+      },
+      "status": "invalid",
+      "code": "invalid-profile"
+    },
+    {
+      "name": "unknown-profile",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\nprofile = 'unknown'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n"
+      },
+      "status": "invalid",
+      "code": "invalid-profile"
+    },
+    {
+      "name": "profile-cycle",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\nprofile = 'work'\n",
+        "setup/loadout.toml": "extends = 'work'\n",
+        "setup/work.toml": "extends = 'default'\n"
+      },
+      "status": "invalid",
+      "code": "profile-cycle"
+    },
+    {
+      "name": "invalid-remove",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "remove = ['claude']\n[[source]]\nname = 'local'\npath = '.'\n[claude]\n"
+      },
+      "status": "invalid",
+      "code": "invalid-profile"
+    },
+    {
+      "name": "multiple-declared-sources",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'personal'\npath = '.'\n[[source]]\nname = 'team'\npath = '../shared'\nuse = ['mcp', 'instructions']\n[claude]\n[codex]\n",
+        "shared/.keep": ""
+      },
+      "status": "available",
+      "profile": "default",
+      "chain": [
+        "setup/loadout.toml"
+      ],
+      "sources": [
+        "personal",
+        "team"
+      ],
+      "harnesses": [
+        "claude",
+        "codex"
+      ]
+    },
+    {
+      "name": "unsupported-slice",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\nmodule-config = ['hooks']\n"
+      },
+      "status": "invalid",
+      "code": "invalid-manifest"
+    },
+    {
+      "name": "home-expansion-with-redundant-separators",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '~//répertoire'\n",
+        "home/répertoire/loadout.toml": "[[source]]\nname = 'local'\npath = '~//shared'\n[claude]\n",
+        "home/shared/.keep": ""
+      },
+      "status": "available",
+      "profile": "default",
+      "chain": [
+        "home/répertoire/loadout.toml"
+      ],
+      "sources": [
+        "local"
+      ],
+      "harnesses": [
+        "claude"
+      ],
+      "source_paths": [
+        "home/shared"
+      ]
+    },
+    {
+      "name": "missing-profile-with-inherited-default",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\nprofile='missing'\n",
+        "setup/loadout.toml": "extends = 'base'\n",
+        "setup/base.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n"
+      },
+      "status": "invalid",
+      "code": "invalid-profile"
+    },
+    {
+      "name": "common-block-defaults-only-apply-to-known-slices",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[all]\nunused=true\n[claude]\n"
+      },
+      "status": "available",
+      "profile": "default",
+      "chain": [
+        "setup/loadout.toml"
+      ],
+      "sources": [
+        "local"
+      ],
+      "harnesses": [
+        "claude"
+      ]
+    },
+    {
+      "name": "legacy-codex-server-renderer",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n[permissions.codex]\nrender='codex-servers'\noutput='config.toml'\n"
+      },
+      "status": "available",
+      "profile": "default",
+      "chain": [
+        "setup/loadout.toml"
+      ],
+      "sources": [
+        "local"
+      ],
+      "harnesses": [
+        "claude",
+        "codex"
+      ]
+    }
+  ],
+  "mcp_previews": [
+    {
+      "name": "wider-mcp-scope",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n[codex]\n"
+      },
+      "harnesses": [
+        "claude"
+      ],
+      "code": "shared-scope"
+    },
+    {
+      "name": "disabled-mcp-slice",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\nmcp=false\n"
+      },
+      "harnesses": [
+        "claude"
+      ],
+      "code": "disabled-slice"
+    },
+    {
+      "name": "missing-source-use",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\nuse=['skills']\n[claude]\n"
+      },
+      "harnesses": [
+        "claude"
+      ],
+      "code": "source-use"
+    },
+    {
+      "name": "external-server-collision",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[[source]]\nname='team'\npath='../team'\n[claude]\n",
+        "team/mcp.toml": "[review]\ntransport='stdio'\ncommand='team-review'\n"
+      },
+      "harnesses": [
+        "claude"
+      ],
+      "code": "source-collision"
+    },
+    {
+      "name": "unrepresentable-stdio-secret",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[claude]\n"
+      },
+      "harnesses": [
+        "claude"
+      ],
+      "code": "mcp-env-reference",
+      "env_reference": true
+    },
+    {
+      "name": "opencode-namespace-overlap",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[opencode]\n",
+        "setup/permissions.toml": "[mcp]\nallow=['review_team/*']\n"
+      },
+      "harnesses": [
+        "opencode"
+      ],
+      "code": "mcp-permission-overlap"
+    },
+    {
+      "name": "pi-namespace-overlap",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[pi]\n",
+        "setup/permissions.toml": "[mcp]\ndeny=['review__team/*']\n"
+      },
+      "harnesses": [
+        "pi"
+      ],
+      "code": "mcp-permission-overlap"
+    },
+    {
+      "name": "malformed-external-mcp",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[opencode]\n",
+        "setup/mcp.toml": "[user]\ntransport='http'\nurl='https://example.test/mcp'\nheaders='bad'\n"
+      },
+      "harnesses": [
+        "opencode"
+      ],
+      "code": "invalid-mcp"
+    },
+    {
+      "name": "empty-permissions-still-contributes-mcp",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[opencode]\nmcp=[]\n"
+      },
+      "harnesses": [
+        "opencode"
+      ],
+      "code": null
+    },
+    {
+      "name": "mcp-same-namespace-and-wildcard-rules",
+      "files": {
+        "home/.config/loadout/config.toml": "source = '{root}/setup'\n",
+        "setup/loadout.toml": "[[source]]\nname = 'local'\npath = '.'\n[opencode]\n",
+        "setup/permissions.toml": "[mcp]\nallow=['review/*', '*/ok']\n"
+      },
+      "harnesses": [
+        "opencode"
+      ],
+      "code": null
+    }
+  ]
+}

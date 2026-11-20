@@ -129,8 +129,9 @@ def git(arguments, cwd):
     return run(["git", *GIT_IDENTITY, *arguments], cwd)
 
 
-def tracked_files(*pathspecs):
-    listed = run(["git", "ls-files", "-z", "--cached", "--", *pathspecs], ROOT, os.environ.copy())
+def source_files(*pathspecs):
+    listed = run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *pathspecs],
+                 ROOT, os.environ.copy())
     files = sorted({Path(name) for name in listed.split("\0") if name and (ROOT / name).exists()})
     assert all((ROOT / path).is_file() and not (ROOT / path).is_symlink() for path in files)
     return files
@@ -164,7 +165,7 @@ def swift(arguments, root, scratch):
 
 
 def package_files():
-    files = tracked_files(*PACKAGE_FILES, *PACKAGE_ROOTS)
+    files = source_files(*PACKAGE_FILES, *PACKAGE_ROOTS)
     assert {str(path) for path in files} >= set(PACKAGE_FILES), set(PACKAGE_FILES) - {str(p) for p in files}
     return files
 
@@ -226,7 +227,7 @@ def main():
         verify_manifest(extracted, qa / "manifest-build")
         swift(["build", "-Xswiftc", "-warnings-as-errors"], extracted, qa / "archive-build")
         swift(["test", "-Xswiftc", "-warnings-as-errors"], extracted, qa / "archive-build")
-        repository_files = tracked_files()
+        repository_files = source_files()
         snapshot = qa / "repository"
         revision = snapshot_repository(repository_files, snapshot)
         consumer = qa / "consumer"
@@ -248,10 +249,10 @@ def main():
         package_checkout = next(path for path in checkouts if (path / "swift/Sources/Flyrail").is_dir())
         assert committed_files(package_checkout) == repository_files
         assert (package_checkout / "Package.swift").read_bytes() == (ROOT / "Package.swift").read_bytes()
-        print(f"Swift package QA: {len(files)} tracked Swift package files archived and verified; manifest "
+        print(f"Swift package QA: {len(files)} Swift package files archived and verified; manifest "
               "dependency ranges, exact resolved pins and resources; the extracted archive builds and tests without sibling "
               f"sources; an external SwiftPM consumer of a {len(repository_files)}-file Git snapshot of the "
-              "tracked repository rendered, installed, executed and removed hooks")
+              "repository source files rendered, installed, executed and removed hooks")
     assert not qa.exists(), "package QA temporary files were retained"
 
 

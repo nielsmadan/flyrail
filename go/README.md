@@ -304,12 +304,19 @@ The state store is the CLI's own: choose a directory under your application's
 state location and pass the same store to every call. Flyrail has no default
 store.
 
+## Global Loadout
+
+A host can discover an existing global Loadout setup and offer it as an
+installation destination. The user chooses a declared source and reviews the
+planned edits. After applying, the host reports when the user needs to run
+Loadout sync. See the [Go integration example](docs/examples.md#global-loadout).
+
 ## Documentation
 
 - [Public API](docs/api.md): packages, conventions and the Rust-to-Go crosswalk of every exported item.
 - [Lifecycle and recovery](docs/lifecycle.md): previews, sync, removal, results and contexts.
 - [Configuration and document editing](docs/configuration.md): bundles, content and edits.
-- [Translation and destinations](docs/translation.md): rendering for explicit agents.
+- [Translation and destinations](docs/translation.md): direct rendering and Loadout source mappings.
 - [Inspection](docs/inspection.md): skill destinations and read-only observation.
 - [Bundled hooks](docs/hooks.md): the hook runtime snapshot and protocol values.
 - [Architecture](docs/architecture.md): packages, boundaries and the no-cgo native layer.

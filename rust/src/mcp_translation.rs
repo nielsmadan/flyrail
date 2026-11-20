@@ -53,7 +53,7 @@ fn has_copilot_env_substitution(value: &str) -> bool {
     })
 }
 
-fn literal<'a>(
+pub fn literal<'a>(
     value: &'a str,
     context: &RenderContext,
     field: &'static str,

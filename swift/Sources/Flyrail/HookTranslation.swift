@@ -173,7 +173,7 @@ private func posixQuote(_ value: String) -> String {
     return "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
 }
 
-private func hookEventName(_ agent: Agent, _ event: HookEvent) -> String {
+package func hookEventName(_ agent: Agent, _ event: HookEvent) -> String {
     switch (agent, event) {
     case (.claude, .sessionStart), (.codex, .sessionStart): "SessionStart"
     case (.claude, .beforeTool), (.codex, .beforeTool): "PreToolUse"
@@ -231,6 +231,7 @@ package func hookArtifacts(
     bundle: FlyrailBundle,
     context: RenderContext,
     assets: [String: ResourcePath],
+    revisionLauncher: Bool = false,
 ) throws -> HookTranslation {
     let hooks = bundle.artifacts.compactMap { artifact -> HookArtifact? in
         if case let .hook(hook) = artifact {
@@ -326,7 +327,8 @@ package func hookArtifacts(
     try entries.append(BundleEntry(path: "config.mts", data: Data(configSource.utf8)))
     var revisionBytes = Data()
     entries.compactMap(\.data).forEach { revisionBytes.append($0) }
-    let revision = try appendPath(base, "revisions/\(SHA256.hash(data: revisionBytes).hexadecimal)")
+    let revisionID = SHA256.hash(data: revisionBytes).hexadecimal
+    let revision = try appendPath(base, "revisions/\(revisionID)")
     let runtimeID = generatedID([bundle.identity.id, agent.rawValue, "runtime"])
     let launcherID = generatedID([bundle.identity.id, agent.rawValue, "launcher"])
     let versionID = generatedID([bundle.identity.id, agent.rawValue, "version"])
@@ -373,7 +375,7 @@ package func hookArtifacts(
             try dependencies.append(Dependency(dependent: hook.id, required: runtimeID))
         }
     } else {
-        let launcher = try appendPath(base, "entry.mjs")
+        let launcher = try appendPath(base, revisionLauncher ? "launchers/\(revisionID)/entry.mjs" : "entry.mjs")
         let code = "try { const { native } = await import(\(bridge)); " +
             "const { default: config } = await import(\(configURL)); " +
             "await native(config, process.argv[2]); } catch { " +
@@ -487,7 +489,7 @@ package func hookArtifacts(
             try dependencies.append(Dependency(
                 dependent: hook.id,
                 required: launcherID,
-                mode: .stableReference,
+                mode: revisionLauncher ? .revision : .stableReference,
             ))
         }
     }
@@ -567,7 +569,7 @@ private func asciiJSONString(_ value: String) -> String {
     return output + "\""
 }
 
-private extension Digest {
+package extension Digest {
     var hexadecimal: String {
         map { String(format: "%02x", $0) }.joined()
     }

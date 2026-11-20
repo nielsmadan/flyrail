@@ -23,6 +23,7 @@ from flyrail._resource_models import (
     Preparation,
     Receipt,
     ResourceRef,
+    Revision,
 )
 from flyrail._resource_plan import artifact_claim, plan_resource, resource, summary
 from flyrail._resource_transaction import cleanup, pending_recovery, prepare, publish, recover
@@ -515,6 +516,8 @@ def locks(
 
 
 def _fresh(preview: LifecyclePreview, *, created: tuple[Ancestor, ...] = ()) -> LifecyclePreview:
+    for condition in preview._read_preconditions:
+        condition.require()
     _require_index(preview, preview.index)
     store = preview.target.store
 
@@ -619,6 +622,7 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
     key = index_key(identifier, target.context_digest)
     write_record(target.store, key, pending, expected=preview.index)
     failed: TargetError | None = None
+    changed: dict[Path, Revision] = {}
     for plan in preview.resources:
         if plan.previous == plan.receipt and plan.before == plan.after:
             results.append(ResourceResult(plan.resource, OperationStatus.UNCHANGED))
@@ -629,8 +633,20 @@ def _run(preview: LifecyclePreview) -> InstallationResult:
             _require_index(preview, pending)
             journal = prepare(target.store, plan)
             _require_index(preview, pending)
+            for condition in preview._read_preconditions:
+                revision = changed.get(condition.resolved)
+                if revision is None:
+                    condition.require()
+                else:
+                    condition.require_binding()
+                    require(condition.resolved, revision)
             publish(target.store, journal)
             committed = True
+            if any(
+                condition.resolved == plan.resource.destination
+                for condition in preview._read_preconditions
+            ):
+                changed[plan.resource.destination] = journal.published
             cleanup(target.store, journal)
             results.append(ResourceResult(plan.resource, OperationStatus.APPLIED))
         except (OSError, ObservationFailure, ValueError, StoreBusy) as error:

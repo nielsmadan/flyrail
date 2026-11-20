@@ -84,3 +84,22 @@ bundle label still compare as a different desired generation.
 
 See the dated shared [capability and destination matrix](../../spec/translation.md)
 for exact host schemas and limitations.
+
+## Global Loadout source mappings
+
+The Loadout preview translates against the effective profile and the selected
+declared source. The [Loadout compatibility contract](../../spec/loadout.md)
+defines how profile inheritance, overrides, and source order affect routing.
+
+| Bundle content | Loadout source mapping and limits |
+| --- | --- |
+| Skills | Install the authored tree and a per-skill policy for the selected harnesses with `render = false`. Loadout-filtered files and conflicting skills or overrides block the preview. |
+| Instructions | Add a bundle-qualified Markdown fragment and one member per applicable existing instruction order array. Shadowed members and unsupported selectors block the preview. |
+| MCP | Add a server table to `mcp.toml` for every configured MCP slice. Stdio supports command, arguments, and literal environment values. A working directory or stdio environment reference blocks the preview. HTTP supports a URL and an optional bearer variable name. Conflicting names in participating sources block the preview. |
+| Hooks | Use selected JSON fragments for Claude, Codex, and Cursor, and bridge modules for OpenCode and Pi. Supported events, outcomes, and runtime requirements still apply. A hook selector shared across harnesses with different protocols blocks the preview. Droid hooks are unsupported. |
+| Native artifacts | User CLI whole-file JavaScript and TypeScript modules map to OpenCode `plugins/` and Pi `extensions/` under `module-config/<harness>/`. Only top-level `.js`, `.mjs`, and `.ts` files at the matching native destinations are supported. |
+
+Copilot is outside the Loadout harness set. The preview also rejects disabled
+slices and incompatible custom routes. Pass an explicit `HookRuntime` in
+`LoadoutOptions` for bundles with hooks. See [Bundled hooks](hooks.md) for
+runtime details.

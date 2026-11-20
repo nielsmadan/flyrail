@@ -44,7 +44,8 @@ package enum LifecycleExecution {
         let completed = try Index(bundleID: fresh.bundleID, contextDigest: fresh.target.contextDigest,
                                   current: fresh.generation)
         let outcome = try NativeTransactionExecution.execute(locks, plans: fresh.resources, previous: fresh.index,
-                                                             pending: pending, completed: completed, seam: seam)
+                                                             pending: pending, completed: completed, seam: seam,
+                                                             loadoutReads: fresh.loadoutReads)
         return try InstallationResult(status: outcome.status,
                                       observation: InstallationInspection.observe(
                                           bundleID: fresh.bundleID,

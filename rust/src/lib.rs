@@ -17,6 +17,7 @@ mod json;
 mod json_document;
 pub mod lifecycle;
 mod lifecycle_impl;
+pub mod loadout;
 mod manifest;
 mod mcp_translation;
 mod memory;
@@ -89,6 +90,12 @@ pub use lifecycle::{
     SkillOptions, apply_preview, inspect_installation, install, install_with_timeout, preview,
     preview_removal, recover_installation, remove, sync, uninstall, uninstall_with_options, update,
     update_with_options,
+};
+pub use loadout::{
+    LoadoutDestination, LoadoutDiagnostic, LoadoutDiscovery, LoadoutHarness, LoadoutImpact,
+    LoadoutLocation, LoadoutOptions, LoadoutPreview, LoadoutResult, LoadoutSelector, LoadoutSetup,
+    LoadoutSource, apply_loadout, discover_loadout, inspect_loadout, preview_loadout,
+    preview_loadout_removal, recover_loadout,
 };
 pub use mcp_translation::UnsupportedTranslation;
 pub use models::{BundleEntry, BundleIdentity, OperationStatus, SkillSpec};

@@ -142,27 +142,37 @@ class Observer:
         if metadata is not None and not stat.S_ISDIR(metadata.st_mode):
             raise ObservationFailure(ErrorCode.UNSAFE_PATH, "expected a directory", path)
 
-    def file(self, path: Path) -> bytes:
+    def file(self, path: Path, *, limit: int | None = None) -> bytes:
         before = self.metadata(path)
         if before is None or not stat.S_ISREG(before.st_mode):
             raise ObservationFailure(ErrorCode.INVALID_STATE, "expected a regular file", path)
+        flags = getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+        def opener(name: str, mode: int) -> int:
+            return os.open(name, mode | flags)
+
         try:
-            stream = path.open("rb")
+            with path.open("rb") if limit is None else open(path, "rb", opener=opener) as stream:
+                opened = os.fstat(stream.fileno())
+                if _path_descriptor_signature(opened) != _path_descriptor_signature(before):
+                    raise ObservationFailure(
+                        ErrorCode.CONCURRENT_CHANGE, "file changed while opening", path
+                    )
+                data = stream.read() if limit is None else stream.read(limit + 1)
+                if limit is not None and len(data) > limit:
+                    raise ObservationFailure(
+                        ErrorCode.INVALID_STATE, "file exceeds byte limit", path
+                    )
+                if _descriptor_signature(os.fstat(stream.fileno())) != _descriptor_signature(
+                    opened
+                ):
+                    raise ObservationFailure(
+                        ErrorCode.CONCURRENT_CHANGE, "file changed while reading", path
+                    )
         except FileNotFoundError as error:
             raise ObservationFailure(
                 ErrorCode.CONCURRENT_CHANGE, "file disappeared while opening", path
             ) from error
-        with stream:
-            opened = os.fstat(stream.fileno())
-            if _path_descriptor_signature(opened) != _path_descriptor_signature(before):
-                raise ObservationFailure(
-                    ErrorCode.CONCURRENT_CHANGE, "file changed while opening", path
-                )
-            data = stream.read()
-            if _descriptor_signature(os.fstat(stream.fileno())) != _descriptor_signature(opened):
-                raise ObservationFailure(
-                    ErrorCode.CONCURRENT_CHANGE, "file changed while reading", path
-                )
         self.metadata(path)
         return data
 

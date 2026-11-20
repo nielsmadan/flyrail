@@ -210,7 +210,7 @@ func requireIndex(ctx context.Context, st store.Store, key string, expected *ind
 	return nil
 }
 
-func executeTransaction(ctx context.Context, locks *transactionLocks, plans []ResourcePlan, previous *index, pending, completed index) (transactionOutcome, *TargetError) {
+func executeTransaction(ctx context.Context, locks *transactionLocks, plans []ResourcePlan, previous *index, pending, completed index, inputs ...loadoutInput) (transactionOutcome, *TargetError) {
 	st := locks.store
 	expected, err := newIndex(pending.bundleID, pending.contextDigest, pending.pending, nil, nil, nil, stateSchemaVersion)
 	if err != nil {
@@ -234,15 +234,36 @@ func executeTransaction(ctx context.Context, locks *transactionLocks, plans []Re
 		return transactionOutcome{}, failed
 	}
 	var applied, unchanged []ResourceRef
+	changed := make(map[string]revision)
+	checkRoute := func() *TargetError {
+		for _, input := range inputs {
+			if revision, found := changed[input.resolved]; found {
+				if failed := input.requireBinding(); failed != nil {
+					return failed
+				}
+				if failed := require(input.resolved, revision); failed != nil {
+					return failed
+				}
+			} else {
+				if failed := input.require(); failed != nil {
+					return failed
+				}
+			}
+		}
+		return nil
+	}
 	for _, plan := range plans {
 		if plan.previous != nil && sameRecord(*plan.previous, plan.receipt) && plan.before.equal(plan.after) {
 			unchanged = append(unchanged, plan.resource)
 			continue
 		}
-		attempt := applyResource(ctx, locks, plan, pending)
+		attempt := applyResource(ctx, locks, plan, pending, checkRoute)
 		ctx = context.WithoutCancel(ctx)
 		if attempt.err == nil {
 			applied = append(applied, plan.resource)
+			if len(inputs) != 0 {
+				changed[plan.resource.Destination] = attempt.journal.published
+			}
 			continue
 		}
 		committed := attempt.committed
@@ -276,7 +297,7 @@ type resourceAttempt struct {
 	err       *TargetError
 }
 
-func applyResource(ctx context.Context, locks *transactionLocks, plan ResourcePlan, pending index) resourceAttempt {
+func applyResource(ctx context.Context, locks *transactionLocks, plan ResourcePlan, pending index, checkRoute func() *TargetError) resourceAttempt {
 	st := locks.store
 	for _, boundary := range []string{seams.ResourcePrecondition, seams.IndexRequire} {
 		if failed := inject(ctx, boundary); failed != nil {
@@ -300,6 +321,9 @@ func applyResource(ctx context.Context, locks *transactionLocks, plan ResourcePl
 	ctx = context.WithoutCancel(ctx)
 	attempt := resourceAttempt{journal: &prepared, guard: guard}
 	if attempt.err = requireIndex(ctx, st, locks.indexKey, &pending); attempt.err != nil {
+		return attempt
+	}
+	if attempt.err = checkRoute(); attempt.err != nil {
 		return attempt
 	}
 	if attempt.committed, attempt.err = publish(ctx, st, prepared); attempt.err != nil {

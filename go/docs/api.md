@@ -41,7 +41,8 @@ which is a nil interface when there is no failure; `Error()` and `Unwrap()` on a
 return `""` and nil.
 
 **Context.** Every call that touches the filesystem or a store takes
-`ctx context.Context` first. The context carries cancellation (and a deadline
+`ctx context.Context` first, except the read-only `DiscoverLoadout`.
+The context carries cancellation (and a deadline
 that can shorten lock waits) only; Rust has no equivalent parameter. Pure
 functions (rendering, editing, summaries, constructors) take no context. A nil
 `ctx` is an invalid argument to every function in package `flyrail` that takes
@@ -531,6 +532,21 @@ type DiscoveryOptions struct {
 | --- | --- | --- |
 | `AgentPresence` | `type AgentPresence struct{ Agent Agent; Executable, Application string }` | `""` = no such evidence. |
 | `detect_agents(path, application_directories)` | `func DetectAgents(ctx context.Context, home string, opts DiscoveryOptions) ([]AgentPresence, error)` | Rust reads `PATH` and the home directory itself; Go takes both explicitly. Application evidence is macOS-only, as Rust. A relative application directory (explicit, or derived from a relative `home`) fails up front with `*ValueError` `agent presence evidence must be an absolute Path`, whatever is installed. Results in `Agents()` order. |
+
+### Global Loadout
+
+See [source and harness selection](lifecycle.md#global-loadout-source-lifecycle)
+and the [Go declarations](../flyrail/loadout.go) for the full API.
+
+| Rust | Go | Notes |
+| --- | --- | --- |
+| `discover_loadout`, `LoadoutDiscovery` | `DiscoverLoadout(home, configHome, env)`, `LoadoutDiscovery` | `LoadoutAbsent`, `LoadoutAvailable`, and `LoadoutInvalid` encode the result variants in `Status`. The result carries `Registry` and the applicable `Setup` or `Diagnostic`. |
+| `LoadoutDiagnostic` | `*LoadoutDiagnostic` | `Code`, `Message`, and `Path` are exported fields. `Error()` returns `Message`. |
+| `LoadoutSetup`, `LoadoutSource`, `LoadoutHarness`, `LoadoutSelector` | Same names | `ProfileChain()` starts with the active manifest. `Sources()` preserves resolution order. `Selectors()` reports the declaring file and key path, ordered entries, and substitutions. `EligibleSources()` is an initial slice filter. |
+| `LoadoutSetup::select`, `LoadoutDestination` | `setup.Select(name, harnesses, acceptSharedScope)`, `*LoadoutDestination` | Binds a declared source and distinct harnesses. Check the resulting `PreviewLoadout` for content-specific constraints. |
+| `LoadoutLocation::new`, `LoadoutLocation::installation` | `NewLoadoutLocation`, `location.Installation(st)` | Reconstruct the lifecycle target from its saved root, profile, source name and source path in the same state store. |
+| `preview_loadout`, `preview_loadout_removal` | `PreviewLoadout`, `PreviewLoadoutRemoval` | `LoadoutOptions` takes `Platform`, `HookRuntime`, `ExecutionRoot` and `ReplaceModified`. `LoadoutPreview` exposes the location, underlying lifecycle preview, per-slice `LoadoutImpact`, applicability, scope notice and optional diagnostic. |
+| `apply_loadout`, `inspect_loadout`, `recover_loadout` | `ApplyLoadout`, `InspectLoadout`, `RecoverLoadout` | Apply and recovery use `LockOptions` and report a `LoadoutResult` with `Location`, `Lifecycle`, and `SyncRequired()`. Inspection takes the saved location and returns an `InstallationObservation`. |
 
 ### State stores
 

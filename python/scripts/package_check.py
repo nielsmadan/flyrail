@@ -104,6 +104,7 @@ def verify_artifacts(project: Path, wheel: Path, sdist: Path) -> None:
             "edits.json",
             "translations.json",
             "hooks.json",
+            "loadout.json",
         ):
             expected_sdist[f"spec/fixtures/{name}"] = (
                 REPOSITORY / "spec/fixtures" / name

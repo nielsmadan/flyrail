@@ -696,6 +696,9 @@ fn fresh(
     preview: &LifecyclePreview,
     created: &[Ancestor],
 ) -> Result<LifecyclePreview, TargetError> {
+    for condition in &preview.read_preconditions {
+        condition.require()?;
+    }
     let target = preview.target();
     let store = target.store().as_ref();
     require_index(
@@ -929,6 +932,7 @@ fn run_locked(preview: &LifecyclePreview, locks: &TransactionLocks<'_>) -> Insta
         refreshed.index(),
         &pending,
         &completed,
+        &refreshed.read_preconditions,
     ) {
         Ok(value) => value,
         Err(error) => {

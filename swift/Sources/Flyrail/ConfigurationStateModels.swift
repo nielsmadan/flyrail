@@ -323,12 +323,14 @@ public struct LifecyclePreview: Sendable, Hashable {
     public let resources: [ResourcePlan]
     public let error: TargetError?
     package let artifactsByResource: [ResourceRef: [RenderedArtifact]]
+    package let loadoutReads: [LoadoutRead]
 
     package init(
         bundleID: String, bundle: FlyrailBundle?, rendered: RenderedBundle, target: InstallationTarget,
         acquisition: Acquisition, replaceModified: Bool, index: Index?, generation: Generation?,
         resources: [ResourcePlan], error: TargetError? = nil,
         artifactsByResource: [ResourceRef: [RenderedArtifact]] = [:],
+        loadoutReads: [LoadoutRead] = [],
     ) throws {
         try validateIdentifier(bundleID, label: "bundle id")
         guard bundle == nil || bundle?.identity.id == bundleID else {
@@ -345,6 +347,7 @@ public struct LifecyclePreview: Sendable, Hashable {
         self.resources = resources
         self.error = error
         self.artifactsByResource = artifactsByResource
+        self.loadoutReads = loadoutReads
     }
 
     public var applicable: Bool {

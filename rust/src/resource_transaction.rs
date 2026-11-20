@@ -249,6 +249,7 @@ pub(crate) fn execute_transaction(
     previous: Option<&Index>,
     pending: &Index,
     completed: &Index,
+    read_preconditions: &[crate::loadout::ReadPrecondition],
 ) -> Result<TransactionOutcome, TargetError> {
     let store = locks.store;
     let expected_completion = Index::new(
@@ -301,6 +302,7 @@ pub(crate) fn execute_transaction(
     write_record(store, &locks.index_key, pending, previous)?;
     let mut applied = Vec::new();
     let mut unchanged = Vec::new();
+    let mut changed = std::collections::BTreeMap::new();
     for plan in plans {
         if plan.previous() == Some(plan.receipt()) && plan.before() == plan.after() {
             unchanged.push(plan.resource().clone());
@@ -329,6 +331,14 @@ pub(crate) fn execute_transaction(
             let prepared = prepare(store, plan, acquired)?;
             journal = Some(prepared.clone());
             require_index(store, &locks.index_key, Some(pending))?;
+            for condition in read_preconditions {
+                if let Some(revision) = changed.get(condition.physical()) {
+                    condition.require_binding()?;
+                    require(condition.physical(), revision)?;
+                } else {
+                    condition.require()?;
+                }
+            }
             publish_with(store, &prepared, || committed.set(true))?;
             cleanup(store, &prepared)
         })();
@@ -365,6 +375,13 @@ pub(crate) fn execute_transaction(
             });
         }
         applied.push(plan.resource().clone());
+        if let Some(journal) = journal.filter(|_| {
+            read_preconditions
+                .iter()
+                .any(|condition| condition.physical() == plan.resource().destination())
+        }) {
+            changed.insert(plan.resource().destination(), journal.published().clone());
+        }
     }
     if let Err(error) = inject("index-completion")
         .and_then(|()| write_record(store, &locks.index_key, completed, Some(pending)))
@@ -2176,8 +2193,8 @@ mod tests {
         .expect("pending");
         let completed = crate::resource_plan::completed_index("team", &"a".repeat(64), None)
             .expect("completed");
-        let outcome =
-            execute_transaction(&locks, &[plan], None, &pending, &completed).expect("transaction");
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed, &[])
+            .expect("transaction");
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
         assert_eq!(outcome.unchanged(), [] as [ResourceRef; 0]);
         assert!(outcome.error().is_none());
@@ -2223,7 +2240,7 @@ mod tests {
         let completed = crate::resource_plan::completed_index("team", &"a".repeat(64), None)
             .expect("completed");
         set_fault(Some("index-completion"));
-        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed)
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed, &[])
             .expect("partial transaction outcome");
         set_fault(None);
         assert_eq!(outcome.completed(), std::slice::from_ref(&reference));
@@ -2272,7 +2289,7 @@ mod tests {
             .expect("completed");
 
         set_fault(Some("cleanup"));
-        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed)
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed, &[])
             .expect("transaction outcome");
         set_fault(None);
 
@@ -2321,7 +2338,7 @@ mod tests {
             .expect("completed");
 
         set_fault(Some("receipt-reread"));
-        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed)
+        let outcome = execute_transaction(&locks, &[plan], None, &pending, &completed, &[])
             .expect("transaction outcome");
         set_fault(None);
 
@@ -2383,7 +2400,7 @@ mod tests {
                 .expect("completed");
 
             set_fault_after(seam, 1);
-            let outcome = execute_transaction(&locks, &plans, None, &pending, &completed)
+            let outcome = execute_transaction(&locks, &plans, None, &pending, &completed, &[])
                 .expect("transaction outcome");
             set_fault(None);
 

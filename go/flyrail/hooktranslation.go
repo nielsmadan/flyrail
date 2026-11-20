@@ -324,6 +324,10 @@ func hookNativeDirectory(rc RenderContext) (string, *translationFailure) {
 }
 
 func hookArtifacts(b *Bundle, rc RenderContext, assets map[string]string) (hookTranslation, *translationFailure) {
+	return hookArtifactsWithLauncher(b, rc, assets, false)
+}
+
+func hookArtifactsWithLauncher(b *Bundle, rc RenderContext, assets map[string]string, revisionLauncher bool) (hookTranslation, *translationFailure) {
 	var hooks []HookArtifact
 	for _, artifact := range b.artifacts {
 		if hook, ok := artifact.(HookArtifact); ok {
@@ -387,7 +391,8 @@ func hookArtifacts(b *Bundle, rc RenderContext, assets map[string]string) (hookT
 	for _, entry := range entries {
 		digest.Write(entry.Data)
 	}
-	revision := pathx.Join(base, "revisions", hex.EncodeToString(digest.Sum(nil)))
+	runtimeVersion := hex.EncodeToString(digest.Sum(nil))
+	revision := pathx.Join(base, "revisions", runtimeVersion)
 	runtimeID := identifier(b.ID(), string(agent), "runtime")
 	launcherID := identifier(b.ID(), string(agent), "launcher")
 	versionID := identifier(b.ID(), string(agent), "version")
@@ -442,7 +447,11 @@ func hookArtifacts(b *Bundle, rc RenderContext, assets map[string]string) (hookT
 		artifacts = append(artifacts, output.artifacts...)
 		dependencies = append(dependencies, output.dependencies...)
 	} else {
-		output, failure := nativeHookArtifacts(b, hooks, rc, nativeDirectory, base, runtimeID, launcherID, bridgeText, configText)
+		launcherBase, mode := base, DependencyStableReference
+		if revisionLauncher {
+			launcherBase, mode = pathx.Join(base, "launchers", runtimeVersion), DependencyRevision
+		}
+		output, failure := nativeHookArtifacts(b, hooks, rc, nativeDirectory, launcherBase, runtimeID, launcherID, bridgeText, configText, mode)
 		if failure != nil {
 			return hookTranslation{}, failure
 		}
@@ -506,7 +515,7 @@ type nativeHookEntry struct {
 	value Value
 }
 
-func nativeHookArtifacts(b *Bundle, hooks []HookArtifact, rc RenderContext, nativeDirectory, base, runtimeID, launcherID, bridgeText, configText string) (hookTranslation, *translationFailure) {
+func nativeHookArtifacts(b *Bundle, hooks []HookArtifact, rc RenderContext, nativeDirectory, base, runtimeID, launcherID, bridgeText, configText string, mode DependencyMode) (hookTranslation, *translationFailure) {
 	agent := rc.audience.agent
 	launcher := pathx.Join(base, "entry.mjs")
 	code := "try { const { native } = await import(" + bridgeText + "); const { default: config } = await import(" + configText +
@@ -566,7 +575,7 @@ func nativeHookArtifacts(b *Bundle, hooks []HookArtifact, rc RenderContext, nati
 		if err != nil {
 			return hookTranslation{}, invalidFailure(err)
 		}
-		dependency, err := NewDependency(hook.id, launcherID, DependencyStableReference)
+		dependency, err := NewDependency(hook.id, launcherID, mode)
 		if err != nil {
 			return hookTranslation{}, invalidFailure(err)
 		}

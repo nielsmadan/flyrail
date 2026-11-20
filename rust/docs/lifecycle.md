@@ -40,6 +40,31 @@ source-free removal.
 `RenderedArtifact::require_existing` prevents creation of an absent destination
 and binds the observed file through publication.
 
+## Global Loadout sources
+
+Present `LoadoutPreview::impact`, `scope_notice`, and any `diagnostic` alongside
+`summarize(plan.lifecycle())`. A shared-scope refusal reports the affected
+paths and harnesses. If the user accepts wider scope, select the destination
+again with shared scope enabled, then show the new preview before applying it.
+Other profiles and projects that use the source can receive the content.
+
+Source updates use `Acquisition::Conflict` and the same per-resource commit and
+recovery rules as direct installs. Apply revalidates the registration, profile
+chain, and observed routing inputs before source writes. Rediscover and preview
+again after a stale plan. Recover interrupted work at its recorded location
+before preparing a new preview.
+
+Persist `LoadoutLocation` from the preview alongside the bundle ID and state
+store identity before applying so interrupted writes remain recoverable. Save
+its canonical global root, profile, source name, and canonical source path.
+Reconstruct it with `LoadoutLocation::new`. Inspection, recovery, and removal
+address the stored location even if the registration changes or the original
+bundle is unavailable.
+
+Check `LoadoutResult::lifecycle()` for operation status and `sync_required()`
+for activation guidance. After source changes, including removal, the user or
+host application runs `loadout sync` so generated configuration reflects them.
+
 ## Ownership and replacement
 
 | `Acquisition` | Existing unowned selection | Intact removal |

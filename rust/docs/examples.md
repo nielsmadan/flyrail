@@ -63,3 +63,61 @@ and extracts the root and example crate archives in a checkout-local vendored
 registry, then builds and runs the example binaries without their source trees.
 It verifies packaged bytes, executable intent, source-free removal, lifecycle
 behavior, and the combined four-family flow.
+
+## Offer a global Loadout source
+
+Offer Loadout alongside direct destinations when discovery returns a usable setup
+with eligible sources. The example takes the harnesses the user requested and
+uses callbacks for the source choice and preview review. Returning `None` from
+the source chooser or declining the preview ends the flow without source writes.
+
+```rust
+use flyrail::{
+    Agent, Bundle, LoadoutDiscovery, LoadoutOptions, LoadoutPreview, LoadoutResult,
+    LoadoutSource, Platform, StateStore, apply_loadout, discover_loadout, preview_loadout,
+};
+use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
+
+fn offer_loadout(
+    bundle: &Bundle,
+    home: &Path,
+    environment: &BTreeMap<String, String>,
+    harnesses: &[Agent],
+    platform: Platform,
+    store: Arc<dyn StateStore>,
+    choose_source: impl FnOnce(&[&LoadoutSource]) -> Option<String>,
+    review: impl FnOnce(&LoadoutPreview) -> bool,
+) -> Result<Option<LoadoutResult>, Box<dyn std::error::Error>> {
+    let setup = match discover_loadout(home, None, environment)? {
+        LoadoutDiscovery::Absent { .. } => return Ok(None),
+        LoadoutDiscovery::Invalid { diagnostic, .. } => {
+            return Err(format!("{} at {}", diagnostic.message(), diagnostic.path().display()).into());
+        }
+        LoadoutDiscovery::Available(setup) => setup,
+    };
+    let sources = setup.eligible_sources(bundle, harnesses);
+    if sources.is_empty() {
+        return Ok(None);
+    }
+    let Some(source_name) = choose_source(&sources) else {
+        return Ok(None);
+    };
+    let destination = setup.select(&source_name, harnesses, false)?;
+    let plan = preview_loadout(bundle, &destination, store, LoadoutOptions::new(platform))?;
+    if review(&plan) && plan.applicable() {
+        return Ok(Some(apply_loadout(&plan, Duration::from_secs(2))));
+    }
+    Ok(None)
+}
+```
+
+In the review callback, show the planned edits, diagnostics, and scope. Before
+confirming an applicable plan, save its `location()` with the bundle ID and
+state store identity. If the user accepts a wider scope, select again with
+shared scope enabled and ask them to review the new preview.
+
+Use `result.lifecycle().status()` for the source operation and
+`result.sync_required()` to tell the user to run `loadout sync` when required.
+For uninstall, reopen the same store, pass the saved bundle ID and location to
+`preview_loadout_removal`, let the user review it, and call `apply_loadout`.
+See the [Loadout lifecycle](lifecycle.md#global-loadout-sources).

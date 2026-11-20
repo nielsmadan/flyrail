@@ -77,6 +77,11 @@ establishes host trust, discovery or activation; inspect render notices separate
 The [configuration API](https://github.com/nielsmadan/flyrail/blob/main/python/docs/api.md)
 shows an in-memory instruction example and explains explicit takeover/adoption.
 
+If a global Loadout setup is available, a host can offer an existing declared
+source as an installation destination. The user chooses the source and harness
+coverage. The host or user runs Loadout sync after source changes.
+See the [Loadout integration walkthrough](https://github.com/nielsmadan/flyrail/blob/main/python/docs/integration.md#install-into-a-global-loadout-source).
+
 ## Documentation and examples
 
 - [Public API](https://github.com/nielsmadan/flyrail/blob/main/python/docs/api.md)

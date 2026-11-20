@@ -39,6 +39,29 @@ source-free removal. Successful resource commits are preserved.
 created and binds the observed file through publication. It closes the gap
 between an application's existence check and the later write.
 
+## Loadout source lifecycle
+
+The Loadout adapter uses the same state store, claims, and per-resource
+transaction boundaries. It owns individual selector members and policy or server
+entries in shared documents, along with its source payloads. Apply checks the
+registry, profile chain, and relevant source inputs captured during discovery
+and planning. If routing inputs changed, rediscover the setup and build a fresh
+preview before retrying.
+
+Persist the bundle ID and `LoadoutLocation` with the identity of the application's
+state store. The locator holds the canonical Loadout `root`, `profile`,
+`source_name`, and canonical `source_path`. Recreate it from those fields when
+opening the same store later. `inspect_loadout` and `recover_loadout` take the
+bundle ID, recorded location and store. To remove, call
+`preview_loadout_removal` with the same three inputs, review the plan, then call
+`apply_loadout` with that preview. These operations use the recorded index and
+resource paths even when the original bundle or registration is gone.
+
+Use the result's `lifecycle` to check status and recovery evidence, and
+`sync_required` to signal a pending Loadout sync. The sync flag can be set
+after an unchanged retry or a partial result, so use the lifecycle status to
+decide whether the requested operation succeeded.
+
 ## Ownership and replacement
 
 | Acquisition | Existing unowned selection | Removal while intact |

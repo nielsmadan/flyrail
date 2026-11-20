@@ -97,3 +97,21 @@ bundle label still compare as a different desired generation.
 
 See the dated shared [capability and destination matrix](../../spec/translation.md)
 for exact host schemas and limitations.
+
+## Global Loadout source mappings
+
+Loadout destinations use the selected declared source and the effective profile
+at the Loadout 0.11.0 compatibility baseline. The preview rejects disabled
+slices, excluded source categories, conflicting ownership or source offerings,
+and unsupported route declarations. See the [shared specification](../../spec/loadout.md).
+
+| Bundle content | Source mapping and limits |
+| --- | --- |
+| Skills | Copy the named subtree and its authored assets to `skills/`. An owned skill policy selects the requested harnesses and sets `render = false`. Same-name offerings, overrides, and paths that Loadout would filter can block the preview. |
+| Instructions | Write a stable bundle-qualified Markdown fragment under `instructions/`. Append an owned `source/fragment` member to the existing array, preserving its order and substitutions. Shadowed fragments and selectors that are stored as a scalar are rejected. |
+| MCP | Write a named table in `mcp.toml` that reaches all active MCP slices. Stdio supports a command, arguments and literal environment values. HTTP supports a URL and a bearer variable name via `auth_env_var`. A command working directory, stdio environment references, and server names that collide across participating sources are rejected. |
+| Hooks | Claude, Codex and Cursor use selected JSON fragments under `hooks/`. OpenCode and Pi use bridge modules under `module-config/`. Runtime files and required support assets live in the chosen source. The preview rejects Droid hooks, unsupported events and outcomes, and JSON hook selectors shared across harnesses. |
+| Native artifacts | The supported routes are individual `.js`, `.mjs`, or `.ts` files for the OpenCode user CLI plugin directory or Pi user CLI extension directory, with a matching platform if specified. They map to the corresponding `module-config/` directories. Reserved Loadout hook filenames and other native destinations are rejected. |
+
+Copilot is outside the Loadout harness set. Source coverage and shared-manifest
+approval are checked during [planning](lifecycle.md#global-loadout-source-lifecycle).

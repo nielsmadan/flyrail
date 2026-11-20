@@ -47,6 +47,11 @@ dependencies. For instructions, MCP registrations, hooks, native payloads, or
 support assets, create a [`RenderContext`](docs/translation.md), call `render`,
 and use the general configuration lifecycle.
 
+If your application offers an existing global Loadout setup, use the
+[Loadout source workflow](docs/examples.md#offer-a-global-loadout-source) to let
+the user select a source, review the impact, and apply the source changes.
+Your application reports that Loadout sync is required.
+
 ## Documentation
 
 - [Public API](docs/api.md)

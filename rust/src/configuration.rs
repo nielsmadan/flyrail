@@ -1,6 +1,7 @@
 use crate::bundle::Bundle;
 use crate::editors::{Acquisition, EditStatus};
 use crate::json::Json;
+use crate::loadout::ReadPrecondition;
 use crate::models::OperationStatus;
 use crate::observations::TargetError;
 use crate::rendered::{Notice, RenderedBundle};
@@ -376,6 +377,7 @@ pub struct LifecyclePreview {
     generation: Option<Generation>,
     resources: Vec<ResourcePlan>,
     error: Option<TargetError>,
+    pub(crate) read_preconditions: Vec<ReadPrecondition>,
 }
 
 impl LifecyclePreview {
@@ -403,6 +405,7 @@ impl LifecyclePreview {
             generation,
             resources,
             error,
+            read_preconditions: Vec::new(),
         }
     }
 
@@ -449,6 +452,16 @@ impl LifecyclePreview {
         let mut result = self.clone();
         result.resources = resources;
         result
+    }
+
+    pub(crate) fn with_read_preconditions(mut self, conditions: Vec<ReadPrecondition>) -> Self {
+        self.read_preconditions = conditions;
+        self
+    }
+
+    pub(crate) fn with_error(mut self, error: TargetError) -> Self {
+        self.error = Some(error);
+        self
     }
 }
 

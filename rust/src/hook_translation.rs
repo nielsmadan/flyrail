@@ -320,7 +320,7 @@ fn object(
     Ok(Value::Object(ObjectValue::new(values)?))
 }
 
-fn asset_argument<S: std::hash::BuildHasher>(
+pub fn asset_argument<S: std::hash::BuildHasher>(
     value: &CommandArgument,
     assets: &HashMap<String, PathBuf, S>,
 ) -> Result<String, ValueError> {
@@ -339,7 +339,7 @@ fn asset_argument<S: std::hash::BuildHasher>(
     }
 }
 
-const fn event_name(agent: Agent, event: HookEvent) -> &'static str {
+pub const fn event_name(agent: Agent, event: HookEvent) -> &'static str {
     match (agent, event) {
         (Agent::Claude | Agent::Codex, HookEvent::SessionStart) => "SessionStart",
         (Agent::Claude | Agent::Codex, HookEvent::BeforeTool) => "PreToolUse",
@@ -375,11 +375,20 @@ const fn unsupported(
     Err(HookTranslationError::Unsupported(error))
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn hook_artifacts<S: std::hash::BuildHasher>(
     bundle: &Bundle,
     context: &RenderContext,
     assets: &HashMap<String, PathBuf, S>,
+) -> Result<HookTranslation, HookTranslationError> {
+    hook_artifacts_with_launcher(bundle, context, assets, false)
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn hook_artifacts_with_launcher<S: std::hash::BuildHasher>(
+    bundle: &Bundle,
+    context: &RenderContext,
+    assets: &HashMap<String, PathBuf, S>,
+    revision_launcher: bool,
 ) -> Result<HookTranslation, HookTranslationError> {
     let hooks: Vec<&HookArtifact> = bundle
         .artifacts()
@@ -522,7 +531,7 @@ pub fn hook_artifacts<S: std::hash::BuildHasher>(
     Json::Str(config_json).encode_python_compact(&mut quoted);
     entries.push(BundleEntry::file("config.mts", format!("import type {{ Config }} from './runner.mts';\nconst config: Config = JSON.parse({quoted});\nexport default config;\n").into_bytes())?);
     let digest = hex_digest(entries.iter().map(|entry| entry.data().unwrap_or_default()));
-    let revision = base.join("revisions").join(digest);
+    let revision = base.join("revisions").join(&digest);
     let runtime_id = identifier(&[bundle.id(), &agent.to_string(), "runtime"]);
     let launcher_id = identifier(&[bundle.id(), &agent.to_string(), "launcher"]);
     let version_id = identifier(&[bundle.id(), &agent.to_string(), "version"]);
@@ -596,7 +605,11 @@ pub fn hook_artifacts<S: std::hash::BuildHasher>(
             dependencies.push(Dependency::new(hook.id(), &runtime_id)?);
         }
     } else {
-        let launcher = base.join("entry.mjs");
+        let launcher = if revision_launcher {
+            base.join("launchers").join(digest).join("entry.mjs")
+        } else {
+            base.join("entry.mjs")
+        };
         let code = format!(
             "try {{ const {{ native }} = await import({bridge_text}); const {{ default: config }} = await import({config_text}); await native(config, process.argv[2]); }} catch {{ process.stderr.write('flyrail-hook:bootstrap\\n'); process.stdout.write('{{}}\\n'); }}\n"
         );
@@ -810,7 +823,11 @@ pub fn hook_artifacts<S: std::hash::BuildHasher>(
             dependencies.push(Dependency::with_mode(
                 hook.id(),
                 &launcher_id,
-                DependencyMode::StableReference,
+                if revision_launcher {
+                    DependencyMode::Revision
+                } else {
+                    DependencyMode::StableReference
+                },
             )?);
         }
     }

@@ -1,4 +1,8 @@
-# Detect agents and install per agent
+# Choose and install into a configuration destination
+
+[Install per agent](#detect-agents) · [Install into global Loadout](#install-into-a-global-loadout-source)
+
+## Detect agents
 
 `detect_agents` reports which coding agents a host can plausibly use; the rest of
 this walkthrough renders, applies, updates and removes a bundle for the agents the
@@ -239,3 +243,70 @@ section — and removing Claude's target cannot reach it regardless, since the
 two targets never shared an index. That separation from
 [one target per agent](#one-target-per-agent) is what let the developer offer,
 apply and now remove agents independently.
+
+## Install into a global Loadout source
+
+Discover at a destination-selection step, using the application's absolute home
+and environment snapshot. An available setup lets the app offer one or more
+declared sources for the bundle and harnesses it wants to configure. A missing
+registration leaves this offer unavailable. For an invalid setup, show its
+diagnostic so the user can tell why the offer is unavailable.
+
+```python
+from flyrail import (
+    Agent,
+    Bundle,
+    BundleIdentity,
+    InstructionArtifact,
+    apply_loadout,
+    discover_loadout,
+    preview_loadout,
+    summarize,
+)
+
+review_tools = Bundle.from_artifacts(
+    BundleIdentity("review-tools", "1"),
+    [InstructionArtifact("guide", "Run the project checks before approving changes.\n")],
+)
+harnesses = (Agent.CLAUDE,)
+
+
+def loadout_offer(home, env):
+    discovery = discover_loadout(home, env=env)
+    setup = discovery.setup
+    sources = () if setup is None else setup.eligible_sources(review_tools, harnesses)
+    return discovery, sources
+
+
+def plan_loadout_install(setup, source_name, store, platform, *, accept_shared_scope=False):
+    destination = setup.select(source_name, harnesses, accept_shared_scope=accept_shared_scope)
+    return preview_loadout(review_tools, destination, store, platform=platform)
+
+
+def apply_confirmed_loadout(plan, confirm, record_location):
+    summary = summarize(plan.lifecycle)
+    if plan.applicable and confirm(summary, plan.impact, plan.scope_notice):
+        record_location(review_tools.id, plan.location)
+        return apply_loadout(plan)
+```
+
+Pass the selected source's `name` to `plan_loadout_install`, along with your
+app's state store and a `Platform` value. This bundle requires an enabled Claude
+instruction slice and a source that offers instructions. Show the plan's
+diagnostic and reported impact when planning fails. If the diagnostic is
+`shared-scope`, show the affected paths and harnesses and ask whether the user
+accepts that scope. Build a new preview with `accept_shared_scope=True` only
+after they agree. Other profiles and projects using the same source may also
+receive the content.
+
+The app supplies `confirm` to show the proposed resource changes and scope
+before applying, and `record_location` to persist the bundle ID and the location
+with the corresponding state store. Check the returned `result.lifecycle.status`
+and resource results. A successful apply records the source changes. Use
+`result.sync_required` to tell the user the generated configuration needs a
+Loadout sync. Flyrail leaves that step to the app or user.
+
+Reuse the recorded location to inspect, recover, or remove the installation,
+even if the active Loadout registration has changed. See
+[Loadout lifecycle](lifecycle.md#loadout-source-lifecycle) and
+[supported source mappings](translation.md#global-loadout-source-mappings).

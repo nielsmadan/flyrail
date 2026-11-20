@@ -110,16 +110,17 @@ func (r InstallationResult) Failure() error {
 
 // LifecyclePreview is an immutable plan bound to every precondition it observed.
 type LifecyclePreview struct {
-	bundleID        string
-	bundle          *Bundle
-	rendered        *RenderedBundle
-	target          *InstallationTarget
-	acquisition     Acquisition
-	replaceModified bool
-	index           *index
-	generation      *generation
-	resources       []ResourcePlan
-	err             *TargetError
+	bundleID          string
+	bundle            *Bundle
+	rendered          *RenderedBundle
+	target            *InstallationTarget
+	acquisition       Acquisition
+	replaceModified   bool
+	index             *index
+	generation        *generation
+	resources         []ResourcePlan
+	err               *TargetError
+	readPreconditions []loadoutInput
 }
 
 // BundleID returns the bundle id the preview installs or removes.

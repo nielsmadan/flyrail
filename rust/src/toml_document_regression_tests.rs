@@ -10,6 +10,24 @@ fn path(names: &[&str]) -> Vec<PathPart> {
 }
 
 #[test]
+fn quoted_keys_and_strings_keep_utf8_codepoints() {
+    let source = "['café']\n'chemin-日本' = '~/répertoire/🍃'\n\"mots-é\" = \"à côté\"\n";
+    let document = TomlDocument::parse(source).expect("valid native TOML");
+    assert_eq!(
+        document
+            .native(&path(&["café", "chemin-日本"]))
+            .expect("literal string"),
+        Value::from("~/répertoire/🍃")
+    );
+    assert_eq!(
+        document
+            .native(&path(&["café", "mots-é"]))
+            .expect("basic string"),
+        Value::from("à côté")
+    );
+}
+
+#[test]
 fn malformed_native_tokens_report_reference_diagnostics() {
     let cases = [
         ("x={}\nx.y=2\n", "Key \"x\" already exists. at line 2 col 0"),
