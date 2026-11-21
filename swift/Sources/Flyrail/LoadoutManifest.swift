@@ -250,7 +250,7 @@ private func loadoutOverrides(
             let scoped = category == "module-config"
             guard (try? validateRelativePath(item, label: "source override")) != nil,
                   !parts.contains(".git"),
-                  scoped ? parts.count >= 2 && parts.first.flatMap({ loadoutAgent(String($0)) }) != nil : parts
+                  scoped ? (parts.count >= 2 && parts.first.flatMap { loadoutAgent(String($0)) } != nil) : parts
                       .count == 1
             else {
                 throw LoadoutDiagnostic("invalid-source", "Invalid source override \(item)", path)
