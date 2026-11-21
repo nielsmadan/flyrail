@@ -24,7 +24,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'dtolnay/rust-toolchain@v1'
-        - 'nielsmadan/curtaincall@v1.3.0'
+        - 'nielsmadan/curtaincall@v2.0.1'
         - 'oven-sh/setup-bun@v2.2.0'
     '.github/workflows/release-python.yml':
         - 'actions/checkout@v7.0.1'
@@ -33,7 +33,7 @@ workflows:
         - 'actions/setup-python@v7.1.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
-        - 'nielsmadan/curtaincall@v1.3.0'
+        - 'nielsmadan/curtaincall@v2.0.1'
         - 'oven-sh/setup-bun@v2.2.0'
     '.github/workflows/release-rust.yml':
         - 'actions/checkout@v7.0.1'
@@ -43,7 +43,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'dtolnay/rust-toolchain@v1'
-        - 'nielsmadan/curtaincall@v1.3.0'
+        - 'nielsmadan/curtaincall@v2.0.1'
         - 'oven-sh/setup-bun@v2.2.0'
         - 'rust-lang/crates-io-auth-action@v1.0.6'
     '.github/workflows/release-swift.yml':
@@ -54,7 +54,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'dtolnay/rust-toolchain@v1'
-        - 'nielsmadan/curtaincall@v1.3.0'
+        - 'nielsmadan/curtaincall@v2.0.1'
         - 'oven-sh/setup-bun@v2.2.0'
 dependencies:
     'actions/checkout@v7.0.1':
@@ -107,9 +107,9 @@ dependencies:
         commit: 'sha1-683b588c487a69d01f6c6ddf40f036ff682cc2c8'
         owner_id: 1940490
         repo_id: 260749683
-    'nielsmadan/curtaincall@v1.3.0':
-        ref: 'v1.3.0'
-        commit: 'sha1-8362e71ffa86422960d7e356f620085bcc62f925'
+    'nielsmadan/curtaincall@v2.0.1':
+        ref: 'v2.0.1'
+        commit: 'sha1-ce208fe4317ffda4315c37d2c2f942782966e867'
         owner_id: 701154
         repo_id: 1418051787
         uses:

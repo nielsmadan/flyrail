@@ -3,8 +3,8 @@
   "initial_version": "0.1.0",
   "sign": true,
   "tag_prefix": "v",
-  "paths": ["swift", "Package.swift", "Package.resolved"],
-  "checks": [
+  "history_paths": ["swift", "Package.swift", "Package.resolved"],
+  "preflight": [
     ["just", "-f", "swift/Justfile", "check"],
     ["just", "-f", "swift/Justfile", "check-integration"],
     ["just", "check-workflow"]
@@ -38,5 +38,5 @@
   "name": "Flyrail for Swift",
   "repository": "nielsmadan/flyrail",
   "workflow": "release-swift.yml",
-  "publication": "the Swift package tag and a Swift GitHub release"
+  "success_message": "the Swift package tag and a Swift GitHub release"
 }

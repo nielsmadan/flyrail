@@ -3,8 +3,8 @@
   "initial_version": "0.1.0",
   "sign": true,
   "tag_prefix": "go/v",
-  "paths": ["go"],
-  "checks": [
+  "history_paths": ["go"],
+  "preflight": [
     ["just", "-f", "go/Justfile", "check"],
     ["just", "-f", "go/Justfile", "check-integration"],
     ["just", "-f", "go/Justfile", "audit-dependencies"],
@@ -35,5 +35,5 @@
   "name": "Flyrail for Go",
   "repository": "nielsmadan/flyrail",
   "workflow": "release-go.yml",
-  "publication": "the Go module tag and a Go GitHub release"
+  "success_message": "the Go module tag and a Go GitHub release"
 }

@@ -107,7 +107,7 @@ def test_language_release_configs_scope_tags_history_and_changed_files(
     config = json.loads((REPOSITORY / component / "scripts" / "release.json").read_text())
     assert config["tag_prefix"] == prefix
     assert workflow.parse_tag(prefix + config["initial_version"]) == (component, (0, 1, 0))
-    assert config["paths"] == paths
+    assert config["history_paths"] == paths
     assert config["workflow"] == workflow_name
     [stage] = config["stages"]
     assert stage["files"] == files
@@ -613,7 +613,7 @@ def test_swift_release_workflow_runs_swift_gates_and_publishes_notes() -> None:
 
 def test_swift_release_runs_integration_gates_before_pushing_the_tag() -> None:
     config = json.loads((REPOSITORY / "swift/scripts/release.json").read_text())
-    assert ["just", "-f", "swift/Justfile", "check-integration"] in config["checks"]
+    assert ["just", "-f", "swift/Justfile", "check-integration"] in config["preflight"]
     assert "python/.venv/bin/python" in config["tools"]
 
 
@@ -666,6 +666,6 @@ def test_go_release_workflow_runs_go_gates_and_publishes_notes() -> None:
 
 def test_go_release_runs_integration_gates_before_pushing_the_tag() -> None:
     config = json.loads((REPOSITORY / "go/scripts/release.json").read_text())
-    assert ["just", "-f", "go/Justfile", "check-integration"] in config["checks"]
-    assert ["just", "-f", "go/Justfile", "audit-dependencies"] in config["checks"]
+    assert ["just", "-f", "go/Justfile", "check-integration"] in config["preflight"]
+    assert ["just", "-f", "go/Justfile", "audit-dependencies"] in config["preflight"]
     assert "python/.venv/bin/python" in config["tools"]

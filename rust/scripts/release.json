@@ -3,8 +3,8 @@
   "initial_version": "0.1.0",
   "sign": true,
   "tag_prefix": "rust-v",
-  "paths": ["rust", "rust-toolchain.toml"],
-  "checks": [
+  "history_paths": ["rust", "rust-toolchain.toml"],
+  "preflight": [
     ["just", "-f", "rust/Justfile", "check"],
     ["just", "check-workflow"]
   ],
@@ -43,5 +43,5 @@
   "name": "Flyrail for Rust",
   "repository": "nielsmadan/flyrail",
   "workflow": "release-rust.yml",
-  "publication": "the flyrail crate on crates.io and a Rust GitHub release"
+  "success_message": "the flyrail crate on crates.io and a Rust GitHub release"
 }
