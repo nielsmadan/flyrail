@@ -40,6 +40,15 @@ source-free removal.
 `RenderedArtifact::require_existing` prevents creation of an absent destination
 and binds the observed file through publication.
 
+`cancellable` runs a lifecycle, skill or Loadout call under a `Cancellation`
+token. Cancellation is checked before each lock attempt, during lock waits, and
+once more after every transaction lock is held; it is ignored from the first
+durable write onward, so a scope that reached it returns its real result.
+`Err(Cancelled)` means no index, receipt, journal or preparation was written, no destination content was published or removed, and no recovery ran. Lock files, store/staging/destination parent directories and authority records may persist, the same footprint a busy timeout leaves. A target that ends `Unchanged` or fails preflight leaves later
+targets cancellable. The internal 10 s `DirectoryStore` mutation lock inside a
+single store write is not cancellable, so cancellation latency can reach that
+bound.
+
 ## Global Loadout sources
 
 Present `LoadoutPreview::impact`, `scope_notice`, and any `diagnostic` alongside

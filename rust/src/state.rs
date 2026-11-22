@@ -15,7 +15,7 @@ use std::io;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(crate) fn index_key(bundle_id: &str, context_digest: &str) -> String {
     format!("index/{bundle_id}/{context_digest}")
@@ -129,10 +129,46 @@ pub(crate) fn store_lock<'a>(
     name: &str,
     timeout: Duration,
 ) -> Result<StoreLock<'a>, TargetError> {
+    if crate::cancellation::active() {
+        return cancellable_store_lock(store, name, timeout);
+    }
     store.lock(name, timeout).map_err(|error| match error {
         StoreError::Busy { .. } => state_failure(store, ErrorCode::Busy, error.to_string()),
         other => other.into(),
     })
+}
+
+const CANCELLATION_SLICE: Duration = Duration::from_millis(20);
+
+fn busy_failure(store: &dyn StateStore, name: &str) -> TargetError {
+    let error = StoreError::Busy {
+        name: name.to_owned(),
+    };
+    state_failure(store, ErrorCode::Busy, error.to_string())
+}
+
+fn cancellable_store_lock<'a>(
+    store: &'a dyn StateStore,
+    name: &str,
+    timeout: Duration,
+) -> Result<StoreLock<'a>, TargetError> {
+    let started = Instant::now();
+    loop {
+        if crate::cancellation::interrupted() {
+            return Err(busy_failure(store, name));
+        }
+        let remaining = timeout.saturating_sub(started.elapsed());
+        match store.lock(name, remaining.min(CANCELLATION_SLICE)) {
+            Ok(lock) => return Ok(lock),
+            Err(error @ StoreError::Busy { .. })
+                if timeout.saturating_sub(started.elapsed()).is_zero() =>
+            {
+                return Err(state_failure(store, ErrorCode::Busy, error.to_string()));
+            }
+            Err(StoreError::Busy { .. }) => {}
+            Err(other) => return Err(other.into()),
+        }
+    }
 }
 
 fn device(path: &Path) -> io::Result<u64> {

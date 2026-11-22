@@ -1,6 +1,7 @@
 pub mod artifacts;
 pub mod authority;
 pub mod bundle;
+pub mod cancellation;
 mod codec;
 mod config_manifest;
 pub mod configuration;
@@ -60,6 +61,7 @@ pub use artifacts::{
 };
 pub use authority::{AuthorityError, Claim, ClaimSelector, Ownership, ResourceAuthority};
 pub use bundle::{Bundle, BundleError};
+pub use cancellation::{Cancellation, Cancelled, cancellable};
 pub use codec::{decode, encode};
 pub use configuration::{
     ClaimObservation, InstallationObservation, InstallationResult, InstallationTarget,

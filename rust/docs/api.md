@@ -156,6 +156,33 @@ generation and current resources. `InstallationObservation::matches` additionall
 checks bundle identity, label, bundle digest, render digest, and rendering support.
 It is a pure comparison against the captured observation.
 
+### Cancellation
+
+`cancellable(&cancellation, || ...)` runs any lifecycle, skill or Loadout call on
+the current thread under a `Cancellation` token and returns `Result<R, Cancelled>`.
+Another thread calls `cancellation.cancel()`. Scopes nest, and an enclosing token
+also interrupts every scope inside it. With `bundle`, `rendered` and `target` from
+the example above:
+
+```rust
+use flyrail::{Acquisition, Cancellation, cancellable, sync};
+use std::time::Duration;
+
+let cancellation = Cancellation::new();
+let outcome = cancellable(&cancellation, || {
+    sync(&bundle, &rendered, &target, Acquisition::Conflict, false, Duration::from_secs(10))
+});
+```
+
+`Err(Cancelled)` means no index, receipt, journal or preparation was written, no destination content was published or removed, and no recovery ran. Lock files, store/staging/destination parent directories and authority records may persist, the same footprint a busy timeout leaves.
+
+A token that is already cancelled makes no lock attempt, and lock waits end early
+once the token is cancelled. The token is ignored once the first durable write
+begins, so such a scope runs to completion and returns its real result. A target
+that ends `Unchanged` or fails preflight leaves later targets cancellable. The
+internal 10 s `DirectoryStore` mutation lock inside a single store write is not
+cancellable, so cancellation latency can reach that bound.
+
 ## Global Loadout
 
 `discover_loadout` takes an absolute home path, an optional absolute configuration

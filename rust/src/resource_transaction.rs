@@ -299,6 +299,7 @@ pub(crate) fn execute_transaction(
             )),
         });
     }
+    crate::cancellation::mark_committed();
     write_record(store, &locks.index_key, pending, previous)?;
     let mut applied = Vec::new();
     let mut unchanged = Vec::new();
@@ -1350,6 +1351,7 @@ pub(crate) fn recover(
         ));
     }
     let Some(journal) = journal else {
+        crate::cancellation::mark_committed();
         return abandon(store, &preparation);
     };
     if journal.previous() == Some(journal.receipt()) {
@@ -1361,8 +1363,10 @@ pub(crate) fn recover(
     }
     let current = current_receipt(store, &journal)?;
     if current.as_ref() == Some(journal.receipt()) {
+        crate::cancellation::mark_committed();
         cleanup(store, &journal)
     } else if current.as_ref() == journal.previous() {
+        crate::cancellation::mark_committed();
         rollback(store, &journal)
     } else {
         Err(failure(

@@ -1027,9 +1027,28 @@ pub(crate) fn apply(preview: &LifecyclePreview, timeout: Duration) -> Installati
         &references,
         timeout,
     ) {
-        Ok(locks) => run_locked(preview, &locks),
+        Ok(locks) => {
+            if !crate::cancellation::begin_commit() {
+                return cancelled_result(preview.bundle_id(), preview.target());
+            }
+            run_locked(preview, &locks)
+        }
         Err(error) => failed_result(preview.bundle_id(), preview.target(), error, Vec::new()),
     }
+}
+
+fn cancelled_result(identifier: &str, target: &InstallationTarget) -> InstallationResult {
+    failed_result(
+        identifier,
+        target,
+        TargetError::new(
+            ErrorCode::Busy,
+            "operation cancelled before commit",
+            None,
+            None,
+        ),
+        Vec::new(),
+    )
 }
 
 fn unsupported_result(
@@ -1159,7 +1178,12 @@ pub(crate) fn recover_installation(
         Err(error) => return failed_result(identifier, target, build_failure(error), Vec::new()),
     };
     match acquire_transaction_locks(identifier, target, index.as_ref(), &references, timeout) {
-        Ok(locks) => recover_locked(identifier, target, index.as_ref(), &references, &locks),
+        Ok(locks) => {
+            if !crate::cancellation::begin_commit() {
+                return cancelled_result(identifier, target);
+            }
+            recover_locked(identifier, target, index.as_ref(), &references, &locks)
+        }
         Err(error) => failed_result(identifier, target, error, Vec::new()),
     }
 }
@@ -1189,6 +1213,9 @@ pub(crate) fn synchronize(
         Ok(value) => value,
         Err(error) => return failed_result(identifier, target, error, Vec::new()),
     };
+    if !crate::cancellation::begin_commit() {
+        return cancelled_result(identifier, target);
+    }
     let recovered = recover_locked(identifier, target, index.as_ref(), &refs, &locks);
     if recovered.error().is_some() {
         return recovered;
