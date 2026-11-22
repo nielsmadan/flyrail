@@ -1,0 +1,416 @@
+import { Bundle } from './bundle.js';
+import type { Acquisition, EditStatus, OperationStatus, ResourceKind } from './enums.js';
+import { ValueError, type TargetError } from './errors.js';
+import { installationHandle, type InstallationTarget } from './installation.js';
+import {
+  lockTimeout,
+  runMutation,
+  runReadOnly,
+  type CallOptions,
+  type LockOptions,
+  type NativeCancelToken,
+} from './internal/abort.js';
+import { awaitNative, callNative, type NativeResult } from './internal/call.js';
+import { attachHandle, handleOf } from './internal/handles.js';
+import type {
+  ClaimObservationWire,
+  InstallationObservationWire,
+  InstallationResultWire,
+  PreviewWire,
+  ResourcePlanWire,
+  ResourceRefWire,
+  ResourceResultWire,
+  ResourceObservationWire,
+} from './internal/models.js';
+import { frozenPaths, targetErrorFromWire } from './internal/results.js';
+import { requireText } from './internal/text.js';
+import type {
+  JsLifecycleOptions,
+  NativeBundle,
+  NativeLifecyclePreview,
+  NativeRenderedBundle,
+} from './native/binding.js';
+import { native } from './native/loader.js';
+import { adoptRenderedBundle, noticeFromWire, RenderedBundle, type Notice } from './rendered.js';
+
+export interface ResourceRef {
+  readonly destination: string;
+  readonly kind: ResourceKind;
+}
+
+export interface ResourcePlan {
+  readonly resource: ResourceRef;
+  readonly transactionDirectory: string;
+  readonly recoveryPaths: readonly string[];
+  readonly requireExisting: boolean;
+  readonly error: TargetError | null;
+}
+
+export interface ClaimObservation {
+  readonly claimId: string;
+  readonly bundleId: string;
+  readonly artifactId: string;
+  readonly version: string;
+  readonly bundleDigest: string;
+  readonly renderDigest: string;
+  readonly status: EditStatus;
+}
+
+export interface ResourceObservation {
+  readonly destination: string;
+  readonly claims: readonly ClaimObservation[];
+  readonly revisionDigest: string | null;
+  readonly error: TargetError | null;
+  readonly recoveryPaths: readonly string[];
+}
+
+export interface ResourceResult {
+  readonly resource: ResourceRef;
+  readonly status: OperationStatus;
+  readonly error: TargetError | null;
+  readonly recoveryPaths: readonly string[];
+}
+
+export interface InstallationResult {
+  readonly status: OperationStatus;
+  readonly observation: InstallationObservation;
+  readonly resources: readonly ResourceResult[];
+  readonly notices: readonly Notice[];
+  readonly error: TargetError | null;
+  readonly succeeded: boolean;
+}
+
+export interface PreviewOptions extends CallOptions {
+  readonly acquisition?: Acquisition;
+  readonly replaceModified?: boolean;
+}
+
+export interface SyncOptions extends LockOptions {
+  readonly acquisition?: Acquisition;
+  readonly replaceModified?: boolean;
+}
+
+export interface RemoveOptions extends LockOptions {
+  readonly replaceModified?: boolean;
+}
+
+const resourceRefFromWire = (wire: ResourceRefWire): ResourceRef =>
+  Object.freeze({ destination: wire.destination, kind: wire.kind });
+
+const resourcePlanFromWire = (wire: ResourcePlanWire): ResourcePlan =>
+  Object.freeze({
+    resource: resourceRefFromWire(wire.resource),
+    transactionDirectory: wire.transactionDirectory,
+    recoveryPaths: frozenPaths(wire.recoveryPaths),
+    requireExisting: wire.requireExisting,
+    error: targetErrorFromWire(wire.error),
+  });
+
+const claimObservationFromWire = (wire: ClaimObservationWire): ClaimObservation =>
+  Object.freeze({
+    claimId: wire.claimId,
+    bundleId: wire.bundleId,
+    artifactId: wire.artifactId,
+    version: wire.version,
+    bundleDigest: wire.bundleDigest,
+    renderDigest: wire.renderDigest,
+    status: wire.status,
+  });
+
+const resourceObservationFromWire = (wire: ResourceObservationWire): ResourceObservation =>
+  Object.freeze({
+    destination: wire.destination,
+    claims: Object.freeze(wire.claims.map(claimObservationFromWire)),
+    revisionDigest: wire.revisionDigest,
+    error: targetErrorFromWire(wire.error),
+    recoveryPaths: frozenPaths(wire.recoveryPaths),
+  });
+
+const resourceResultFromWire = (wire: ResourceResultWire): ResourceResult =>
+  Object.freeze({
+    resource: resourceRefFromWire(wire.resource),
+    status: wire.status,
+    error: targetErrorFromWire(wire.error),
+    recoveryPaths: frozenPaths(wire.recoveryPaths),
+  });
+
+interface PreviewParts {
+  readonly handle: NativeLifecyclePreview;
+  readonly bundle: Bundle | null;
+  readonly rendered: RenderedBundle;
+  readonly target: InstallationTarget;
+}
+
+let createPreview: (parts: PreviewParts) => LifecyclePreview;
+
+export class LifecyclePreview {
+  readonly bundleId: string;
+  readonly bundle: Bundle | null;
+  readonly rendered: RenderedBundle;
+  readonly target: InstallationTarget;
+  readonly acquisition: Acquisition;
+  readonly replaceModified: boolean;
+  readonly resources: readonly ResourcePlan[];
+  readonly error: TargetError | null;
+  readonly applicable: boolean;
+
+  private constructor(parts: PreviewParts) {
+    const wire: PreviewWire = callNative(() => parts.handle.snapshot());
+    this.bundleId = wire.bundleId;
+    this.bundle = parts.bundle;
+    this.rendered = parts.rendered;
+    this.target = parts.target;
+    this.acquisition = wire.acquisition;
+    this.replaceModified = wire.replaceModified;
+    this.resources = Object.freeze(wire.resources.map(resourcePlanFromWire));
+    this.error = targetErrorFromWire(wire.error);
+    this.applicable = wire.applicable;
+    attachHandle(this, parts.handle);
+    Object.freeze(this);
+  }
+
+  static {
+    createPreview = (parts) => new LifecyclePreview(parts);
+  }
+}
+
+let createObservation: (
+  wire: InstallationObservationWire,
+  target: InstallationTarget,
+) => InstallationObservation;
+
+export class InstallationObservation {
+  readonly bundleId: string;
+  readonly target: InstallationTarget;
+  readonly resources: readonly ResourceObservation[];
+  readonly isCurrent: boolean;
+  readonly pending: boolean;
+  readonly version: string | null;
+  readonly bundleDigest: string | null;
+  readonly renderDigest: string | null;
+  readonly error: TargetError | null;
+
+  private constructor(wire: InstallationObservationWire, target: InstallationTarget) {
+    this.bundleId = wire.bundleId;
+    this.target = target;
+    this.resources = Object.freeze(wire.resources.map(resourceObservationFromWire));
+    this.isCurrent = wire.isCurrent;
+    this.pending = wire.pending;
+    this.version = wire.version;
+    this.bundleDigest = wire.bundleDigest;
+    this.renderDigest = wire.renderDigest;
+    this.error = targetErrorFromWire(wire.error);
+    attachHandle(this, wire.handle);
+    Object.freeze(this);
+  }
+
+  matches(bundle: Bundle, rendered: RenderedBundle): boolean {
+    return (handleOf(this) as InstallationObservationWire['handle']).matches(
+      bundleHandle(bundle),
+      renderedHandle(rendered),
+    );
+  }
+
+  static {
+    createObservation = (wire, target) => new InstallationObservation(wire, target);
+  }
+}
+
+export const observationFromWire = (
+  wire: InstallationObservationWire,
+  target: InstallationTarget,
+): InstallationObservation => createObservation(wire, target);
+
+export const installationResultFromWire = (
+  wire: InstallationResultWire,
+  target: InstallationTarget,
+): InstallationResult =>
+  Object.freeze({
+    status: wire.status,
+    observation: createObservation(wire.observation, target),
+    resources: Object.freeze(wire.resources.map(resourceResultFromWire)),
+    notices: Object.freeze(wire.notices.map(noticeFromWire)),
+    error: targetErrorFromWire(wire.error),
+    succeeded: wire.status === 'applied' || wire.status === 'unchanged',
+  });
+
+export const previewFromHandle = (
+  handle: NativeLifecyclePreview,
+  bundle: Bundle | null,
+  rendered: RenderedBundle | null,
+  target: InstallationTarget,
+): LifecyclePreview =>
+  createPreview({
+    handle,
+    bundle,
+    rendered: rendered ?? adoptRenderedBundle(handle.rendered()),
+    target,
+  });
+
+export const bundleHandle = (bundle: Bundle): NativeBundle => {
+  const handle = handleOf(bundle);
+  if (!(bundle instanceof Bundle) || !(handle instanceof native.NativeBundle)) {
+    throw new ValueError('bundle must be a Bundle');
+  }
+  return handle;
+};
+
+const renderedHandle = (rendered: RenderedBundle): NativeRenderedBundle => {
+  const handle = handleOf(rendered);
+  if (!(rendered instanceof RenderedBundle) || !(handle instanceof native.NativeRenderedBundle)) {
+    throw new ValueError('rendered bundle must be a RenderedBundle');
+  }
+  return handle;
+};
+
+export const previewHandle = (preview: LifecyclePreview): NativeLifecyclePreview => {
+  const handle = handleOf(preview);
+  if (
+    !(preview instanceof LifecyclePreview) ||
+    !(handle instanceof native.NativeLifecyclePreview)
+  ) {
+    throw new ValueError('preview must be a LifecyclePreview');
+  }
+  return handle;
+};
+
+const lifecycleOptions = (
+  options:
+    | (LockOptions & { readonly acquisition?: Acquisition; readonly replaceModified?: boolean })
+    | undefined,
+  locks: boolean,
+): JsLifecycleOptions => ({
+  acquisition: options?.acquisition ?? 'conflict',
+  replaceModified: options?.replaceModified ?? false,
+  lockTimeoutMs: locks ? lockTimeout(options) : 0,
+});
+
+const bundleId = (id: string): string => requireText(id, 'bundle id');
+
+export function preview(
+  bundle: Bundle,
+  rendered: RenderedBundle,
+  target: InstallationTarget,
+  options?: PreviewOptions,
+): Promise<LifecyclePreview> {
+  return runReadOnly(options?.signal, async () => {
+    const handle = await awaitNative(
+      native.lifecyclePreview(
+        bundleHandle(bundle),
+        renderedHandle(rendered),
+        installationHandle(target),
+        lifecycleOptions(options, false),
+      ),
+    );
+    return previewFromHandle(handle, bundle, rendered, target);
+  });
+}
+
+export function previewRemoval(
+  id: string,
+  target: InstallationTarget,
+  options?: CallOptions & { readonly replaceModified?: boolean },
+): Promise<LifecyclePreview> {
+  return runReadOnly(options?.signal, async () => {
+    const handle = await awaitNative(
+      native.lifecyclePreviewRemoval(
+        bundleId(id),
+        installationHandle(target),
+        lifecycleOptions(options, false),
+      ),
+    );
+    return previewFromHandle(handle, null, null, target);
+  });
+}
+
+const mutate = (
+  signal: AbortSignal | undefined,
+  targetOf: () => InstallationTarget,
+  start: (token: NativeCancelToken | null) => Promise<NativeResult<InstallationResultWire>>,
+): Promise<InstallationResult> =>
+  runMutation(signal, async (token) =>
+    installationResultFromWire(await awaitNative(start(token)), targetOf()),
+  );
+
+export function applyPreview(
+  proposal: LifecyclePreview,
+  options?: LockOptions,
+): Promise<InstallationResult> {
+  return mutate(
+    options?.signal,
+    () => proposal.target,
+    (token) =>
+      native.lifecycleApplyPreview(previewHandle(proposal), lifecycleOptions(options, true), token),
+  );
+}
+
+export function sync(
+  bundle: Bundle,
+  rendered: RenderedBundle,
+  target: InstallationTarget,
+  options?: SyncOptions,
+): Promise<InstallationResult> {
+  return mutate(
+    options?.signal,
+    () => target,
+    (token) =>
+      native.lifecycleSync(
+        bundleHandle(bundle),
+        renderedHandle(rendered),
+        installationHandle(target),
+        lifecycleOptions(options, true),
+        token,
+      ),
+  );
+}
+
+export function recoverInstallation(
+  id: string,
+  target: InstallationTarget,
+  options?: LockOptions,
+): Promise<InstallationResult> {
+  return mutate(
+    options?.signal,
+    () => target,
+    (token) =>
+      native.lifecycleRecoverInstallation(
+        bundleId(id),
+        installationHandle(target),
+        lifecycleOptions(options, true),
+        token,
+      ),
+  );
+}
+
+export function inspectInstallation(
+  id: string,
+  target: InstallationTarget,
+  options?: CallOptions,
+): Promise<InstallationObservation> {
+  return runReadOnly(options?.signal, async () =>
+    createObservation(
+      await awaitNative(
+        native.lifecycleInspectInstallation(bundleId(id), installationHandle(target)),
+      ),
+      target,
+    ),
+  );
+}
+
+export function remove(
+  id: string,
+  target: InstallationTarget,
+  options?: RemoveOptions,
+): Promise<InstallationResult> {
+  return mutate(
+    options?.signal,
+    () => target,
+    (token) =>
+      native.lifecycleRemove(
+        bundleId(id),
+        installationHandle(target),
+        lifecycleOptions(options, true),
+        token,
+      ),
+  );
+}

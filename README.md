@@ -13,9 +13,10 @@ receipt and transaction formats in `spec/`.
 | Rust | Alpha; Rust stable | [API and quickstart](rust/README.md) |
 | Swift | Alpha; macOS 13+, Swift 6.2+ | [Installation and quickstart](swift/README.md) |
 | Go | Alpha; Go 1.27+, macOS and Linux | [Quickstart and API](go/README.md) |
+| TypeScript | Alpha; Node 24.14+, Bun 1.4.2+, Electron (tested on macOS; Linux Electron untested); binding over the Rust crate; unreleased (local two-tarball install) | [Quickstart and API](typescript/README.md) |
 
-A TypeScript implementation can use the same contracts and conformance
-fixtures. Its public API should be native to the language.
+The TypeScript package is a binding over the Rust crate, so it shares the
+durable formats by construction instead of reimplementing them.
 
 ## Repository
 
@@ -23,6 +24,7 @@ fixtures. Its public API should be native to the language.
 - `rust/`: Rust crate and tooling.
 - `swift/`: Swift package sources, tests and tooling; `Package.swift` is at the root.
 - `go/`: Go module, example CLIs, documentation and tooling.
+- `typescript/`: npm package, napi-rs addon over the Rust crate, tests, examples, documentation and tooling.
 - `spec/`: language-independent formats, recovery protocol and shared fixtures.
 - `.github/`: repository CI and dependency maintenance.
 
@@ -46,7 +48,7 @@ content and reports host prerequisites and activation separately.
 ## Development
 
 `just setup` synchronizes the locked environment and installs the Git hooks.
-`just check` runs the fast Python, Rust and Go gates; `check-integration` and
+`just check` runs the fast Python, Rust, Go and TypeScript gates; `check-integration` and
 `check-package` also cover Swift, and `audit-dependencies` and `check-workflow`
 are repository-wide:
 
@@ -71,7 +73,8 @@ release commit and tag; `--dry-run` stops after the previews.
 Without just, run `python3 python/scripts/check.py check` from this directory.
 See [Python development](python/docs/development.md),
 [Rust development](rust/docs/development.md),
-[Go development](go/docs/development.md) and [Swift](swift/README.md) for
+[Go development](go/docs/development.md),
+[TypeScript development](typescript/docs/development.md) and [Swift](swift/README.md) for
 tool setup and the individual build/test commands. Generated logs, test
 installations, reports and build outputs stay in ignored local directories.
 

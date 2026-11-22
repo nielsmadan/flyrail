@@ -35,3 +35,6 @@ them, are described under "Interop drivers" in [porting guidance](porting.md#int
 `fixtures/loadout.json` supplies the global registration, profile and MCP preview vectors.
 `fixtures/differential.tsv` is the shared differential corpus that the
 implementations' differential drivers consume.
+
+The TypeScript package is a binding over the Rust crate rather than a separate
+implementation; see [Bindings](porting.md#bindings).

@@ -28,6 +28,7 @@ jobs:
       rust: ${{ steps.select.outputs.rust }}
       swift: ${{ steps.select.outputs.swift }}
       go: ${{ steps.select.outputs.go }}
+      typescript: ${{ steps.select.outputs.typescript }}
       workflow: ${{ steps.select.outputs.workflow }}
     steps:
       # Rust tests compare against Python, and Swift and Go tests against Python and Rust.
@@ -58,6 +59,9 @@ jobs:
               - *rust
               - 'go/**'
               - 'swift/scripts/**'
+            typescript:
+              - *rust
+              - 'typescript/**'
             workflow:
               - '.github/**'
       - name: Select affected checks
@@ -69,16 +73,18 @@ jobs:
           RUST: ${{ steps.filter.outputs.rust }}
           SWIFT: ${{ steps.filter.outputs.swift }}
           GO: ${{ steps.filter.outputs.go }}
+          TYPESCRIPT: ${{ steps.filter.outputs.typescript }}
           WORKFLOW: ${{ steps.filter.outputs.workflow }}
         run: |
           if [ "$RUN_ALL" = true ]; then
-            PYTHON=true RUST=true SWIFT=true GO=true WORKFLOW=true
+            PYTHON=true RUST=true SWIFT=true GO=true TYPESCRIPT=true WORKFLOW=true
           fi
           {
             echo "python=$PYTHON"
             echo "rust=$RUST"
             echo "swift=$SWIFT"
             echo "go=$GO"
+            echo "typescript=$TYPESCRIPT"
             echo "workflow=$WORKFLOW"
           } >> "$GITHUB_OUTPUT"
 
@@ -597,6 +603,172 @@ jobs:
           (cd go && go mod verify)
           python -I -B go/scripts/package_qa.py
 
+  typescript-check:
+    name: TypeScript (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.typescript == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cache/cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cache/typescript/target
+      npm_config_cache: ${{ github.workspace }}/.cache/npm
+      FLYRAIL_REQUIRE_FIXTURES: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.21.0'
+          package-manager-cache: false
+      - name: Require pinned Node prerequisites
+        run: |
+          npm install --global npm@11.19.0
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: typescript/native -> ../../.cache/typescript/target
+      - name: TypeScript install
+        working-directory: typescript
+        run: npm ci
+      - name: TypeScript dependency check
+        working-directory: typescript
+        run: |
+          npm ls --depth=0
+          python3 -I -B scripts/check_cargo_lock.py
+      - name: TypeScript native build
+        working-directory: typescript
+        run: npm run build:native
+      - name: TypeScript formatting
+        working-directory: typescript
+        run: |
+          npm run format:check
+          cargo fmt --check --manifest-path native/Cargo.toml
+      - name: TypeScript lint
+        working-directory: typescript
+        run: |
+          npm run lint
+          cargo clippy --manifest-path native/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: TypeScript type check
+        working-directory: typescript
+        run: npm run typecheck
+      - name: TypeScript tests
+        working-directory: typescript
+        run: npm test
+      - name: TypeScript build
+        working-directory: typescript
+        run: npm run build
+
+  typescript-integration:
+    name: TypeScript integration (${{ matrix.os }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cache/cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cache/typescript/target
+      npm_config_cache: ${{ github.workspace }}/.cache/npm
+      FLYRAIL_REQUIRE_FIXTURES: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: '0.12.13'
+          enable-cache: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.21.0'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: '1.4.2'
+          no-cache: true
+      - name: Require pinned TypeScript prerequisites
+        run: |
+          npm install --global npm@11.19.0
+          python -c "import sys; assert sys.version_info[:2] == (3, 14)"
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
+          test "$(bun --version)" = "1.4.2"
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          workspaces: |
+            rust
+            typescript/native -> ../../.cache/typescript/target
+      - name: Provision pinned Python differential environment
+        run: python python/scripts/check.py sync
+      - name: Assert differential Python prerequisites
+        run: python/.venv/bin/python -c "import flyrail, tomlkit"
+      - name: Build the Rust interop driver
+        run: env -u CARGO_TARGET_DIR cargo build --locked --manifest-path rust/Cargo.toml --example interop --features interop-test-seams
+      - name: TypeScript install
+        working-directory: typescript
+        run: npm ci
+      - name: TypeScript dependency check
+        working-directory: typescript
+        run: |
+          npm ls --depth=0
+          python3 -I -B scripts/check_cargo_lock.py
+      - name: TypeScript native build
+        working-directory: typescript
+        run: npm run build:native
+      - name: TypeScript formatting
+        working-directory: typescript
+        run: |
+          npm run format:check
+          cargo fmt --check --manifest-path native/Cargo.toml
+      - name: TypeScript lint
+        working-directory: typescript
+        run: |
+          npm run lint
+          cargo clippy --manifest-path native/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: TypeScript type check
+        working-directory: typescript
+        run: npm run typecheck
+      - name: TypeScript tests
+        working-directory: typescript
+        run: npm test
+      - name: TypeScript integration tests
+        working-directory: typescript
+        run: npm run test:integration
+      - name: TypeScript Bun smoke
+        working-directory: typescript
+        run: bun run test/runtime/bun-smoke.ts
+      - name: TypeScript release addon and build
+        working-directory: typescript
+        run: |
+          npm run build:native:release
+          npm run build
+      # Electron's main process runs unsandboxed on macos-26; package QA exits 3 when a step is blocked.
+      - name: TypeScript package QA
+        run: python -I -B typescript/scripts/package_qa.py
+
   audit-dependencies:
     name: Dependency audit
     needs: changes
@@ -658,6 +830,8 @@ jobs:
       - swift-integration
       - go-check
       - go-integration
+      - typescript-check
+      - typescript-integration
       - audit-dependencies
       - check-workflow
     runs-on: ubuntu-24.04

@@ -1,9 +1,9 @@
 # Native implementation notes
 
-Python is the first implementation. Rust, Swift and Go ports exist, and a
-TypeScript port should embed naturally in its host while sharing the contracts
-in this directory. Keep implementation and tooling under the corresponding
-language directory.
+Python is the first implementation. Rust, Swift and Go ports exist. TypeScript
+is not a port but a binding whose engine is the Rust crate, so its durable
+formats are Rust's by construction. Keep implementation and tooling under the
+corresponding language directory.
 
 ## Shared contracts
 
@@ -92,6 +92,16 @@ document through separate stores. None of the
 ports may infer cross-resource atomicity or power-loss durability from shared
 receipt formats.
 
+## Bindings
+
+A binding reuses another implementation's engine instead of reimplementing the
+contracts, so it needs no differential or format port of its own. The TypeScript
+binding runs two sanity checks instead: a TypeScript installation and a Rust
+`interop` driver operate on one store in both directions (including an
+interrupted update and recovery), and TypeScript and Python applications share
+one document through separate stores. It also relocates the shared state-record
+fixtures and requires the engine's canonical encoding to be a fixed point.
+
 ## Interop drivers
 
 Each implementation ships a command-line driver that performs one lifecycle
@@ -122,6 +132,7 @@ Rust run the value and document-editing comparisons through the separate
 | Rust | `rust/examples/interop.rs`, `rust/examples/differential.rs` |
 | Swift | `swift/Sources/FlyrailInterop` |
 | Go | `go/internal/cmd/flyrail-interop`, driven by the scripts in `go/scripts/` |
+| TypeScript | none; it drives the Rust and Python drivers (see [Bindings](#bindings)) |
 
 `spec/fixtures/interop-source-options.json` lists the options every driver's
 `write --source` must reject before touching the store.

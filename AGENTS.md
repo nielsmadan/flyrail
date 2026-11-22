@@ -3,6 +3,8 @@
 Flyrail is a multi-language library project. Language implementations belong in
 language directories; shared formats and conformance fixtures belong in spec/.
 Read the implementation's AGENTS.md before changing its code or tooling.
+`typescript/` is a napi-rs binding over the Rust crate in `rust/`, with no release
+automation yet.
 
 Keep repository files useful to contributors and package consumers. Commit source,
 meaningful tests, synthetic fixtures, examples, public documentation and build/CI
@@ -12,6 +14,10 @@ and machine-specific evidence only under ignored .cache/. Never package those fi
 Use relative or computed paths. Do not commit developer home directories, temporary
 run identifiers or local environment details. Keep generated outputs and caches
 ignored. Do not alter HOME, global tools, hooks or real agent installations.
+
+`typescript/` is a napi-rs binding over `rust/`, not a port: changes to `rust/` must keep the
+`typescript` checks green. Electron is tested on macOS; Linux Electron is untested. It has no
+release automation.
 
 The root Justfile delegates to implemented languages. Each language releases
 independently from `<language>/scripts/release.json` through `just release

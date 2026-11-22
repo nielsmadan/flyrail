@@ -1,0 +1,12 @@
+{
+  "name": "flyrail-electron-consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "devDependencies": {
+    "@electron/asar": "4.3.1",
+    "electron": "45.2.3",
+    "esbuild": "0.28.2"
+  }
+}

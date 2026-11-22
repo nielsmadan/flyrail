@@ -25,7 +25,9 @@ updates:
           - "minor"
 
   - package-ecosystem: "cargo"
-    directory: "/rust"
+    directories:
+      - "/rust"
+      - "/typescript/native"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -38,6 +40,7 @@ updates:
       - "nielsmadan"
     groups:
       non-breaking:
+        group-by: dependency-name
         patterns:
           - "*"
         update-types:
@@ -86,6 +89,26 @@ updates:
 
   - package-ecosystem: "gomod"
     directory: "/go"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    assignees:
+      - "nielsmadan"
+    groups:
+      non-breaking:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "npm"
+    directory: "/typescript"
     schedule:
       interval: "weekly"
       day: "monday"

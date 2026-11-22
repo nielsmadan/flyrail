@@ -1,0 +1,94 @@
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+root := clean(justfile_directory() + "/..")
+linux_image := "node:24.21.0-bookworm"
+
+export CARGO_HOME := root + "/.cache/cargo-home"
+export CARGO_TARGET_DIR := root + "/.cache/typescript/target"
+export npm_config_cache := root + "/.cache/npm"
+export FLYRAIL_REQUIRE_FIXTURES := "1"
+
+default:
+    @just --list
+
+setup:
+    npm ci
+
+deps-check:
+    @npm ls --depth=0 > /dev/null 2>&1 || { echo "node_modules does not match package-lock.json: run just setup" >&2; exit 1; }
+    python3 -I -B scripts/check_cargo_lock.py
+
+format:
+    npm run format
+    cargo fmt --manifest-path native/Cargo.toml
+
+format-check:
+    npm run format:check
+    cargo fmt --check --manifest-path native/Cargo.toml
+
+lint:
+    npm run lint
+    cargo clippy --manifest-path native/Cargo.toml --all-targets --all-features -- -D warnings
+
+native-build:
+    npm run build:native
+
+native-build-release:
+    npm run build:native:release
+
+typecheck:
+    npm run typecheck
+
+test:
+    npm test
+
+build:
+    npm run build
+
+check: deps-check native-build format-check lint typecheck test
+
+interop-driver:
+    @test -x ../python/.venv/bin/python || { echo "the Python environment is missing: run just setup at the repository root" >&2; exit 1; }
+    env -u CARGO_TARGET_DIR cargo build --locked --manifest-path ../rust/Cargo.toml --example interop --features interop-test-seams
+
+check-integration: check interop-driver tools
+    npm run test:integration
+    just bun-smoke
+
+bun-smoke: tools
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bun="$(python3 -I -B scripts/tools.py bun 2> /dev/null || command -v bun || true)"
+    if [[ -z "$bun" ]]; then echo "bun is required for the Bun smoke script" >&2; exit 1; fi
+    echo "bun $("$bun" --version)"
+    "$bun" run test/runtime/bun-smoke.ts
+
+tools:
+    @python3 -I -B scripts/tools.py bun > /dev/null || echo "warning: the pinned Bun could not be installed; using bun from PATH" >&2
+
+check-package: native-build-release build
+    python3 -I -B scripts/package_qa.py
+
+pack dir=(root + "/.cache/typescript/pack"): native-build-release build
+    python3 -I -B scripts/package_qa.py --pack-only "{{dir}}"
+
+check-linux:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cache="{{root}}/.cache/typescript/linux"
+    mkdir -p "$cache"
+    docker run --rm --user "$(id -u):$(id -g)" \
+        --volume "{{root}}:/flyrail:ro" --volume "$cache:/cache" --workdir /cache \
+        --env HOME=/cache/home --env TMPDIR=/cache/tmp \
+        --env RUSTUP_HOME=/cache/rustup --env CARGO_HOME=/cache/cargo-home \
+        --env CARGO_TARGET_DIR=/cache/target --env npm_config_cache=/cache/npm \
+        --env FLYRAIL_REQUIRE_FIXTURES=1 \
+        {{linux_image}} bash -euo pipefail /flyrail/typescript/scripts/check_linux.sh
+
+lock:
+    npm install --package-lock-only --ignore-scripts
+    cp ../rust/Cargo.lock native/Cargo.lock
+    cargo metadata --manifest-path native/Cargo.toml --format-version 1 > /dev/null
+    cargo update --manifest-path native/Cargo.toml -p napi-derive --precise 3.7.0
+    cargo update --manifest-path native/Cargo.toml -p napi --precise 3.16.1
+    cargo update --manifest-path native/Cargo.toml -p napi-derive-backend --precise 7.0.0

@@ -16,3 +16,9 @@ build/
 dist/
 .DS_Store
 *.log
+node_modules/
+typescript/build/
+typescript/src/native/binding.d.ts
+*.node
+*.tgz
+typescript/native/target/

@@ -1,0 +1,6 @@
+dist
+build
+node_modules
+native/target
+package-lock.json
+src/native/binding.d.ts

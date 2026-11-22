@@ -4,18 +4,21 @@ default: check
 
 setup:
     {{python}} python/scripts/check.py sync
+    cd typescript && just setup
     lefthook install
 
 check:
     {{python}} python/scripts/check.py check
     cd rust && just check
     cd go && just check
+    cd typescript && just check
 
 check-integration:
     {{python}} python/scripts/check.py check-integration
     cd rust && just check-integration
     cd swift && just check-integration
     cd go && just check-integration
+    cd typescript && just check-integration
 
 format:
     {{python}} python/scripts/check.py format
@@ -34,6 +37,7 @@ check-package:
     cd rust && just check-package
     cd swift && just check-package
     cd go && just check-package
+    cd typescript && just check-package
 
 audit-dependencies:
     {{python}} python/scripts/check.py audit-dependencies

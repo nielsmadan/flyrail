@@ -139,11 +139,12 @@ job are the source of truth:
 
 | Changed paths | Jobs |
 | --- | --- |
-| `python/**`, `spec/**`, `Justfile`, `lefthook.yml` | Python, dependency audit, Rust, Swift, Go |
-| `rust/**`, `rust-toolchain.toml` | Rust, Swift, Go |
+| `python/**`, `spec/**`, `Justfile`, `lefthook.yml` | Python, dependency audit, Rust, Swift, Go, TypeScript |
+| `rust/**`, `rust-toolchain.toml` | Rust, Swift, Go, TypeScript |
 | `swift/**`, `Package.swift`, `Package.resolved` | Swift |
 | `swift/scripts/**` | Swift, Go |
 | `go/**` | Go |
+| `typescript/**` | TypeScript |
 | `.github/workflows/**` | all, including workflow validation |
 | other `.github/**` | workflow validation |
 
@@ -151,11 +152,13 @@ Pull requests listing 3000 or more files run every job, because the pull request
 files API stops there. The `CI result` job passes when every selected job passed
 or was skipped; make it the single required status check. The Swift job runs on
 macOS 26 with pinned SwiftFormat and SwiftLint and counts toward `CI result`.
-The Go job runs on Ubuntu 24.04 and macOS 26 with Go 1.27.3 and also counts.
+The Go job runs on Ubuntu 24.04 and macOS 26 with Go 1.27.3 and also counts, as does the
+TypeScript job (Ubuntu 24.04 and macOS 26, Node 24.21.0, the Rust toolchain file).
 The integration matrix, the Swift integration job (macOS 26: differential and
 interop scripts, packaged hook runtime and package QA) and the Go integration
 job (Ubuntu 24.04 and macOS 26: race-enabled tests, differential and interop
-scripts and package QA) run on the nightly schedule and on workflow dispatch,
+scripts and package QA) and the TypeScript integration job (Ubuntu 24.04 and macOS 26: integration
+tests, Bun smoke and package QA, with Electron on macOS) run on the nightly schedule and on workflow dispatch,
 and `CI result` requires them too. The
 release workflow runs both tiers on every supported platform, so no release
 publishes without integration results.
@@ -167,7 +170,7 @@ SwiftFormat and SwiftLint pins live once, in the
 [`setup-swift-tools`](../../.github/actions/setup-swift-tools/action.yml) action.
 
 [Dependabot](../../.github/dependabot.yml) groups weekly updates per ecosystem, with a
-7-day cooldown: Python under `/python`, Cargo under `/rust`, Go modules under `/go`, Swift
+7-day cooldown: Python under `/python`, Cargo under `/rust`, Go modules under `/go`, npm under `/typescript`, Cargo under `/typescript/native`, Swift
 packages at the root, and GitHub Actions. Its action bump pull requests update the lockfile; run `gh actions-lock` after
 adding a workflow or an action. Keep Hatchling's build and dev pins consistent. Update the uv,
 actionlint, SwiftFormat and SwiftLint versions and checksums explicitly; they are
