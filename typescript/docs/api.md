@@ -8,11 +8,30 @@ the TypeScript surface.
 
 ## Package
 
-`flyrail` is ESM only (`"type": "module"`, no `require` condition). The single
-entry point `flyrail` exports every public class, function and type. It needs
+`flyrail` is ESM only (`"type": "module"`, no `require` condition). The entry
+point `flyrail` exports every public class, function and type. It needs
 Node.js 24.14 or newer, Bun 1.4.2 or newer, or an Electron main process, on
 macOS or Linux (glibc) for arm64 or x64. Loading the package loads the native
-addon once; a missing or unsupported addon throws `NativeLoadError`.
+addon once; a missing or unsupported addon makes the import itself reject with
+`NativeLoadError`.
+
+The subpath `flyrail/errors` exports the [error classes](#errors) without
+loading the addon, so a host can import `NativeLoadError` and degrade
+gracefully when the addon is missing:
+
+```ts
+import { NativeLoadError } from 'flyrail/errors';
+
+const flyrail = await import('flyrail').catch((error: unknown) => {
+  if (error instanceof NativeLoadError) {
+    return null;
+  }
+  throw error;
+});
+```
+
+Both entry points share one copy of each class, so `instanceof` agrees between
+them.
 
 ## Conventions
 
@@ -42,7 +61,14 @@ only where they carry methods or a native handle.
 **Input validation.** Every path argument must be absolute (POSIX
 `isAbsolute`), or the call throws `ValueError("<label> must be an absolute path")`.
 Strings that cross into Rust must be well-formed UTF-16
-(`String.prototype.isWellFormed`), or the call throws `ValueError`. Hook text is
+(`String.prototype.isWellFormed`), or the call throws `ValueError`. An argument
+that must be a flyrail class instance (a `Bundle`, `RenderContext`, `Target`,
+artifact, store and so on) throws a `ValueError` naming the argument, such as
+`bundle must be a Bundle`, when given anything else. `Target.equals`,
+`Claim.equals` and `InstallationTarget.equals` return `false` for a value of
+another type instead; `EnvRef`, `BundleIdentity`, `DateValue`, `TimeValue` and
+`DateTimeValue` `equals` compare fields structurally and throw `TypeError` for
+`null`. Hook text is
 exact UTF-16 and may contain lone surrogates. The library takes home,
 environment, PATH and working directory only as explicit arguments and never
 reads them from the process.
@@ -62,13 +88,18 @@ starts.
 
 - Mutations (`applyPreview`, `sync`, `recoverInstallation`, `remove`,
   `install`, `update`, `uninstall`, `applyLoadout`, `recoverLoadout`) reject
-  with `signal.reason` only when the native call reports Rust's
-  `Err(Cancelled)`. `Err(Cancelled)` means no index, receipt, journal or preparation was written,
-  no destination content was published or removed, and no recovery ran. Lock
-  files, store/staging/destination parent directories and authority records
-  (which the transaction protocol retains permanently anyway) may persist, the
-  same footprint a busy timeout leaves. Otherwise the call resolves with its
-  real result, even when the signal fired after the commit started.
+  with `signal.reason` when the abort is seen before the native call is
+  dispatched, when a worker dequeues it, during a lock wait, or at the check
+  right after the locks are acquired (the last two are Rust's
+  `Err(Cancelled)`). Then no index, receipt, journal or preparation was
+  written, no destination content was published or removed, and no recovery
+  ran. Lock files, store/staging/destination parent directories and authority
+  records (which the transaction protocol retains permanently anyway) may
+  persist, the same footprint a busy timeout leaves. An abort once any
+  target's first durable write has begun is not observed: the call resolves
+  with its real result, whether or not it then writes anything. An earlier
+  target of a multi-target call that ends `unchanged` or fails preflight leaves
+  later targets' checkpoints active.
 - Read-only calls (previews, inspections, loading, discovery, store `read` and
   `keys`, authority canonicalization) reject with `signal.reason` as soon as the
   signal aborts; the native work finishes in the background and its result is
@@ -385,13 +416,19 @@ attempt per lock). See [lifecycle](lifecycle.md) for the full semantics.
 | `inspect_installation`                                                      | `inspectInstallation(bundleId, target, options?)`: `Promise<InstallationObservation>`                                                                                  |                                                                                                                                                                                                                                               |
 | `ClaimObservation`, `ResourceObservation` accessors                         | `ClaimObservation`, `ResourceObservation`                                                                                                                              | Plain frozen objects. `revisionDigest` is `null` when the resource could not be observed.                                                                                                                                                     |
 | `InstallationObservation` accessors, `matches`                              | `InstallationObservation`: `bundleId`, `target`, `resources`, `isCurrent`, `pending`, `version`, `bundleDigest`, `renderDigest`, `error`; `matches(bundle, rendered)`  | `target` is the caller's `InstallationTarget`. `matches` is Rust's comparison against the captured observation.                                                                                                                               |
-| `ResourceResult`, `InstallationResult` accessors                            | `ResourceResult`, `InstallationResult`: `{ status, observation, resources, notices, error, succeeded }`                                                                | `succeeded` is `true` exactly for `applied` and `unchanged`.                                                                                                                                                                                  |
+| `ResourceResult` accessors                                                  | `ResourceResult`: `{ resource, status, error, recoveryPaths }`                                                                                                         |                                                                                                                                                                                                                                               |
+| `InstallationResult` accessors                                              | `InstallationResult`: `{ status, observation, resources, notices, error }`; `succeeded` is added                                                                       | `succeeded` mirrors Go's `Succeeded()`: `true` exactly for `applied` and `unchanged`.                                                                                                                                                         |
 | `ChangeAction`, `PlannedChange`, `PlanSummary`, `summarize`                 | `ChangeAction`, `PlannedChange`, `PlanSummary`, `summarize(preview)`                                                                                                   | `summarize` is synchronous. `agent`, `scope` and `surface` are `null` when the routing context does not name them.                                                                                                                            |
 
 Not bound: `ResourceRef::new` and `ResourceRef::schema_version`, `PlannedChange::new` and `PlanSummary::new` (the crate
 constructs them), `ResourcePlan::ancestors`, `ResourceKind: FromStr`, and the durable state records
-(`Index`, `Receipt`, `Preparation`, `Journal` and their parts), as in Go;
-`LifecyclePreview::index` and `generation`; and the `Eq` derives on results.
+(`Index`, `Receipt`, `Preparation`, `Journal` and their parts) and their codec
+`encode`/`decode`, as in Go; `LifecyclePreview::index` and `generation`; and the
+`Eq` derives on results.
+
+| Rust                                       | TypeScript                                  | Notes                                                                                                                                                                                                                                                          |
+| ------------------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cancellation`, `cancellable`, `Cancelled` | `options.signal` on every asynchronous call | The binding creates an internal `CancelToken` per mutation with a signal and runs the call inside `cancellable`; `Err(Cancelled)` becomes a rejection with `signal.reason` (see [Conventions](#conventions)). `Cancellation` and `Cancelled` are not exported. |
 
 ### Observations
 
@@ -406,7 +443,7 @@ Skill observations are plain frozen objects. Optional values are `null`, never
 | `Conflict`                            | `Conflict`: `{ path, owner }`                                                                                                                                           |                                                                                                                                     |
 | `Observation` accessors, `is_current` | `Observation`: `{ state, installed, installations, versionMatches, recordedContentMatches, contentMatches, modifications, conflicts, error, recoveryPaths, isCurrent }` | The three `Option<bool>` checks are `null` when they could not be made.                                                             |
 | `TargetInspection<T>`                 | `TargetInspection`: `{ target, root, aliasOf, observation }`                                                                                                            | `target` is the caller's `Target` at that index. `aliasOf` is `null` or the index of the first target with the same canonical root. |
-| `TargetResult<T>`                     | `TargetResult`: `{ target, root, aliasOf, status, observation, error, recoveryPaths, succeeded }`                                                                       | `succeeded` is true exactly for `applied` and `unchanged`.                                                                          |
+| `TargetResult<T>`                     | `TargetResult`: `{ target, root, aliasOf, status, observation, error, recoveryPaths }`; `succeeded` is added                                                            | `succeeded` mirrors Go's `Succeeded()`: `true` exactly for `applied` and `unchanged`.                                               |
 
 Not bound: the constructors of these types (the crate constructs them).
 
@@ -432,7 +469,9 @@ come back in target order, and independent target failures stay data.
 `process.env`. `searchPath` is an array of absolute directories (no empty
 entries, none containing `:`); `[]` searches nothing. Application directories
 default to `/Applications` plus `<home>/Applications` when `home` is given;
-`applications` replaces that list and `noApplications: true` clears it.
+`applications` replaces that list (so `home` then has no effect) and
+`noApplications: true` clears it. Passing both `applications` and
+`noApplications: true` throws `ValueError`.
 
 | Rust                                | TypeScript                                                                                                          | Notes                                                                            |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -483,6 +522,21 @@ works. `applyLoadout` and `recoverLoadout` take `signal` with the mutation
 semantics in [lifecycle](lifecycle.md); discovery, previews and `inspectLoadout`
 take `signal` with the read-only semantics. `syncRequired` is true unless the
 lifecycle status is `failed`: the host runs Loadout sync. See [loadout](loadout.md).
+
+| Rust                                                   | TypeScript                                                                                                                                                                    | Notes                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `discover_loadout(home, config_home, env)`             | `discoverLoadout({ home, configHome?, environment, signal? })`: `Promise<LoadoutDiscovery>`                                                                                   |                                                             |
+| `LoadoutDiscovery`                                     | `LoadoutDiscovery`: `{ status: 'absent' }`, `{ status: 'available', setup }` or `{ status: 'invalid', diagnostic }`, each with `registry`                                     | A tagged union on `status`.                                 |
+| `LoadoutDiagnostic` accessors                          | `LoadoutDiagnostic`: `code`, `message`, `path`                                                                                                                                | Returned as data, never thrown.                             |
+| `LoadoutSetup` accessors, `eligible_sources`, `select` | `LoadoutSetup`: `registry`, `root`, `profile`, `profileChain`, `sources`, `harnesses`, `selectors`; `eligibleSources(bundle, harnesses)`, `select(name, harnesses, options?)` | `options.acceptSharedScope` defaults to `false`.            |
+| `LoadoutSource`, `LoadoutHarness`, `LoadoutSelector`   | Plain frozen objects of the same names                                                                                                                                        |                                                             |
+| `LoadoutDestination` accessors                         | `LoadoutDestination`: `location`, `source`, `harnesses`                                                                                                                       | Not constructible; returned by `select`.                    |
+| `LoadoutLocation::new`, accessors, `installation`      | `new LoadoutLocation(root, profile, sourceName, sourcePath)`; `root`, `profile`, `sourceName`, `sourcePath`; `installation(store)`                                            |                                                             |
+| `LoadoutOptions`                                       | `LoadoutOptions`: `{ platform, hookRuntime?, executionRoot?, replaceModified?, signal? }`                                                                                     |                                                             |
+| `preview_loadout`, `preview_loadout_removal`           | `previewLoadout(bundle, destination, store, options)`, `previewLoadoutRemoval(bundleId, location, store, options?)`: `Promise<LoadoutPreview>`                                |                                                             |
+| `LoadoutPreview` accessors                             | `LoadoutPreview`: `location`, `lifecycle`, `impact`, `diagnostic`, `applicable`, `scopeNotice`                                                                                | `LoadoutImpact` is a plain frozen object.                   |
+| `apply_loadout`, `recover_loadout`                     | `applyLoadout(preview, options?)`, `recoverLoadout(bundleId, location, store, options?)`: `Promise<LoadoutResult>`                                                            | `LoadoutResult` is `{ location, lifecycle, syncRequired }`. |
+| `inspect_loadout`                                      | `inspectLoadout(bundleId, location, store, options?)`: `Promise<InstallationObservation>`                                                                                     |                                                             |
 
 Not bound: `LoadoutOptions::new` (the options object supplies `platform` and
 defaults the rest), the `Debug`, `Clone` and `Eq` derives, and `LoadoutDiscovery::Available`'s

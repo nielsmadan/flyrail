@@ -174,7 +174,10 @@ let outcome = cancellable(&cancellation, || {
 });
 ```
 
-`Err(Cancelled)` means no index, receipt, journal or preparation was written, no destination content was published or removed, and no recovery ran. Lock files, store/staging/destination parent directories and authority records may persist, the same footprint a busy timeout leaves.
+`Err(Cancelled)` means no index, receipt, journal or preparation was written, no
+destination changed and no recovery ran; the
+[lifecycle guide](lifecycle.md#planning-and-applying) lists the files and
+records that may remain.
 
 A token that is already cancelled makes no lock attempt, and lock waits end early
 once the token is cancelled. The token is ignored once the first durable write

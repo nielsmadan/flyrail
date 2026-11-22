@@ -41,6 +41,12 @@ describe('detectAgents', () => {
     ]);
   });
 
+  test('applications together with noApplications is refused', async () => {
+    await expect(
+      detectAgents({ searchPath: [], applications: ['/Applications'], noApplications: true }),
+    ).rejects.toThrow(new ValueError('applications and noApplications cannot be combined'));
+  });
+
   test('an empty search path finds nothing', async () => {
     expect(await detectAgents({ searchPath: [], noApplications: true })).toEqual([]);
   });

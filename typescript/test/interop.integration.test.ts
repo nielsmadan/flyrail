@@ -18,7 +18,7 @@ import {
   render,
   sync,
 } from 'flyrail';
-import { canonicalState } from '../src/internal/conformance.js';
+import { canonicalState } from './helpers/conformance.js';
 import { fixture, fixturesRequired } from './helpers/fixtures.js';
 import { encodeRecord, relocated } from './helpers/state-records.js';
 import { tempRoot } from './helpers/temp.js';
@@ -309,7 +309,7 @@ describe.skipIf(!driversAvailable())('Rust and Python interop', () => {
     readonly record: unknown;
   }
 
-  test.skipIf(receipts.length === 0)('the fixtures hold receipts', () => {
+  test.skipIf(receipts.length === 0 && !fixturesRequired())('the fixtures hold receipts', () => {
     expect(receipts.length).toBeGreaterThan(0);
   });
 

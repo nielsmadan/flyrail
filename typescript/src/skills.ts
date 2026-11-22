@@ -1,16 +1,10 @@
 import type { Bundle } from './bundle.js';
 import { ValueError } from './errors.js';
-import {
-  lockTimeout,
-  runMutation,
-  runReadOnly,
-  type CallOptions,
-  type LockOptions,
-} from './internal/abort.js';
+import { lockTimeout, runMutation, runReadOnly } from './internal/abort.js';
+import type { CallOptions, LockOptions } from './options.js';
 import { awaitNative } from './internal/call.js';
-import { handleOf } from './internal/handles.js';
-import { requireText } from './internal/text.js';
-import { bundleHandle } from './lifecycle.js';
+import { bundleHandle, targetHandle } from './internal/guards.js';
+import { requireBundleId } from './internal/text.js';
 import type { NativeTarget } from './native/binding.js';
 import { native } from './native/loader.js';
 import {
@@ -21,19 +15,11 @@ import {
 } from './observations.js';
 import { adoptRenderedBundle, type RenderedBundle } from './rendered.js';
 import { storeHandle, type StateStore } from './stores.js';
-import { Target } from './targets.js';
+import type { Target } from './targets.js';
 
 export interface SkillOptions extends LockOptions {
   readonly replaceModified?: boolean;
 }
-
-const targetHandle = (target: Target): NativeTarget => {
-  const handle = handleOf(target);
-  if (!(target instanceof Target) || !(handle instanceof native.NativeTarget)) {
-    throw new ValueError('target must be a Target');
-  }
-  return handle;
-};
 
 const targetHandles = (targets: readonly Target[]): NativeTarget[] => {
   if (!Array.isArray(targets)) {
@@ -127,7 +113,7 @@ export function uninstall(
   return runMutation(options?.signal, async (token) => {
     const wire = await awaitNative(
       native.skillsUninstall(
-        requireText(bundleId, 'bundle id'),
+        requireBundleId(bundleId),
         targetHandles(targets),
         storeHandle(store),
         skillOptions(options),

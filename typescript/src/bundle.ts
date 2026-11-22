@@ -1,12 +1,13 @@
 import { artifactFromWire, artifactWire, assetFromWire, assetWire } from './artifacts.js';
 import type { Artifact, SupportAsset } from './artifacts.js';
-import { runReadOnly, type CallOptions } from './internal/abort.js';
+import { runReadOnly } from './internal/abort.js';
+import type { CallOptions } from './options.js';
 import { awaitNative, callNative } from './internal/call.js';
 import { toNative } from './internal/convert.js';
 import { entryFromNative, entryToNative } from './internal/entries.js';
 import { attachHandle, handleOf } from './internal/handles.js';
 import { requireAbsolute } from './internal/paths.js';
-import { requireText } from './internal/text.js';
+import { requireBundleId, requireText } from './internal/text.js';
 import type { ArtifactWire, AssetWire, DependencyWire } from './internal/models.js';
 import { dependencyFromWire, dependencyWire, type Dependency } from './rendered.js';
 import type {
@@ -17,6 +18,7 @@ import type {
 } from './native/binding.js';
 import { native } from './native/loader.js';
 import type { SemanticValue } from './values.js';
+import { frozenCopy } from './internal/results.js';
 
 export interface BundleEntry {
   readonly path: string;
@@ -54,7 +56,7 @@ export class BundleIdentity {
 
   constructor(id: string, version: string) {
     const handle: NativeBundleIdentity = callNative(() =>
-      native.bundleIdentity(requireText(id, 'bundle id'), requireText(version, 'bundle version')),
+      native.bundleIdentity(requireBundleId(id), requireText(version, 'bundle version')),
     );
     const snapshot = handle.snapshot();
     this.id = snapshot.id;
@@ -84,7 +86,7 @@ export class SkillSpec {
     const snapshot = handle.snapshot();
     this.name = snapshot.name;
     this.path = snapshot.path;
-    this.executables = Object.freeze([...snapshot.executables]);
+    this.executables = frozenCopy(snapshot.executables);
     attachHandle(this, handle);
     Object.freeze(this);
   }
@@ -111,7 +113,7 @@ export class Bundle {
     );
     this.entries = Object.freeze(snapshot.entries.map(entryFromNative));
     this.contentDigest = snapshot.contentDigest;
-    this.sourceRoots = Object.freeze([...snapshot.sourceRoots]);
+    this.sourceRoots = frozenCopy(snapshot.sourceRoots);
     this.schemaVersion = snapshot.schemaVersion;
     attachHandle(this, handle);
     Object.freeze(this);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { canonicalState, type StateRecordType } from '../../src/internal/conformance.js';
+import { canonicalState, type StateRecordType } from '../helpers/conformance.js';
 import { fixture } from '../helpers/fixtures.js';
 import { encodeRecord, relocated } from '../helpers/state-records.js';
 import { tempRoot } from '../helpers/temp.js';

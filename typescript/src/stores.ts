@@ -1,5 +1,6 @@
-import { ValueError } from './errors.js';
-import { runMutation, runReadOnly, type CallOptions } from './internal/abort.js';
+import { NativeError, ValueError } from './errors.js';
+import { runMutation, runReadOnly } from './internal/abort.js';
+import type { CallOptions } from './options.js';
 import { awaitNative, callNative } from './internal/call.js';
 import { attachHandle, handleOf } from './internal/handles.js';
 import { requireAbsolute } from './internal/paths.js';
@@ -62,9 +63,15 @@ export class DirectoryStore {
   readonly stagingDirectory: string;
 
   private constructor(handle: NativeStateStore) {
-    const snapshot = handle.snapshot();
-    this.location = snapshot.location ?? '';
-    this.stagingDirectory = snapshot.stagingDirectory ?? '';
+    const { location, stagingDirectory } = handle.snapshot();
+    if (location === undefined) {
+      throw new NativeError('a directory store has no location');
+    }
+    if (stagingDirectory === undefined) {
+      throw new NativeError('a directory store has no staging directory');
+    }
+    this.location = location;
+    this.stagingDirectory = stagingDirectory;
     attachHandle(this, handle);
     Object.freeze(this);
   }

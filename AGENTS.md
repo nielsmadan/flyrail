@@ -3,8 +3,6 @@
 Flyrail is a multi-language library project. Language implementations belong in
 language directories; shared formats and conformance fixtures belong in spec/.
 Read the implementation's AGENTS.md before changing its code or tooling.
-`typescript/` is a napi-rs binding over the Rust crate in `rust/`, with no release
-automation yet.
 
 Keep repository files useful to contributors and package consumers. Commit source,
 meaningful tests, synthetic fixtures, examples, public documentation and build/CI

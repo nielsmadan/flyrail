@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
@@ -17,12 +17,7 @@ import {
 } from 'flyrail';
 import { skillBundle } from './helpers/skills.js';
 import { tempRoot } from './helpers/temp.js';
-
-const exists = (path: string): Promise<boolean> =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
+import { exists } from './helpers/files.js';
 
 describe('skill lifecycle', () => {
   test('installs a two-skill bundle into two targets', async () => {

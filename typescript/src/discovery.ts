@@ -2,7 +2,8 @@ import { posix } from 'node:path';
 
 import type { Agent } from './enums.js';
 import { ValueError } from './errors.js';
-import { type CallOptions, runReadOnly } from './internal/abort.js';
+import { runReadOnly } from './internal/abort.js';
+import type { CallOptions } from './options.js';
 import { awaitNative } from './internal/call.js';
 import { optionalAbsolute, requireAbsolute } from './internal/paths.js';
 import { native } from './native/loader.js';
@@ -29,6 +30,10 @@ const searchEntry = (entry: string): string => {
 
 const applicationDirectories = (options: DetectAgentsOptions): string[] => {
   const home = optionalAbsolute(options.home, 'home');
+  const explicit = options.applications !== undefined && options.applications !== null;
+  if (options.noApplications === true && explicit) {
+    throw new ValueError('applications and noApplications cannot be combined');
+  }
   if (options.noApplications === true) {
     return [];
   }

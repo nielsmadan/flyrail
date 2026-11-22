@@ -15,9 +15,10 @@ ESLint enforces this on `src/**`; do not weaken those rules. Every `#[napi]`
 function, method and constructor carries `catch_unwind`
 (`test/napi-attributes.test.ts` fails otherwise). Every fallible entry point
 runs its work inside `guarded` and returns a tagged `{ ok, value | error }`
-object; only the infallible exports (`nativeVersion`, `targetsAgents`) and
-`CancelToken` are untagged. Never encode an error into a message string. Blocking work runs on the crate's own worker pool,
-never on libuv's. `src/index.ts` is the only public entry; `src/internal/**` and
+object; only the infallible exports (`nativeVersion`, `targetsAgents`,
+`hookLimits`) and `CancelToken` are untagged. Never encode an error into a message string. Blocking work runs on the crate's own worker pool,
+never on libuv's. `src/index.ts` is the public entry and `src/errors.ts` is also exported as
+`flyrail/errors`, which must never load the addon; `src/internal/**` and
 `src/native/**` are never re-exported. The public API carries no doc comments:
 `docs/api.md` is the reference. Read `docs/architecture.md` before changing the
 pool, the loader or the error format.

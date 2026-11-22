@@ -1,17 +1,11 @@
-import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { inspectInstallation, sync } from 'flyrail';
 import { codexProject, holdLock, storeUnder } from './helpers/lifecycle.js';
 import { tempRoot } from './helpers/temp.js';
+import { exists } from './helpers/files.js';
 
 const timeout = 30_000;
-
-const exists = (path: string): Promise<boolean> =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
 
 describe('lifecycle cancellation', () => {
   test(

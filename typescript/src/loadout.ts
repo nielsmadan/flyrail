@@ -1,23 +1,18 @@
 import type { Agent, Platform } from './enums.js';
 import { FlyrailError, ValueError } from './errors.js';
 import { adoptInstallationTarget, type InstallationTarget } from './installation.js';
-import {
-  lockTimeout,
-  runMutation,
-  runReadOnly,
-  type CallOptions,
-  type LockOptions,
-} from './internal/abort.js';
+import { lockTimeout, runMutation, runReadOnly } from './internal/abort.js';
+import type { CallOptions, LockOptions } from './options.js';
 import { awaitNative, callNative } from './internal/call.js';
-import { attachHandle, handleOf } from './internal/handles.js';
+import { bundleHandle, runtimeHandle } from './internal/guards.js';
+import { attachHandle, requireHandle } from './internal/handles.js';
 import { fromPairObjects, toPairObjects } from './internal/maps.js';
 import { buildModel, modelHandle, type LoadoutLocationWire } from './internal/models.js';
 import { optionalAbsolute, requireAbsolute } from './internal/paths.js';
-import { requireText } from './internal/text.js';
+import { requireBundleId, requireText } from './internal/text.js';
 import type { Bundle } from './bundle.js';
-import { HookRuntime } from './hook-runtime.js';
+import type { HookRuntime } from './hook-runtime.js';
 import {
-  bundleHandle,
   installationResultFromWire,
   observationFromWire,
   previewFromHandle,
@@ -29,13 +24,13 @@ import type {
   JsLoadoutDiagnostic,
   JsLoadoutSetup,
   JsLoadoutSource,
-  NativeHookRuntime,
   NativeLoadoutDestination,
   NativeLoadoutPreview,
   NativeLoadoutSetup,
 } from './native/binding.js';
 import { native } from './native/loader.js';
 import { storeHandle, type StateStore } from './stores.js';
+import { frozenCopy } from './internal/results.js';
 
 export class LoadoutDiagnostic extends FlyrailError {
   override name = 'LoadoutDiagnostic';
@@ -100,16 +95,14 @@ export interface DiscoverLoadoutOptions extends CallOptions {
 const diagnosticFromWire = (wire: JsLoadoutDiagnostic): LoadoutDiagnostic =>
   new LoadoutDiagnostic(wire.code, wire.message, wire.path);
 
-const strings = (items: readonly string[]): readonly string[] => Object.freeze([...items]);
-
 const sourceFromWire = (wire: JsLoadoutSource): LoadoutSource =>
   Object.freeze({
     name: wire.name,
     path: wire.path,
-    uses: strings(wire.uses),
+    uses: frozenCopy(wire.uses),
     declaredIn: wire.declaredIn,
     overrides: Object.freeze(
-      Object.fromEntries(wire.overrides.map(({ key, values }) => [key, strings(values)])),
+      Object.fromEntries(wire.overrides.map(({ key, values }) => [key, frozenCopy(values)])),
     ),
   });
 
@@ -153,13 +146,8 @@ export class LoadoutLocation {
   }
 }
 
-const locationHandle = (location: LoadoutLocation) => {
-  const handle = modelHandle(location);
-  if (!(location instanceof LoadoutLocation) || !(handle instanceof native.NativeModel)) {
-    throw new ValueError('location must be a LoadoutLocation');
-  }
-  return handle;
-};
+const locationHandle = (location: LoadoutLocation) =>
+  modelHandle(location, LoadoutLocation, 'location must be a LoadoutLocation');
 
 const locationFromWire = (wire: {
   readonly root: string;
@@ -180,7 +168,7 @@ export class LoadoutDestination {
     const wire = callNative(() => handle.snapshot());
     this.location = locationFromWire(wire.location);
     this.source = sourceFromWire(wire.source);
-    this.harnesses = Object.freeze([...wire.harnesses] as Agent[]);
+    this.harnesses = frozenCopy(wire.harnesses as Agent[]);
     attachHandle(this, handle);
     Object.freeze(this);
   }
@@ -190,16 +178,13 @@ export class LoadoutDestination {
   }
 }
 
-const destinationHandle = (destination: LoadoutDestination): NativeLoadoutDestination => {
-  const handle = handleOf(destination);
-  if (
-    !(destination instanceof LoadoutDestination) ||
-    !(handle instanceof native.NativeLoadoutDestination)
-  ) {
-    throw new ValueError('destination must be a LoadoutDestination');
-  }
-  return handle;
-};
+const destinationHandle = (destination: LoadoutDestination): NativeLoadoutDestination =>
+  requireHandle(
+    destination,
+    LoadoutDestination,
+    native.NativeLoadoutDestination,
+    'destination must be a LoadoutDestination',
+  );
 
 let createSetup: (handle: NativeLoadoutSetup) => LoadoutSetup;
 
@@ -217,11 +202,11 @@ export class LoadoutSetup {
     this.registry = wire.registry;
     this.root = wire.root;
     this.profile = wire.profile;
-    this.profileChain = strings(wire.profileChain);
+    this.profileChain = frozenCopy(wire.profileChain);
     this.sources = Object.freeze(wire.sources.map(sourceFromWire));
     this.harnesses = Object.freeze(
       wire.harnesses.map((harness) =>
-        Object.freeze({ agent: harness.agent as Agent, slices: strings(harness.slices) }),
+        Object.freeze({ agent: harness.agent as Agent, slices: frozenCopy(harness.slices) }),
       ),
     );
     this.selectors = Object.freeze(
@@ -230,8 +215,8 @@ export class LoadoutSetup {
           agent: selector.agent as Agent,
           category: selector.category,
           manifest: selector.manifest,
-          key: strings(selector.key),
-          entries: strings(selector.entries),
+          key: frozenCopy(selector.key),
+          entries: frozenCopy(selector.entries),
           substitutions: fromPairObjects(selector.substitutions),
         }),
       ),
@@ -268,13 +253,8 @@ export class LoadoutSetup {
   }
 }
 
-const setupHandle = (setup: LoadoutSetup): NativeLoadoutSetup => {
-  const handle = handleOf(setup);
-  if (!(setup instanceof LoadoutSetup) || !(handle instanceof native.NativeLoadoutSetup)) {
-    throw new ValueError('setup must be a LoadoutSetup');
-  }
-  return handle;
-};
+const setupHandle = (setup: LoadoutSetup): NativeLoadoutSetup =>
+  requireHandle(setup, LoadoutSetup, native.NativeLoadoutSetup, 'setup must be a LoadoutSetup');
 
 export type LoadoutDiscovery =
   | { readonly status: 'absent'; readonly registry: string }
@@ -358,7 +338,7 @@ export class LoadoutPreview {
         Object.freeze({
           category: impact.category,
           path: impact.path,
-          harnesses: Object.freeze([...impact.harnesses] as Agent[]),
+          harnesses: frozenCopy(impact.harnesses as Agent[]),
           shared: impact.shared,
         }),
       ),
@@ -375,26 +355,13 @@ export class LoadoutPreview {
   }
 }
 
-const loadoutPreviewHandle = (preview: LoadoutPreview): NativeLoadoutPreview => {
-  const handle = handleOf(preview);
-  if (!(preview instanceof LoadoutPreview) || !(handle instanceof native.NativeLoadoutPreview)) {
-    throw new ValueError('preview must be a LoadoutPreview');
-  }
-  return handle;
-};
-
-const runtimeHandle = (runtime: HookRuntime | null | undefined): NativeHookRuntime | undefined => {
-  if (runtime === null || runtime === undefined) {
-    return undefined;
-  }
-  const handle = handleOf(runtime);
-  if (!(runtime instanceof HookRuntime) || !(handle instanceof native.NativeHookRuntime)) {
-    throw new ValueError('hook runtime must be a HookRuntime');
-  }
-  return handle;
-};
-
-const bundleId = (id: string): string => requireText(id, 'bundle id');
+const loadoutPreviewHandle = (preview: LoadoutPreview): NativeLoadoutPreview =>
+  requireHandle(
+    preview,
+    LoadoutPreview,
+    native.NativeLoadoutPreview,
+    'preview must be a LoadoutPreview',
+  );
 
 export function previewLoadout(
   bundle: Bundle,
@@ -430,7 +397,7 @@ export function previewLoadoutRemoval(
   return runReadOnly(options?.signal, async () => {
     const handle = await awaitNative(
       native.loadoutPreviewRemoval(
-        bundleId(id),
+        requireBundleId(id),
         locationHandle(location),
         storeHandle(store),
         options?.replaceModified ?? false,
@@ -469,7 +436,7 @@ export function inspectLoadout(
   return runReadOnly(options?.signal, async () =>
     observationFromWire(
       await awaitNative(
-        native.loadoutInspect(bundleId(id), locationHandle(location), storeHandle(store)),
+        native.loadoutInspect(requireBundleId(id), locationHandle(location), storeHandle(store)),
       ),
       location.installation(store),
     ),
@@ -485,7 +452,7 @@ export function recoverLoadout(
   return runMutation(options?.signal, async (token) => {
     const wire = await awaitNative(
       native.loadoutRecover(
-        bundleId(id),
+        requireBundleId(id),
         locationHandle(location),
         storeHandle(store),
         { lockTimeoutMs: lockTimeout(options) },

@@ -3,10 +3,11 @@ import type { Agent, Platform, Surface, TargetScope } from './enums.js';
 import type { HookRuntime } from './hook-runtime.js';
 import { adoptInstallationTarget, contextPairs, type InstallationTarget } from './installation.js';
 import { callNative } from './internal/call.js';
+import { runtimeHandle, targetHandle } from './internal/guards.js';
 import { attachHandle, handleOf } from './internal/handles.js';
 import { fromPairObjects } from './internal/maps.js';
 import { optionalAbsolute } from './internal/paths.js';
-import type { NativeHookRuntime, NativeRenderContext, NativeTarget } from './native/binding.js';
+import type { NativeRenderContext } from './native/binding.js';
 import { native } from './native/loader.js';
 import { storeHandle, type StateStore } from './stores.js';
 import type { Target } from './targets.js';
@@ -43,7 +44,7 @@ export class RenderContext {
     const runtime = options?.hookRuntime ?? null;
     const handle: NativeRenderContext = callNative(() =>
       native.renderContextNew(
-        handleOf(target) as NativeTarget,
+        targetHandle(target),
         platform,
         options?.surface ?? 'cli',
         {
@@ -56,7 +57,7 @@ export class RenderContext {
           ...present('nativeRoot', optionalAbsolute(options?.nativeRoot, 'native root')),
           ...present('assetRoot', optionalAbsolute(options?.assetRoot, 'asset root')),
         },
-        runtime === null ? undefined : (handleOf(runtime) as NativeHookRuntime),
+        runtimeHandle(runtime),
       ),
     );
     const snapshot = handle.snapshot();

@@ -1,10 +1,10 @@
 use crate::artifacts::{Model, NativeModel};
 use crate::authority::{read_claim, write_claim};
 use crate::content::{
-    Wire, cloned_tree, node, parse, read_content, read_member, read_selector, status, unknown_kind,
+    Wire, cloned_tree, node, parse, read_content, read_member, read_selector, unknown_kind,
     write_content, write_member, write_selector,
 };
-use crate::errors::{BindingError, BindingResult, tagged};
+use crate::errors::{BindingError, BindingResult, status, tagged};
 use crate::guard::{guarded, on_large_stack};
 use flyrail::{
     Acquisition, ArrayPosition, CreatedContainer, Disposition, DocumentEdit, DocumentFormat,

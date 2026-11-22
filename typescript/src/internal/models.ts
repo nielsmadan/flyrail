@@ -30,7 +30,7 @@ import type {
 import { native } from '../native/loader.js';
 import { callNative } from './call.js';
 import type { NativeValue } from './convert.js';
-import { handleOf } from './handles.js';
+import { requireHandle, type Brand } from './handles.js';
 
 export interface AudienceWire {
   readonly kind: 'audience';
@@ -285,7 +285,8 @@ export function buildModel<W extends ModelWire>(wire: ModelWire): Built<W> {
   return { handle, snapshot };
 }
 
-export const modelHandle = (owner: object): NativeModel => handleOf(owner) as NativeModel;
+export const modelHandle = (owner: unknown, type: Brand, message: string): NativeModel =>
+  requireHandle(owner, type, native.NativeModel, message);
 
 export interface NoticeWire {
   readonly kind: 'notice';

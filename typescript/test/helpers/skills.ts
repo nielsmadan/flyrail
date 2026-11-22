@@ -1,6 +1,5 @@
 import { Bundle, fileEntry } from 'flyrail';
-
-const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+import { encode } from './bytes.js';
 
 export const skillBundle = (version = '1', id = 'team'): Bundle =>
   Bundle.fromMemory(

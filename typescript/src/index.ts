@@ -96,7 +96,7 @@ export type {
 } from './lifecycle.js';
 export { summarize } from './summary.js';
 export type { PlanSummary, PlannedChange } from './summary.js';
-export type { CallOptions, LockOptions } from './internal/abort.js';
+export type { CallOptions, LockOptions } from './options.js';
 export type {
   Conflict,
   Installation,

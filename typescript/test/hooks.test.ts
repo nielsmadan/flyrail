@@ -13,9 +13,7 @@ import {
   HookResponse,
   ValueError,
 } from 'flyrail';
-
-const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
-const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
+import { decode, encode } from './helpers/bytes.js';
 
 const codeOf = (action: () => unknown): string | undefined => {
   try {
@@ -77,9 +75,11 @@ describe('hook JSON', () => {
     expect(() => HookJson.array([{} as HookJson])).toThrow(ValueError);
   });
 
-  test('reads the limits from native', () => {
-    expect(HOOK_INPUT_LIMIT).toBe(1_048_576);
-    expect(HOOK_EVENT_TIMEOUT_LIMIT_MS).toBe(300_000);
+  test('accepts JSON at the input limit and refuses one byte more', () => {
+    expect(HookJson.string('x'.repeat(HOOK_INPUT_LIMIT - 2)).bytes()).toHaveLength(
+      HOOK_INPUT_LIMIT,
+    );
+    expect(codeOf(() => HookJson.string('x'.repeat(HOOK_INPUT_LIMIT - 1)))).toBe('input-limit');
   });
 });
 
@@ -189,6 +189,12 @@ describe('hook handler and config', () => {
   test('rejects an out-of-range timeout with ValueError', () => {
     expect(() => handler('a', { timeoutMs: 0 })).toThrow(ValueError);
     expect(() => handler('a', { timeoutMs: 1.5 })).toThrow(ValueError);
+    expect(handler('a', { timeoutMs: HOOK_EVENT_TIMEOUT_LIMIT_MS }).timeoutMs).toBe(
+      HOOK_EVENT_TIMEOUT_LIMIT_MS,
+    );
+    expect(() => handler('a', { timeoutMs: HOOK_EVENT_TIMEOUT_LIMIT_MS + 1 })).toThrow(
+      new ValueError('hook timeout must be 1-300000 integer milliseconds'),
+    );
   });
 
   test('a config serializes to a JSON object and orders handlers by id', () => {

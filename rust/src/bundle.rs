@@ -82,7 +82,7 @@ impl Bundle {
             .unwrap_or_else(|| Path::new("."));
         let mut source = DirectorySource::new(parent)?;
         source.observe(origin)?;
-        let bytes = std::fs::read(origin).map_err(BundleError::Io)?;
+        let bytes = crate::zip::read_file(origin).map_err(BundleError::Io)?;
         let archive = crate::zip::Archive::open(bytes).map_err(BundleError::Io)?;
         let bundle = Self::from_source(&mut ZipSource::new(archive, resource)?, {
             vec![std::fs::canonicalize(origin).map_err(BundleError::Io)?]

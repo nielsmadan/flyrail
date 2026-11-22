@@ -1,8 +1,7 @@
-use crate::errors::{BindingError, BindingResult};
+use crate::errors::{BindingError, BindingResult, outside_i64, status};
 use flyrail::{ArrayValue, Date, DateTime, ObjectValue, Scalar, Time, Value};
-use napi::bindgen_prelude::{FromNapiValue, ToNapiValue, Uint16Array};
+use napi::bindgen_prelude::{FromNapiValue, ToNapiValue};
 use napi::{check_status, sys};
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -16,10 +15,6 @@ const TOO_DEEP: &str = "value nesting is too deep";
 
 fn argument(message: &str) -> BindingError {
     BindingError::Argument(message.to_owned())
-}
-
-fn status<T>(result: napi::Result<T>) -> BindingResult<T> {
-    result.map_err(|error| BindingError::Native(error.reason))
 }
 
 unsafe fn property(
@@ -74,7 +69,7 @@ unsafe fn read_integer(env: sys::napi_env, value: sys::napi_value) -> BindingRes
     if lossless {
         Ok(integer)
     } else {
-        Err(argument("integers must fit signed 64 bits"))
+        Err(outside_i64())
     }
 }
 
@@ -533,14 +528,6 @@ pub(crate) fn within_depth(depth: usize) -> BindingResult<()> {
     }
 }
 
-pub(crate) struct HookUnits(pub Vec<u16>);
-
-impl From<&Uint16Array> for HookUnits {
-    fn from(units: &Uint16Array) -> Self {
-        Self(units.to_vec())
-    }
-}
-
 pub(crate) fn absolute_path(text: &str) -> BindingResult<PathBuf> {
     let path = Path::new(text);
     if path.is_absolute() {
@@ -561,11 +548,4 @@ pub(crate) fn duration_ms(ms: f64) -> BindingResult<Duration> {
             "duration must be finite and nonnegative",
         )))
     }
-}
-
-#[expect(dead_code)]
-pub(crate) fn pairs(record: HashMap<String, String>) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = record.into_iter().collect();
-    pairs.sort_unstable();
-    pairs
 }

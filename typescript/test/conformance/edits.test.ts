@@ -167,23 +167,29 @@ const provenanceSummary = (provenance: DocumentProvenance): unknown => ({
   schemaFields: provenance.schemaFields.map(selectionSummary),
 });
 
+interface Baseline {
+  readonly claim: Claim;
+  readonly summary: unknown;
+}
+
 const checkOwnership = (
   index: number,
   result: DocumentEdit,
   previous: readonly OwnedSelection[],
   previousProvenance: DocumentProvenance,
-  baselines: { readonly claim: Claim; readonly summary: unknown }[],
-): void => {
+  baselines: readonly Baseline[],
+): readonly Baseline[] => {
   const where = `step ${String(index)}`;
+  const extended = [...baselines];
   result.ownership.forEach((owned) => {
     if (owned.disposition !== 'taken-over') {
       expect(owned.baseline, `${where} only takeover owns a baseline`).toBeNull();
       return;
     }
     const summary = snapshotSummary(owned.baseline);
-    const known = baselines.find((item) => item.claim.equals(owned.claim));
+    const known = extended.find((item) => item.claim.equals(owned.claim));
     if (known === undefined) {
-      baselines.push({ claim: owned.claim, summary });
+      extended.push({ claim: owned.claim, summary });
     } else {
       expect(summary, `${where} takeover baseline`).toEqual(known.summary);
     }
@@ -196,13 +202,14 @@ const checkOwnership = (
       provenanceSummary(previousProvenance),
     );
   }
+  return extended;
 };
 
 const replay = (testCase: EditCase): void => {
   let current = encode(testCase.before);
   let ownership: readonly OwnedSelection[] = [];
   let provenance = new DocumentProvenance();
-  const baselines: { readonly claim: Claim; readonly summary: unknown }[] = [];
+  let baselines: readonly Baseline[] = [];
   testCase.steps.forEach((step, index) => {
     const observed = step.observed === undefined ? current : encode(step.observed);
     const requests = (step.requests ?? [step]).map((item) => request(item, testCase.format));
@@ -212,7 +219,7 @@ const replay = (testCase: EditCase): void => {
       result.observations.map((observation) => observation.status),
       `step ${String(index)} statuses`,
     ).toEqual(step.statuses ?? [step.status]);
-    checkOwnership(index, result, ownership, provenance, baselines);
+    baselines = checkOwnership(index, result, ownership, provenance, baselines);
     current = result.after;
     ownership = result.ownership;
     provenance = result.provenance;

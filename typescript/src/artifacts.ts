@@ -30,6 +30,7 @@ import {
   type SkillWire,
 } from './internal/models.js';
 import { requireText } from './internal/text.js';
+import { frozenCopy } from './internal/results.js';
 
 export class EnvRef {
   readonly name: string;
@@ -85,6 +86,20 @@ const environmentWire = (value: EnvironmentValue): EnvironmentValueWire =>
 const environmentFromWire = (wire: EnvironmentValueWire): EnvironmentValue =>
   wire.kind === 'text' ? wire.text : new EnvRef(wire.name);
 
+const buildCommandWire = (
+  argv: readonly CommandArgument[],
+  env: Readonly<Record<string, EnvironmentValue>>,
+  cwd: CommandArgument | null,
+): CommandWire => ({
+  kind: 'command',
+  argv: argv.map(argumentWire),
+  env: Object.entries(env).map(([name, value]) => ({
+    name: requireText(name, 'environment name'),
+    value: environmentWire(value),
+  })),
+  cwd: cwd === null ? null : argumentWire(cwd),
+});
+
 export class Command {
   readonly kind = 'command';
   readonly argv: readonly CommandArgument[];
@@ -96,15 +111,7 @@ export class Command {
     env: Readonly<Record<string, EnvironmentValue>> = {},
     cwd: CommandArgument | null = null,
   ) {
-    const { handle, snapshot } = buildModel<CommandWire>({
-      kind: 'command',
-      argv: argv.map(argumentWire),
-      env: Object.entries(env).map(([name, value]) => ({
-        name: requireText(name, 'environment name'),
-        value: environmentWire(value),
-      })),
-      cwd: cwd === null ? null : argumentWire(cwd),
-    });
+    const { handle, snapshot } = buildModel<CommandWire>(buildCommandWire(argv, env, cwd));
     this.argv = Object.freeze(snapshot.argv.map(argumentFromWire));
     this.env = fromPairs(
       snapshot.env.map((entry) => [entry.name, environmentFromWire(entry.value)] as const),
@@ -115,15 +122,8 @@ export class Command {
   }
 }
 
-const commandWire = (command: Command): CommandWire => ({
-  kind: 'command',
-  argv: command.argv.map(argumentWire),
-  env: Object.entries(command.env).map(([name, value]) => ({
-    name,
-    value: environmentWire(value),
-  })),
-  cwd: command.cwd === null ? null : argumentWire(command.cwd),
-});
+const commandWire = (command: Command): CommandWire =>
+  buildCommandWire(command.argv, command.env, command.cwd);
 
 const commandFromWire = (wire: CommandWire): Command =>
   new Command(
@@ -307,8 +307,8 @@ export class HookArtifact {
     this.event = snapshot.event;
     this.command = commandFromWire(snapshot.command);
     this.timeoutMs = snapshot.timeoutMs;
-    this.outcomes = Object.freeze([...snapshot.outcomes]);
-    this.tools = Object.freeze([...snapshot.tools]);
+    this.outcomes = frozenCopy(snapshot.outcomes);
+    this.tools = frozenCopy(snapshot.tools);
     this.protocolVersion = snapshot.protocolVersion;
     attachHandle(this, handle);
     Object.freeze(this);

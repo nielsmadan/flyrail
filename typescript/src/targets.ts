@@ -1,6 +1,6 @@
 import type { Agent, TargetScope } from './enums.js';
 import { callNative } from './internal/call.js';
-import { attachHandle, handleOf } from './internal/handles.js';
+import { attachHandle, handleOf, hasHandle } from './internal/handles.js';
 import { fromPairObjects, toPairObjects } from './internal/maps.js';
 import { requireAbsolute } from './internal/paths.js';
 import { requireText } from './internal/text.js';
@@ -54,7 +54,9 @@ export class Target {
   }
 
   equals(other: Target): boolean {
-    const otherHandle = handleOf(other) as NativeTarget | undefined;
-    return otherHandle !== undefined && (handleOf(this) as NativeTarget).equals(otherHandle);
+    return (
+      hasHandle(other, Target, native.NativeTarget) &&
+      (handleOf(this) as NativeTarget).equals(handleOf(other) as NativeTarget)
+    );
   }
 }

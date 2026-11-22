@@ -1,14 +1,9 @@
-import { access, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { run } from '../examples/quickstart.js';
 import { tempRoot } from './helpers/temp.js';
-
-const exists = (path: string): Promise<boolean> =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
+import { exists } from './helpers/files.js';
 
 const firstTypeScriptBlock = (markdown: string): string | undefined =>
   /^```ts\n([\s\S]*?)^```$/mu.exec(markdown)?.[1];

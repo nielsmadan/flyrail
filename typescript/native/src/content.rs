@@ -1,6 +1,6 @@
 use crate::bundles::{entry_from_parts, entry_view};
 use crate::convert::ValueTree;
-use crate::errors::{BindingError, BindingResult};
+use crate::errors::{BindingError, BindingResult, status};
 use crate::guard::on_large_stack;
 use flyrail::{
     Content, DocumentFormat, DocumentSchema, FileContent, FileMode, Key, Member, Placement,
@@ -10,10 +10,6 @@ use flyrail::{
 use napi::bindgen_prelude::{FromNapiValue, JsObjectValue, Object, Uint8Array, Unknown};
 use napi::{Env, JsValue, ValueType};
 use std::str::FromStr;
-
-pub(crate) fn status<T>(result: napi::Result<T>) -> BindingResult<T> {
-    result.map_err(|error| BindingError::Native(error.reason))
-}
 
 pub(crate) fn unknown_kind(kind: &str) -> BindingError {
     BindingError::Argument(format!("unknown model kind '{kind}'"))

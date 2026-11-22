@@ -31,6 +31,7 @@ import { requireText } from './internal/text.js';
 import type { NativeModel } from './native/binding.js';
 import { native } from './native/loader.js';
 import type { SemanticValue } from './values.js';
+import { frozenCopy } from './internal/results.js';
 
 export type SnapshotValue =
   | { readonly kind: 'bytes'; readonly bytes: Uint8Array }
@@ -291,7 +292,7 @@ export class DocumentProvenance {
     });
     this.#emptyDocument = copyOrNull(snapshot.emptyDocument);
     this.containers = Object.freeze(snapshot.containers.map(containerFromWire));
-    this.trailingSeparators = Object.freeze([...snapshot.trailingSeparators]);
+    this.trailingSeparators = frozenCopy(snapshot.trailingSeparators);
     this.schemaFields = Object.freeze(snapshot.schemaFields.map(selectionFromWire));
     this.#schemaEmptyDocument = copyOrNull(snapshot.schemaEmptyDocument);
     attachHandle(this, handle);
@@ -382,13 +383,7 @@ const handlesOf = <T extends object>(
   items: readonly T[],
   type: abstract new (...args: never[]) => T,
   label: string,
-): NativeModel[] =>
-  items.map((item) => {
-    if (!(item instanceof type) || handleOf(item) === undefined) {
-      throw new ValueError(`${label} must be a ${type.name}`);
-    }
-    return modelHandle(item);
-  });
+): NativeModel[] => items.map((item) => modelHandle(item, type, `${label} must be a ${type.name}`));
 
 export function editDocument(
   source: Uint8Array | null,
@@ -411,8 +406,9 @@ export function editDocument(
 }
 
 export function contentClaim(content: Content): Claim {
-  if (handleOf(content) === undefined) {
+  const handle = handleOf(content);
+  if (!(handle instanceof native.NativeModel)) {
     throw new ValueError('content must be a section or structured content');
   }
-  return claimFromWire(callNative(() => native.editingContentClaim(modelHandle(content))));
+  return claimFromWire(callNative(() => native.editingContentClaim(handle)));
 }

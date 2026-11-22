@@ -51,6 +51,7 @@ import {
 } from 'flyrail';
 import { fixture } from '../helpers/fixtures.js';
 import { jsonValue, type Json } from '../helpers/json.js';
+import { fromHex } from '../helpers/bytes.js';
 
 interface SemanticCase {
   readonly record: readonly unknown[];
@@ -119,8 +120,6 @@ function fromRecord(record: readonly unknown[]): SemanticValue {
   }
 }
 
-const hex = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, 'hex'));
-
 describe.skipIf(document === undefined)('configurations.json semantic_values', () => {
   const cases = document?.semantic_values ?? [];
 
@@ -153,7 +152,7 @@ describe.skipIf(document === undefined)('configurations.json cases', () => {
         testCase.entries.map((entry) =>
           entry.data_hex === null
             ? directoryEntry(entry.path)
-            : fileEntry(entry.path, hex(entry.data_hex)),
+            : fileEntry(entry.path, fromHex(entry.data_hex)),
         ),
       );
       expect(bundle.schemaVersion).toBe(2);
@@ -297,7 +296,7 @@ function renderedContent(record: RenderingVector['artifacts'][number]['content']
     case 'section':
       return new SectionContent(record.marker as string, record.text as string);
     case 'file':
-      return new FileContent(hex(record.data_hex as string), 'private');
+      return new FileContent(fromHex(record.data_hex as string), 'private');
     case 'structured':
       return new StructuredContent(
         record.format as DocumentFormat,

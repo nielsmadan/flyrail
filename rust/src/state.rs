@@ -133,17 +133,14 @@ pub(crate) fn store_lock<'a>(
         return cancellable_store_lock(store, name, timeout);
     }
     store.lock(name, timeout).map_err(|error| match error {
-        StoreError::Busy { .. } => state_failure(store, ErrorCode::Busy, error.to_string()),
+        StoreError::Busy { .. } => busy_failure(store, &error),
         other => other.into(),
     })
 }
 
 const CANCELLATION_SLICE: Duration = Duration::from_millis(20);
 
-fn busy_failure(store: &dyn StateStore, name: &str) -> TargetError {
-    let error = StoreError::Busy {
-        name: name.to_owned(),
-    };
+fn busy_failure(store: &dyn StateStore, error: &StoreError) -> TargetError {
     state_failure(store, ErrorCode::Busy, error.to_string())
 }
 
@@ -154,8 +151,11 @@ fn cancellable_store_lock<'a>(
 ) -> Result<StoreLock<'a>, TargetError> {
     let started = Instant::now();
     loop {
-        if crate::cancellation::interrupted() {
-            return Err(busy_failure(store, name));
+        if crate::cancellation::observe_interruption() {
+            let error = StoreError::Busy {
+                name: name.to_owned(),
+            };
+            return Err(busy_failure(store, &error));
         }
         let remaining = timeout.saturating_sub(started.elapsed());
         match store.lock(name, remaining.min(CANCELLATION_SLICE)) {
@@ -163,7 +163,7 @@ fn cancellable_store_lock<'a>(
             Err(error @ StoreError::Busy { .. })
                 if timeout.saturating_sub(started.elapsed()).is_zero() =>
             {
-                return Err(state_failure(store, ErrorCode::Busy, error.to_string()));
+                return Err(busy_failure(store, &error));
             }
             Err(StoreError::Busy { .. }) => {}
             Err(other) => return Err(other.into()),
@@ -518,5 +518,43 @@ mod tests {
         let _held = store_lock(&store, "index/team/x", Duration::ZERO).unwrap();
         let error = store_lock(&store, "index/team/x", Duration::ZERO).unwrap_err();
         assert_eq!(error.code(), ErrorCode::Busy);
+    }
+
+    struct FailingLock;
+
+    impl StateStore for FailingLock {
+        fn read(&self, _key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+            Ok(None)
+        }
+        fn write(&self, _: &str, _: &[u8], _: Option<&[u8]>) -> Result<bool, StoreError> {
+            Ok(true)
+        }
+        fn delete(&self, _key: &str, _expected: &[u8]) -> Result<bool, StoreError> {
+            Ok(true)
+        }
+        fn keys(&self, _prefix: &str) -> Result<Vec<String>, StoreError> {
+            Ok(Vec::new())
+        }
+        fn lock(&self, _name: &str, _timeout: Duration) -> Result<StoreLock<'_>, StoreError> {
+            Err(StoreError::Io {
+                message: String::from("lock device failed"),
+                path: Some(PathBuf::from("/store/locks/x")),
+                kind: io::ErrorKind::Other,
+                errno: Some(libc::EIO),
+            })
+        }
+    }
+
+    #[test]
+    fn a_lock_io_error_inside_a_cancellable_wait_keeps_its_code_and_text() {
+        let token = crate::cancellation::Cancellation::new();
+        let error = crate::cancellation::cancellable(&token, || {
+            store_lock(&FailingLock, "index/team/x", Duration::from_secs(5)).map(|_| ())
+        })
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::IoError);
+        assert_eq!(error.message(), "lock device failed");
+        assert_eq!(error.errno(), Some(libc::EIO));
     }
 }

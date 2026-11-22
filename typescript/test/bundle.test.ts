@@ -13,6 +13,7 @@ import {
 } from 'flyrail';
 import { storedZip } from './helpers/zip.js';
 import { tempRoot } from './helpers/temp.js';
+import { encode } from './helpers/bytes.js';
 
 const manifest = {
   schema_version: 1,
@@ -23,7 +24,6 @@ const manifest = {
 const manifestText = JSON.stringify(manifest);
 const skillText = '# Review\n';
 const scriptText = '#!/bin/sh\n';
-const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 async function writeBundle(root: string): Promise<void> {
   await mkdir(join(root, 'skills/review'), { recursive: true });
@@ -101,6 +101,22 @@ describe('Bundle.fromZip', () => {
     const directory = await Bundle.fromDirectory(join(root, 'dir'));
     expect(zipped.contentDigest).toBe(directory.contentDigest);
     expect(zipped.entries).toEqual(directory.entries);
+  });
+
+  test('refuses a member declared over the uncompressed byte limit', async () => {
+    const root = await tempRoot();
+    const archive = storedZip([{ name: 'flyrail/flyrail.json', data: encode(manifestText) }]);
+    const oversized = 64 * 1024 * 1024 + 1;
+    archive.writeUInt32LE(oversized, archive.indexOf('PK\x03\x04', 0, 'latin1') + 22);
+    archive.writeUInt32LE(oversized, archive.indexOf('PK\x01\x02', 0, 'latin1') + 24);
+    const path = join(root, 'bomb.zip');
+    await writeFile(path, archive);
+    const failure: unknown = await Bundle.fromZip(path, 'flyrail').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(BundleError);
+    expect(failure).toMatchObject({
+      kind: 'io',
+      message: 'archive member exceeds the uncompressed byte limit',
+    });
   });
 
   test('rejects a relative archive path', async () => {

@@ -88,6 +88,16 @@ describe('translateNativeError', () => {
     });
   });
 
+  test.each(['bundle', 'authority', 'store'])(
+    'reports an unknown %s kind as NativeError',
+    (type) => {
+      const payload = { type, kind: 'renamed', message: 'x' } as unknown as NativeErrorPayload;
+      const error = translateNativeError(payload);
+      expect(error).toBeInstanceOf(NativeError);
+      expect(error.message).toBe(`unknown native error payload: ${JSON.stringify(payload)}`);
+    },
+  );
+
   test.each([
     [new ValueError('x'), 'ValueError'],
     [new BundleError('invalid', 'x'), 'BundleError'],

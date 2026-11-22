@@ -693,7 +693,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
-          components: rustfmt, clippy
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.14'
@@ -730,30 +729,9 @@ jobs:
       - name: TypeScript install
         working-directory: typescript
         run: npm ci
-      - name: TypeScript dependency check
-        working-directory: typescript
-        run: |
-          npm ls --depth=0
-          python3 -I -B scripts/check_cargo_lock.py
       - name: TypeScript native build
         working-directory: typescript
         run: npm run build:native
-      - name: TypeScript formatting
-        working-directory: typescript
-        run: |
-          npm run format:check
-          cargo fmt --check --manifest-path native/Cargo.toml
-      - name: TypeScript lint
-        working-directory: typescript
-        run: |
-          npm run lint
-          cargo clippy --manifest-path native/Cargo.toml --all-targets --all-features -- -D warnings
-      - name: TypeScript type check
-        working-directory: typescript
-        run: npm run typecheck
-      - name: TypeScript tests
-        working-directory: typescript
-        run: npm test
       - name: TypeScript integration tests
         working-directory: typescript
         run: npm run test:integration

@@ -1,4 +1,6 @@
-use std::io;
+use std::cell::Cell;
+use std::io::{self, Read};
+use std::path::Path;
 
 const LOCAL_SIGNATURE: u32 = 0x0403_4B50;
 const CENTRAL_SIGNATURE: u32 = 0x0201_4B50;
@@ -13,10 +15,15 @@ const CENTRAL_HEADER: usize = 46;
 const END_RECORD: usize = 22;
 const END64_RECORD: usize = 56;
 const END64_LOCATOR: usize = 20;
+const MAX_ARCHIVE_BYTES: u64 = 256 << 20;
+const MAX_MEMBERS: u64 = 100_000;
+const MAX_MEMBER_BYTES: u64 = 64 << 20;
+const MAX_TOTAL_BYTES: u64 = 512 << 20;
 
 pub struct Archive {
     data: Vec<u8>,
     members: Vec<Member>,
+    total: Cell<u64>,
 }
 
 pub struct Member {
@@ -34,8 +41,21 @@ pub struct Member {
     pub uncompressed_size: u64,
 }
 
+pub fn read_file(path: &Path) -> Result<Vec<u8>, io::Error> {
+    let file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > MAX_ARCHIVE_BYTES {
+        return Err(archive_too_large());
+    }
+    let mut data = Vec::new();
+    file.take(MAX_ARCHIVE_BYTES + 1).read_to_end(&mut data)?;
+    Ok(data)
+}
+
 impl Archive {
     pub fn open(data: Vec<u8>) -> Result<Self, io::Error> {
+        if u64::try_from(data.len()).unwrap_or(u64::MAX) > MAX_ARCHIVE_BYTES {
+            return Err(archive_too_large());
+        }
         let end = EndRecord::find(&data)?;
         let (count, offset) = if end.zip64 {
             let record = End64::read(&data, find_locator(&data, end.offset_absolute)?)?;
@@ -43,6 +63,9 @@ impl Archive {
         } else {
             (u64::from(end.count), end.offset)
         };
+        if count > MAX_MEMBERS {
+            return Err(bad("archive exceeds the member count limit"));
+        }
         let mut members = Vec::new();
         let mut cursor = usize::try_from(offset).map_err(|_| bad("central directory offset"))?;
         for _ in 0..count {
@@ -55,7 +78,11 @@ impl Archive {
             member.end_offset = end_offset;
             end_offset = member.offset;
         }
-        Ok(Self { data, members })
+        Ok(Self {
+            data,
+            members,
+            total: Cell::new(0),
+        })
     }
 
     pub fn members(&self) -> &[Member] {
@@ -98,13 +125,23 @@ impl Archive {
         }
         let length = usize::try_from(member.compressed_size).map_err(|_| bad("member size"))?;
         let payload = slice(&self.data, start, length).ok_or_else(|| bad("truncated member"))?;
-        let output = inflate(member.method, payload)?;
-        if u64::try_from(output.len()).unwrap_or(u64::MAX) != member.uncompressed_size {
+        let size = member.uncompressed_size;
+        if size > MAX_MEMBER_BYTES {
+            return Err(bad("archive member exceeds the uncompressed byte limit"));
+        }
+        let total = self.total.get();
+        if size > MAX_TOTAL_BYTES || total > MAX_TOTAL_BYTES - size {
+            return Err(bad("archive exceeds the total uncompressed byte limit"));
+        }
+        let limit = usize::try_from(size + 1).map_err(|_| bad("member size"))?;
+        let output = inflate(member.method, payload, limit)?;
+        if u64::try_from(output.len()).unwrap_or(u64::MAX) != size {
             return Err(bad("member size mismatch"));
         }
         if crc32(&output) != member.crc32 {
             return Err(bad("bad member CRC"));
         }
+        self.total.set(total + size);
         Ok(output)
     }
 }
@@ -313,11 +350,16 @@ fn u64_at(data: &[u8], at: usize) -> Result<u64, io::Error> {
     Ok(u64::from_le_bytes(field))
 }
 
-fn inflate(method: u16, payload: &[u8]) -> Result<Vec<u8>, io::Error> {
+fn inflate(method: u16, payload: &[u8], limit: usize) -> Result<Vec<u8>, io::Error> {
     match method {
         0 => Ok(payload.to_vec()),
-        8 => miniz_oxide::inflate::decompress_to_vec(payload)
-            .map_err(|_| bad("member uses invalid deflate data")),
+        8 => miniz_oxide::inflate::decompress_to_vec_with_limit(payload, limit).map_err(|error| {
+            if error.status == miniz_oxide::inflate::TINFLStatus::HasMoreOutput {
+                bad("member size mismatch")
+            } else {
+                bad("member uses invalid deflate data")
+            }
+        }),
         _ => Err(bad("unsupported archive compression method")),
     }
 }
@@ -474,6 +516,10 @@ fn cp437(byte: u8) -> char {
 
 fn bad(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
+}
+
+fn archive_too_large() -> io::Error {
+    bad("archive exceeds the byte limit")
 }
 
 #[cfg(test)]
@@ -683,6 +729,60 @@ mod tests {
             archive.read(&archive.members()[0]).unwrap(),
             b"hello hello hello"
         );
+    }
+
+    fn set_declared_size(archive: &mut [u8], size: u32) {
+        let local = archive
+            .windows(4)
+            .position(|window| window == b"PK\x03\x04")
+            .unwrap();
+        archive[local + 22..local + 26].copy_from_slice(&size.to_le_bytes());
+        let central = archive
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+            .unwrap();
+        archive[central + 24..central + 28].copy_from_slice(&size.to_le_bytes());
+    }
+
+    #[test]
+    fn refuses_a_member_declared_over_the_uncompressed_byte_limit() {
+        let mut bytes = write_archive(&[file("a.txt", b"data".to_vec())]);
+        set_declared_size(&mut bytes, (64 << 20) + 1);
+        let archive = Archive::open(bytes).unwrap();
+        let error = archive.read(&archive.members()[0]).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "archive member exceeds the uncompressed byte limit"
+        );
+    }
+
+    #[test]
+    fn stops_inflating_a_member_at_its_declared_size() {
+        let bomb = Spec {
+            name: "bomb.bin".to_owned(),
+            data: vec![0; 65 << 20],
+            method: 8,
+            ..blank()
+        };
+        let mut bytes = write_archive(&[bomb]);
+        set_declared_size(&mut bytes, 16);
+        let local = bytes
+            .windows(4)
+            .position(|window| window == b"PK\x03\x04")
+            .unwrap();
+        let central = bytes
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+            .unwrap();
+        let compressed = u32::from_le_bytes(bytes[central + 20..central + 24].try_into().unwrap());
+        assert!(compressed < 1 << 20);
+        let truncated = (compressed / 2).to_le_bytes();
+        bytes[local + 18..local + 22].copy_from_slice(&truncated);
+        bytes[central + 20..central + 24].copy_from_slice(&truncated);
+        let archive = Archive::open(bytes).unwrap();
+        let error = archive.read(&archive.members()[0]).unwrap_err();
+        assert_eq!(error.to_string(), "member size mismatch");
     }
 
     #[test]

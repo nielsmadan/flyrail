@@ -1,5 +1,5 @@
-import { native } from '../native/loader.js';
-import { callNative } from './call.js';
+import { callNative } from '../../src/internal/call.js';
+import { native } from '../../src/native/loader.js';
 
 export type StateRecordType = 'Index' | 'Journal' | 'Preparation' | 'Receipt' | 'ResourceRef';
 

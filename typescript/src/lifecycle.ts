@@ -1,17 +1,12 @@
-import { Bundle } from './bundle.js';
+import type { Bundle } from './bundle.js';
 import type { Acquisition, EditStatus, OperationStatus, ResourceKind } from './enums.js';
-import { ValueError, type TargetError } from './errors.js';
+import type { TargetError } from './errors.js';
 import { installationHandle, type InstallationTarget } from './installation.js';
-import {
-  lockTimeout,
-  runMutation,
-  runReadOnly,
-  type CallOptions,
-  type LockOptions,
-  type NativeCancelToken,
-} from './internal/abort.js';
+import { lockTimeout, runMutation, runReadOnly, type NativeCancelToken } from './internal/abort.js';
+import type { CallOptions, LockOptions } from './options.js';
 import { awaitNative, callNative, type NativeResult } from './internal/call.js';
-import { attachHandle, handleOf } from './internal/handles.js';
+import { bundleHandle, renderedHandle } from './internal/guards.js';
+import { attachHandle, handleOf, requireHandle } from './internal/handles.js';
 import type {
   ClaimObservationWire,
   InstallationObservationWire,
@@ -22,16 +17,16 @@ import type {
   ResourceResultWire,
   ResourceObservationWire,
 } from './internal/models.js';
-import { frozenPaths, targetErrorFromWire } from './internal/results.js';
-import { requireText } from './internal/text.js';
-import type {
-  JsLifecycleOptions,
-  NativeBundle,
-  NativeLifecyclePreview,
-  NativeRenderedBundle,
-} from './native/binding.js';
+import { frozenCopy, targetErrorFromWire } from './internal/results.js';
+import { requireBundleId } from './internal/text.js';
+import type { JsLifecycleOptions, NativeLifecyclePreview } from './native/binding.js';
 import { native } from './native/loader.js';
-import { adoptRenderedBundle, noticeFromWire, RenderedBundle, type Notice } from './rendered.js';
+import {
+  adoptRenderedBundle,
+  noticeFromWire,
+  type Notice,
+  type RenderedBundle,
+} from './rendered.js';
 
 export interface ResourceRef {
   readonly destination: string;
@@ -101,7 +96,7 @@ const resourcePlanFromWire = (wire: ResourcePlanWire): ResourcePlan =>
   Object.freeze({
     resource: resourceRefFromWire(wire.resource),
     transactionDirectory: wire.transactionDirectory,
-    recoveryPaths: frozenPaths(wire.recoveryPaths),
+    recoveryPaths: frozenCopy(wire.recoveryPaths),
     requireExisting: wire.requireExisting,
     error: targetErrorFromWire(wire.error),
   });
@@ -123,7 +118,7 @@ const resourceObservationFromWire = (wire: ResourceObservationWire): ResourceObs
     claims: Object.freeze(wire.claims.map(claimObservationFromWire)),
     revisionDigest: wire.revisionDigest,
     error: targetErrorFromWire(wire.error),
-    recoveryPaths: frozenPaths(wire.recoveryPaths),
+    recoveryPaths: frozenCopy(wire.recoveryPaths),
   });
 
 const resourceResultFromWire = (wire: ResourceResultWire): ResourceResult =>
@@ -131,7 +126,7 @@ const resourceResultFromWire = (wire: ResourceResultWire): ResourceResult =>
     resource: resourceRefFromWire(wire.resource),
     status: wire.status,
     error: targetErrorFromWire(wire.error),
-    recoveryPaths: frozenPaths(wire.recoveryPaths),
+    recoveryPaths: frozenCopy(wire.recoveryPaths),
   });
 
 interface PreviewParts {
@@ -247,32 +242,13 @@ export const previewFromHandle = (
     target,
   });
 
-export const bundleHandle = (bundle: Bundle): NativeBundle => {
-  const handle = handleOf(bundle);
-  if (!(bundle instanceof Bundle) || !(handle instanceof native.NativeBundle)) {
-    throw new ValueError('bundle must be a Bundle');
-  }
-  return handle;
-};
-
-const renderedHandle = (rendered: RenderedBundle): NativeRenderedBundle => {
-  const handle = handleOf(rendered);
-  if (!(rendered instanceof RenderedBundle) || !(handle instanceof native.NativeRenderedBundle)) {
-    throw new ValueError('rendered bundle must be a RenderedBundle');
-  }
-  return handle;
-};
-
-export const previewHandle = (preview: LifecyclePreview): NativeLifecyclePreview => {
-  const handle = handleOf(preview);
-  if (
-    !(preview instanceof LifecyclePreview) ||
-    !(handle instanceof native.NativeLifecyclePreview)
-  ) {
-    throw new ValueError('preview must be a LifecyclePreview');
-  }
-  return handle;
-};
+export const previewHandle = (preview: LifecyclePreview): NativeLifecyclePreview =>
+  requireHandle(
+    preview,
+    LifecyclePreview,
+    native.NativeLifecyclePreview,
+    'preview must be a LifecyclePreview',
+  );
 
 const lifecycleOptions = (
   options:
@@ -284,8 +260,6 @@ const lifecycleOptions = (
   replaceModified: options?.replaceModified ?? false,
   lockTimeoutMs: locks ? lockTimeout(options) : 0,
 });
-
-const bundleId = (id: string): string => requireText(id, 'bundle id');
 
 export function preview(
   bundle: Bundle,
@@ -314,7 +288,7 @@ export function previewRemoval(
   return runReadOnly(options?.signal, async () => {
     const handle = await awaitNative(
       native.lifecyclePreviewRemoval(
-        bundleId(id),
+        requireBundleId(id),
         installationHandle(target),
         lifecycleOptions(options, false),
       ),
@@ -374,7 +348,7 @@ export function recoverInstallation(
     () => target,
     (token) =>
       native.lifecycleRecoverInstallation(
-        bundleId(id),
+        requireBundleId(id),
         installationHandle(target),
         lifecycleOptions(options, true),
         token,
@@ -390,7 +364,7 @@ export function inspectInstallation(
   return runReadOnly(options?.signal, async () =>
     createObservation(
       await awaitNative(
-        native.lifecycleInspectInstallation(bundleId(id), installationHandle(target)),
+        native.lifecycleInspectInstallation(requireBundleId(id), installationHandle(target)),
       ),
       target,
     ),
@@ -407,7 +381,7 @@ export function remove(
     () => target,
     (token) =>
       native.lifecycleRemove(
-        bundleId(id),
+        requireBundleId(id),
         installationHandle(target),
         lifecycleOptions(options, true),
         token,

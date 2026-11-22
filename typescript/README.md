@@ -8,7 +8,8 @@ other Flyrail implementations.
 ## Status
 
 Alpha and unreleased. Every domain of the Rust crate that the Go module also
-exposes is bound. Nothing is published to npm yet.
+exposes is bound, except host-implemented stores and store locks (see
+[support](docs/support.md#deferred)). Nothing is published to npm yet.
 
 ## Platforms
 
@@ -116,6 +117,9 @@ export async function run(root: string): Promise<void> {
 - [API reference](docs/api.md)
 - [Architecture](docs/architecture.md)
 - [Lifecycle](docs/lifecycle.md)
+- [Configuration](docs/configuration.md)
+- [Inspection](docs/inspection.md)
+- [Translation](docs/translation.md)
 - [Hooks](docs/hooks.md)
 - [Global Loadout](docs/loadout.md)
 - [Examples](docs/examples.md)

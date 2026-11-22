@@ -52,6 +52,14 @@ loaded through `createRequire(import.meta.url)`; if neither loads it throws
 rather than `process.dlopen` lets Electron redirect an `app.asar` path to
 `app.asar.unpacked`.
 
+Because the addon loads while `flyrail` is evaluated, a failed load rejects
+`import('flyrail')` and fails a static `import` of it. To degrade gracefully
+on an unsupported platform or a missing platform package, import the error
+classes from `flyrail/errors`, which never loads the addon, and load the
+package with a dynamic `import()` (see [API](api.md#package)). `just
+check-package` installs `flyrail` without its platform package and checks this
+pattern.
+
 There is no environment variable that overrides the addon path. The library
 never reads the environment, so the addon's location is decided only by
 package resolution.
@@ -98,8 +106,8 @@ A pending call keeps the event loop alive until it settles, so await every
 mutation before calling `process.exit` or Electron's `app.exit`. Exiting
 earlier abandons the operation wherever it is; the next `sync`, `remove` or
 `recoverInstallation` recovers it. Calling the package from `worker_threads` is
-supported: the design spike terminated a worker with a call in flight on Node,
-Bun and Electron without a crash or a hang. See
+supported; terminating a worker with a call in flight is not covered by an
+automated check. See
 [lifecycle](lifecycle.md#process-lifecycle).
 
 ## Bun

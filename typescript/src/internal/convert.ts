@@ -1,6 +1,7 @@
 import { ValueError } from '../errors.js';
 import { DateTimeValue, DateValue, ObjectValue, TimeValue, type SemanticValue } from '../values.js';
 import { requireText } from './text.js';
+import { frozenCopy } from './results.js';
 
 export interface NativeDate {
   readonly year: number;
@@ -220,7 +221,7 @@ function closeSemantic(
   outs: readonly SemanticValue[],
 ): SemanticValue {
   return kind === 'array'
-    ? Object.freeze([...outs])
+    ? frozenCopy(outs)
     : new ObjectValue(outs.map((out, index) => [keys[index] ?? '', out] as const));
 }
 

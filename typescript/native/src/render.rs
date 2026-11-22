@@ -1,10 +1,10 @@
 use crate::artifacts::{read_dependencies, write_dependencies};
 use crate::bundles::NativeBundle;
 use crate::content::{
-    Captured, Wire, node, parse, read_content, read_schema, status, write_content, write_schema,
+    Captured, Wire, node, parse, read_content, read_schema, write_content, write_schema,
 };
 use crate::convert::absolute_path;
-use crate::errors::{BindingResult, tagged};
+use crate::errors::{BindingResult, status, tagged};
 use crate::guard::{guarded, on_large_stack};
 use crate::hooks::NativeHookRuntime;
 use crate::targets::{JsPair, NativeTarget, lossy, pair_view};

@@ -220,14 +220,16 @@ async function ai(request: AiRequest, io: Io): Promise<number> {
   return clean(results) ? 0 : 1;
 }
 
-const countWords = async (path: string): Promise<number> => {
-  const bytes = await readFile(path);
-  let text: string;
+const decodeUtf8 = (bytes: Uint8Array, path: string): string => {
   try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
     throw new Error(`${path} is not valid UTF-8`);
   }
+};
+
+const countWords = async (path: string): Promise<number> => {
+  const text = decodeUtf8(await readFile(path), path);
   return text.split(/\s+/u).filter((word) => word !== '').length;
 };
 

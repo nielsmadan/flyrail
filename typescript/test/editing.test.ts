@@ -21,10 +21,8 @@ import {
   editDocument,
   valuesEqual,
 } from 'flyrail';
+import { decode, encode } from './helpers/bytes.js';
 
-const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
-const decode = (bytes: Uint8Array | null): string | null =>
-  bytes === null ? null : new TextDecoder().decode(bytes);
 const setting = (value: bigint): StructuredContent =>
   new StructuredContent('json', new Selector([new Key('limit')]), value);
 

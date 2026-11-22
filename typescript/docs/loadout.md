@@ -46,11 +46,19 @@ diagnostic.
 - `previewLoadoutRemoval(bundleId, location, store)` plans a source-free removal
   from the recorded installation; apply it with `applyLoadout`.
 - `applyLoadout(preview, { lockTimeoutMs, signal })` revalidates the recorded
-  reads and publishes. Cancellation before the first durable write rejects with
-  `signal.reason`; after it the real result resolves.
+  reads and publishes. Cancellation follows the
+  [lifecycle checkpoints](lifecycle.md#abortsignal): an abort seen up to the
+  post-lock check rejects with `signal.reason`; a later one resolves with the
+  real result.
 - `inspectLoadout(bundleId, location, store)` observes the installation.
 - `recoverLoadout(bundleId, location, store, options)` completes or rolls back an
   interrupted transaction.
+
+A `LoadoutSetup` or `LoadoutDestination` captures the source as it was read at
+discovery. Once the source changes, including through this library's own
+`applyLoadout` or removal, a preview from that setup or destination is not
+applicable: its `diagnostic` has code `concurrent-change`. Run
+`discoverLoadout` again and select a fresh destination before the next preview.
 
 Keep the `LoadoutLocation` (`root`, `profile`, `sourceName`, `sourcePath`)
 alongside the state store: it identifies the installation for later reads and

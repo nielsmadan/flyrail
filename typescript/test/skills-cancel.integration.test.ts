@@ -1,16 +1,10 @@
-import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { Target, install, uninstall } from 'flyrail';
+import { InstallationTarget, Target, canonicalDestination, install } from 'flyrail';
 import { holdLock, storeUnder } from './helpers/lifecycle.js';
 import { skillBundle } from './helpers/skills.js';
 import { tempRoot } from './helpers/temp.js';
-
-const exists = (path: string): Promise<boolean> =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
+import { exists } from './helpers/files.js';
 
 describe('skill cancellation', () => {
   test('an abort during a blocked index lock wait rejects with the reason and installs nothing', async () => {
@@ -18,12 +12,9 @@ describe('skill cancellation', () => {
     const store = await storeUnder(root);
     const bundle = skillBundle();
     const targets = [Target.directory(join(root, 'skills'))];
-    await install(bundle, targets, store);
-    await uninstall(bundle.id, targets, store);
-    const indexKeys = await store.keys(`index/${bundle.id}/`);
-    expect(indexKeys).toHaveLength(1);
-    const [lockName] = indexKeys;
-    const hold = await holdLock(store, lockName ?? '');
+    const destination = await canonicalDestination(join(root, 'skills'));
+    const { contextDigest } = new InstallationTarget(store, { destination });
+    const hold = await holdLock(store, `index/${bundle.id}/${contextDigest}`);
     try {
       const controller = new AbortController();
       const reason = new Error('stop');

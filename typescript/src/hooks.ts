@@ -12,6 +12,7 @@ import type {
   NativeHookResponse,
 } from './native/binding.js';
 import { native } from './native/loader.js';
+import { frozenCopy } from './internal/results.js';
 
 const limits = native.hookLimits();
 export const HOOK_INPUT_LIMIT: number = limits.input;
@@ -345,7 +346,7 @@ export class HookHandler {
     const snapshot = handle.snapshot();
     this.id = snapshot.id;
     this.event = snapshot.event as HookEvent;
-    this.argv = Object.freeze([...snapshot.argv]);
+    this.argv = frozenCopy(snapshot.argv);
     this.environment = Object.freeze(
       Object.fromEntries(
         snapshot.environment.map(
@@ -357,7 +358,7 @@ export class HookHandler {
     this.cwd = snapshot.cwd;
     this.timeoutMs = snapshot.timeoutMs;
     this.outcomes = Object.freeze(snapshot.outcomes as HookOutcome[]);
-    this.tools = Object.freeze([...snapshot.tools]);
+    this.tools = frozenCopy(snapshot.tools);
     handlerHandles.attach(this, handle);
     Object.freeze(this);
   }

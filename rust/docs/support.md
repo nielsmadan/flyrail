@@ -18,6 +18,14 @@ Flyrail does not manage cloud configuration, execute bundled commands during
 installation, or contact MCP servers. A current installation does not prove host
 discovery, trust, activation, credentials, or runtime readiness.
 
+## Bundle archive limits
+
+`Bundle::from_zip` caps untrusted archives before allocating: 256 MiB of
+archive, 100,000 members, 64 MiB uncompressed per member and 512 MiB
+uncompressed in total. A member never inflates past its declared size. An
+archive over a cap returns `BundleError::Io` (`InvalidData`) with the same text
+as the Go module, such as `archive member exceeds the uncompressed byte limit`.
+
 ## Security metadata
 
 Partial section and structured updates preserve current file mode and supported

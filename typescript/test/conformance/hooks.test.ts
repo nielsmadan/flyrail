@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { HookRequest, HookResponse, type HookEvent, type HookOutcome } from 'flyrail';
 import { fixture } from '../helpers/fixtures.js';
+import { decode, encode } from '../helpers/bytes.js';
 
 interface HookVector {
   readonly name: string;
@@ -14,8 +15,6 @@ const document = fixture('hooks.json') as
   { readonly version: number; readonly cases: readonly HookVector[] } | undefined;
 
 const declared: readonly HookOutcome[] = ['continue', 'block', 'ask', 'modify-input', 'context'];
-const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
-const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 describe('hooks.json', () => {
   test.skipIf(document === undefined)('is version 1 with cases', () => {

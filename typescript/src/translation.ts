@@ -1,17 +1,13 @@
-import type { InstructionArtifact, McpArtifact } from './artifacts.js';
+import { InstructionArtifact, McpArtifact } from './artifacts.js';
 import type { Bundle } from './bundle.js';
 import { callNative } from './internal/call.js';
-import { attachHandle, handleOf } from './internal/handles.js';
+import { bundleHandle, contextHandle } from './internal/guards.js';
+import { attachHandle, requireHandle } from './internal/handles.js';
 import { toPairObjects } from './internal/maps.js';
 import { modelHandle } from './internal/models.js';
 import { requireAbsolute } from './internal/paths.js';
-import { requireText } from './internal/text.js';
-import type {
-  NativeBundle,
-  NativeRenderContext,
-  NativeRenderedBundle,
-  NativeTranslation,
-} from './native/binding.js';
+import { requireBundleId, requireText } from './internal/text.js';
+import type { NativeRenderedBundle, NativeTranslation } from './native/binding.js';
 import { native } from './native/loader.js';
 import type { RenderContext } from './render-context.js';
 import {
@@ -25,20 +21,15 @@ import {
   type RenderedBundle,
 } from './rendered.js';
 
-const contextHandle = (context: RenderContext): NativeRenderContext =>
-  handleOf(context) as NativeRenderContext;
-
 export function render(bundle: Bundle, context: RenderContext): RenderedBundle {
   return adoptRenderedBundle(
-    callNative(() => native.renderBundle(handleOf(bundle) as NativeBundle, contextHandle(context))),
+    callNative(() => native.renderBundle(bundleHandle(bundle), contextHandle(context))),
   );
 }
 
 export function renderMany(bundle: Bundle, contexts: readonly RenderContext[]): RenderedBundle {
   return adoptRenderedBundle(
-    callNative(() =>
-      native.renderBundleMany(handleOf(bundle) as NativeBundle, contexts.map(contextHandle)),
-    ),
+    callNative(() => native.renderBundleMany(bundleHandle(bundle), contexts.map(contextHandle))),
   );
 }
 
@@ -71,8 +62,8 @@ export function translateInstructionArtifact(
   return adoptTranslation(
     callNative(() =>
       native.translateInstruction(
-        requireText(bundleId, 'bundle id'),
-        modelHandle(artifact),
+        requireBundleId(bundleId),
+        modelHandle(artifact, InstructionArtifact, 'artifact must be an InstructionArtifact'),
         contextHandle(context),
       ),
     ),
@@ -90,7 +81,11 @@ export function translateMcpArtifact(
   }));
   return adoptTranslation(
     callNative(() =>
-      native.translateMcp(modelHandle(artifact), contextHandle(context), destinations),
+      native.translateMcp(
+        modelHandle(artifact, McpArtifact, 'artifact must be an McpArtifact'),
+        contextHandle(context),
+        destinations,
+      ),
     ),
   );
 }
@@ -103,7 +98,14 @@ export function assembleTranslations(
 ): RenderedBundle {
   const handle: NativeRenderedBundle = callNative(() =>
     native.translationsAssemble(
-      translations.map((translation) => handleOf(translation) as NativeTranslation),
+      translations.map((translation) =>
+        requireHandle(
+          translation,
+          ArtifactTranslation,
+          native.NativeTranslation,
+          'translation must be an ArtifactTranslation',
+        ),
+      ),
       { dependencies: dependencies.map(dependencyWire) },
       contexts.map(contextHandle),
       toPairObjects(routingContext),

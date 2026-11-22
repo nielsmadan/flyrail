@@ -118,7 +118,7 @@ pub(crate) fn active() -> bool {
     with_scopes(|scopes| scopes.last().is_some_and(|scope| !scope.committed)).unwrap_or(false)
 }
 
-pub(crate) fn interrupted() -> bool {
+pub(crate) fn observe_interruption() -> bool {
     with_scopes(|scopes| {
         let mut cancelled = false;
         for scope in scopes.iter_mut().filter(|scope| !scope.committed) {
@@ -131,7 +131,7 @@ pub(crate) fn interrupted() -> bool {
 }
 
 pub(crate) fn begin_commit() -> bool {
-    !interrupted()
+    !observe_interruption()
 }
 
 pub(crate) fn mark_committed() {
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn nothing_is_interrupted_outside_a_scope() {
         assert!(!active());
-        assert!(!interrupted());
+        assert!(!observe_interruption());
         assert!(begin_commit());
     }
 
@@ -179,7 +179,7 @@ mod tests {
         let result = cancellable(&token, || {
             let granted = begin_commit();
             token.cancel();
-            seen.set((granted, interrupted()));
+            seen.set((granted, observe_interruption()));
         });
         assert_eq!(seen.get(), (true, true));
         assert_eq!(result, Err(Cancelled));
@@ -191,7 +191,7 @@ mod tests {
         let result = cancellable(&token, || {
             mark_committed();
             token.cancel();
-            (active(), interrupted(), begin_commit())
+            (active(), observe_interruption(), begin_commit())
         });
         assert_eq!(result, Ok((false, false, true)));
     }
@@ -203,7 +203,7 @@ mod tests {
         let result = cancellable(&outer, || {
             let nested = cancellable(&Cancellation::new(), || {
                 outer.cancel();
-                interrupted()
+                observe_interruption()
             });
             seen.set(Some(nested));
         });
@@ -217,7 +217,7 @@ mod tests {
         let result = cancellable(&outer, || {
             let nested = cancellable(&Cancellation::new(), mark_committed);
             outer.cancel();
-            (nested, active(), interrupted())
+            (nested, active(), observe_interruption())
         });
         assert_eq!(result, Ok((Ok(()), false, false)));
     }
@@ -230,7 +230,7 @@ mod tests {
             let nested = cancellable(&Cancellation::new(), active);
             let restored = active();
             outer.cancel();
-            seen.set((nested == Ok(true), restored, interrupted()));
+            seen.set((nested == Ok(true), restored, observe_interruption()));
         });
         assert_eq!(seen.get(), (true, true, true));
         assert_eq!(result, Err(Cancelled));
@@ -242,7 +242,7 @@ mod tests {
         let inner = Cancellation::new();
         let result = cancellable(&outer, || {
             inner.cancel();
-            let nested = cancellable(&inner, interrupted);
+            let nested = cancellable(&inner, observe_interruption);
             mark_committed();
             nested
         });
@@ -258,7 +258,7 @@ mod tests {
         assert!(outcome.is_err());
         assert!(!active());
         token.cancel();
-        assert!(!interrupted());
+        assert!(!observe_interruption());
         assert_eq!(cancellable(&Cancellation::new(), || 1), Ok(1));
     }
 }

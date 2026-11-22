@@ -20,6 +20,7 @@ import {
 } from './internal/models.js';
 import { requireText } from './internal/text.js';
 import type { SemanticScalar, SemanticValue } from './values.js';
+import { frozenCopy } from './internal/results.js';
 
 export class FileContent {
   readonly kind = 'file';
@@ -92,7 +93,7 @@ export class Member {
       key: key.map((name) => requireText(name, 'member key')),
     });
     this.#identity = snapshot.identity;
-    this.key = Object.freeze([...snapshot.key]);
+    this.key = frozenCopy(snapshot.key);
     attachHandle(this, handle);
     Object.freeze(this);
   }
@@ -124,7 +125,7 @@ export class Selector {
 
   constructor(parts: readonly SelectorPart[]) {
     const { handle } = buildModel<SelectorWire>(selectorWire({ parts }));
-    this.parts = Object.freeze([...parts]);
+    this.parts = frozenCopy(parts);
     attachHandle(this, handle);
     Object.freeze(this);
   }

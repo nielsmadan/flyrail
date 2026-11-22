@@ -1,9 +1,9 @@
 import type { Agent, Family } from './enums.js';
 import { callNative } from './internal/call.js';
-import { handleOf } from './internal/handles.js';
-import type { NativeRenderContext } from './native/binding.js';
+import { contextHandle } from './internal/guards.js';
 import { native } from './native/loader.js';
 import type { RenderContext } from './render-context.js';
+import { frozenCopy } from './internal/results.js';
 
 export interface Capability {
   readonly family: Family;
@@ -12,9 +12,6 @@ export interface Capability {
   readonly limitations: readonly string[];
   readonly prerequisites: readonly string[];
 }
-
-const contextHandle = (context: RenderContext): NativeRenderContext =>
-  handleOf(context) as NativeRenderContext;
 
 export const TRANSLATABLE_AGENTS: readonly Agent[] = Object.freeze(
   callNative(() => native.renderTranslatableAgents()) as Agent[],
@@ -47,8 +44,8 @@ export function capabilities(context: RenderContext): readonly Capability[] {
         family: capability.family as Family,
         portable: capability.portable,
         native: capability.native,
-        limitations: Object.freeze([...capability.limitations]),
-        prerequisites: Object.freeze([...capability.prerequisites]),
+        limitations: frozenCopy(capability.limitations),
+        prerequisites: frozenCopy(capability.prerequisites),
       }),
     ),
   );

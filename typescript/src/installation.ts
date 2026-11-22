@@ -1,6 +1,5 @@
-import { ValueError } from './errors.js';
 import { callNative } from './internal/call.js';
-import { attachHandle, handleOf } from './internal/handles.js';
+import { attachHandle, hasHandle, requireHandle } from './internal/handles.js';
 import { fromPairObjects, toPairObjects, type PairObject } from './internal/maps.js';
 import { requireText } from './internal/text.js';
 import type { NativeInstallationTarget } from './native/binding.js';
@@ -49,10 +48,9 @@ export class InstallationTarget {
   }
 
   equals(other: InstallationTarget): boolean {
-    const otherHandle = handleOf(other);
     return (
-      otherHandle instanceof native.NativeInstallationTarget &&
-      installationHandle(this).equals(otherHandle)
+      hasHandle(other, InstallationTarget, native.NativeInstallationTarget) &&
+      installationHandle(this).equals(installationHandle(other))
     );
   }
 }
@@ -70,12 +68,10 @@ export function adoptInstallationTarget(
 }
 
 export function installationHandle(target: InstallationTarget): NativeInstallationTarget {
-  const handle = handleOf(target);
-  if (
-    !(target instanceof InstallationTarget) ||
-    !(handle instanceof native.NativeInstallationTarget)
-  ) {
-    throw new ValueError('target must be an InstallationTarget');
-  }
-  return handle;
+  return requireHandle(
+    target,
+    InstallationTarget,
+    native.NativeInstallationTarget,
+    'target must be an InstallationTarget',
+  );
 }

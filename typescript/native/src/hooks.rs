@@ -1,7 +1,7 @@
 use crate::bundles::{JsBundleEntry, entry_view};
 use crate::content::parse;
-use crate::convert::{HookUnits, absolute_path, whole};
-use crate::errors::{BindingError, BindingResult, tagged};
+use crate::convert::{absolute_path, whole};
+use crate::errors::{BindingError, BindingResult, outside_i64, tagged};
 use crate::guard::{guarded, on_large_stack};
 use flyrail::hooks::{
     ERROR_LIMIT, EVENT_TIMEOUT_LIMIT_MS, HANDLER_LIMIT, INPUT_LIMIT, JSON_DEPTH_LIMIT,
@@ -94,7 +94,7 @@ pub fn hook_limits() -> JsHookLimits {
 }
 
 fn text_of(units: &Uint16Array) -> HookText {
-    HookText::from_utf16(HookUnits::from(units).0)
+    HookText::from_utf16(units.to_vec())
 }
 
 fn units_of(text: &HookText) -> Uint16Array {
@@ -213,9 +213,7 @@ pub fn hook_json_integer(env: &Env, value: BigInt) -> napi::Result<Object<'_>> {
             if lossless {
                 Ok(json(HookJson::integer(integer)?))
             } else {
-                Err(BindingError::Argument(String::from(
-                    "integers must fit signed 64 bits",
-                )))
+                Err(outside_i64())
             }
         }),
     )

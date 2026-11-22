@@ -1,7 +1,8 @@
 import type { Ownership } from './enums.js';
-import { runReadOnly, type CallOptions } from './internal/abort.js';
+import { runReadOnly } from './internal/abort.js';
+import type { CallOptions } from './options.js';
 import { awaitNative, callNative } from './internal/call.js';
-import { attachHandle, handleOf } from './internal/handles.js';
+import { attachHandle, hasHandle, requireHandle } from './internal/handles.js';
 import {
   buildModel,
   modelHandle,
@@ -76,6 +77,8 @@ export class ResourceAuthority {
   }
 }
 
+const claimHandle = (claim: Claim) => modelHandle(claim, Claim, 'claim must be a Claim');
+
 export class Claim {
   readonly kind: Ownership;
   readonly selector: ClaimSelector;
@@ -93,19 +96,25 @@ export class Claim {
   }
 
   overlaps(other: Claim): boolean {
-    return callNative(() => modelHandle(this).claimOverlaps(modelHandle(other)));
+    const handle = claimHandle(other);
+    return callNative(() => claimHandle(this).claimOverlaps(handle));
   }
 
   identity(authority: ResourceAuthority): string {
-    const handle = handleOf(authority);
-    if (!(authority instanceof ResourceAuthority) || handle === undefined) {
-      throw new ValueError('authority must be a ResourceAuthority');
-    }
-    return callNative(() => modelHandle(this).claimIdentity(handle as NativeAuthority));
+    const handle = requireHandle(
+      authority,
+      ResourceAuthority,
+      native.NativeAuthority,
+      'authority must be a ResourceAuthority',
+    );
+    return callNative(() => claimHandle(this).claimIdentity(handle));
   }
 
   equals(other: Claim): boolean {
-    return callNative(() => modelHandle(this).claimEquals(modelHandle(other)));
+    return (
+      hasHandle(other, Claim, native.NativeModel) &&
+      callNative(() => claimHandle(this).claimEquals(claimHandle(other)))
+    );
   }
 }
 

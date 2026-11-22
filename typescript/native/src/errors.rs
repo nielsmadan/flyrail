@@ -21,6 +21,14 @@ pub(crate) enum BindingError {
 
 pub(crate) type BindingResult<T> = Result<T, BindingError>;
 
+pub(crate) fn status<T>(result: napi::Result<T>) -> BindingResult<T> {
+    result.map_err(|error| BindingError::Native(error.reason))
+}
+
+pub(crate) fn outside_i64() -> BindingError {
+    BindingError::Argument(String::from("integers must fit signed 64 bits"))
+}
+
 impl From<ValueError> for BindingError {
     fn from(error: ValueError) -> Self {
         Self::Value(error)

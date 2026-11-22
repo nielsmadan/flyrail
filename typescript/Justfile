@@ -51,11 +51,12 @@ interop-driver:
     @test -x ../python/.venv/bin/python || { echo "the Python environment is missing: run just setup at the repository root" >&2; exit 1; }
     env -u CARGO_TARGET_DIR cargo build --locked --manifest-path ../rust/Cargo.toml --example interop --features interop-test-seams
 
-check-integration: check interop-driver tools
+check-integration: check interop-driver tools && _bun-smoke
     npm run test:integration
-    just bun-smoke
 
-bun-smoke: tools
+bun-smoke: tools && _bun-smoke
+
+_bun-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
     bun="$(python3 -I -B scripts/tools.py bun 2> /dev/null || command -v bun || true)"

@@ -12,6 +12,8 @@ export function requireText(text: string, label: string): string {
   return text;
 }
 
+export const requireBundleId = (id: string): string => requireText(id, 'bundle id');
+
 export function toUnits(text: string): Uint16Array {
   if (typeof text !== 'string') {
     throw new ValueError('hook text must be a string');

@@ -7,7 +7,7 @@ import type {
   SkillInspectionWire,
   SkillResultWire,
 } from './internal/models.js';
-import { frozenPaths, targetErrorFromWire } from './internal/results.js';
+import { frozenCopy, targetErrorFromWire } from './internal/results.js';
 import type { Target } from './targets.js';
 
 export interface InventoryEntry {
@@ -104,7 +104,7 @@ const observationFromWire = (wire: ObservationWire): Observation =>
       wire.conflicts.map((item) => Object.freeze({ path: item.path, owner: item.owner })),
     ),
     error: targetErrorFromWire(wire.error),
-    recoveryPaths: frozenPaths(wire.recoveryPaths),
+    recoveryPaths: frozenCopy(wire.recoveryPaths),
     isCurrent: wire.isCurrent,
   });
 
@@ -144,7 +144,7 @@ export const targetResultsFromWire = (
         status: item.status,
         observation: observationFromWire(item.observation),
         error: targetErrorFromWire(item.error),
-        recoveryPaths: frozenPaths(item.recoveryPaths),
+        recoveryPaths: frozenCopy(item.recoveryPaths),
         succeeded: item.status === 'applied' || item.status === 'unchanged',
       }),
     ),

@@ -6,7 +6,8 @@ Run commands from `typescript/`. The repository-root Justfile runs `just setup`
 and `just check` here as part of its own `setup` and `check`, and
 `check-integration` and `check-package` here as part of its own. Warm
 `just check` here takes 19 s (median of three runs: 19, 19 and 18 s on Apple
-silicon with everything cached), inside the 30 s budget for the git-hook gate.
+silicon with everything cached), inside the 30 s budget for the git-hook gate. The budget covers the TypeScript
+portion only, on top of the Python, Rust and Go checks the root hook already runs.
 If a later change pushes it past 30 s, native clippy and the `conformance`
 project move into `just check-integration`; format-check, lint, type check and
 the `unit` and `smoke` projects stay in `just check`.
@@ -17,7 +18,7 @@ the `unit` and `smoke` projects stay in `just check`.
 | ---------- | ----------------------------------------------------------------------------- |
 | Node.js    | `>=24.14` (`engines.node`); CI pins 24.21.0                                   |
 | npm        | 11.19.0 in CI, with the committed `package-lock.json`                         |
-| Bun        | 1.4.2, the minimum the design spike verified (run scripts with `bun run`)     |
+| Bun        | 1.4.2, the minimum `just bun-smoke` and the package QA run (use `bun run`)    |
 | Rust       | 1.99.0 from the root `rust-toolchain.toml`                                    |
 | TypeScript | 6.0.3, the newest release inside typescript-eslint 8.72.1's peer range (<6.1) |
 
@@ -73,7 +74,9 @@ unoptimized build overflows Node's main stack on deep value conversions.
 add the napi dependencies, so the engine is built with exactly the versions the
 Rust crate is tested with. `scripts/check_cargo_lock.py` (run by `deps-check`)
 fails, naming each package, when a package present in both lockfiles resolves
-to a different set of versions. The napi crates are locked to napi 3.16.1,
+to a different set of versions, or when a direct dependency of `native/`
+(napi, napi-derive, napi-build) does not resolve to exactly the version
+`native/Cargo.toml` declares. The napi crates are locked to napi 3.16.1,
 napi-derive 3.7.0 and napi-derive-backend 7.0.0: napi-derive-backend 7.0.1
 generates code that needs napi 3.16.2. `just lock` re-seeds from the Rust
 lockfile and re-applies those three pins.
@@ -108,8 +111,8 @@ held; tests call its `release()` in `finally`. Integration tests pass an
 explicit per-test timeout and a `lockTimeoutMs` (10 s) wherever they expect a
 blocked wait. `test/helpers` provides
 `tempRoot()` (a `0700` directory removed when the test finishes),
-`fixture(name)` for `../spec/fixtures`, and `requireTool`/`toolAvailable` for
-Node, Bun and the repository Python.
+`fixture(name)` for `../spec/fixtures`, `requireTool` for Node, Bun and the
+repository Python, `encode`/`decode`/`fromHex` for bytes and `exists` for paths.
 
 `just bun-smoke` runs `test/runtime/bun-smoke.ts` with `bun run` (never
 `bun test`): eight concurrent `sync` calls sharing one `DirectoryStore`, and one
@@ -164,7 +167,8 @@ each consumer's stdout and stderr, when one fails.
    whose every field the QA asserts. For Node the QA also asserts that the
    addon was loaded from the platform package; Bun has no `process.report`, so
    that check is skipped for Bun.
-5. On macOS it builds an Electron 45.2.3 app from `scripts/consumer/electron`:
+5. On macOS it runs `node node_modules/electron/install.js` (Electron 45 has no
+   postinstall that fetches its binary) and builds an Electron 45.2.3 app from `scripts/consumer/electron`:
    esbuild bundles `main.ts` with `flyrail` external, the two packages are
    copied into the app, and @electron/asar packs it with `--unpack "**/*.node"`.
    It asserts that `asar list --is-pack` marks every `.node` entry `unpack`
@@ -212,10 +216,10 @@ and macOS 26 for changes under `typescript/` and every path that selects Rust; s
 the [path selection table](../../python/docs/development.md#ci-and-maintenance).
 The binding builds the Rust crate, so changes to `rust/` run it too.
 
-| Job                           | When                                                  | What                                                                                                                                                                                                                                                                     |
-| ----------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `TypeScript (os)`             | Pushes, nightly, dispatch, and affected pull requests | Installs the Rust toolchain from `rust-toolchain.toml`, Node 24.21.0 and npm 11.19.0 (asserted), then `npm ci` and the `just check` order: dependency check, native build, Prettier and rustfmt, ESLint and clippy, type check and tests, followed by `npm run build`.   |
-| `TypeScript integration (os)` | Nightly schedule and dispatch                         | Provisions Python, uv, Rust, Node 24.21.0 and Bun 1.4.2, builds the Rust interop example, then runs the fast tier, the integration tests, the Bun smoke script, the release addon, `dist/` and the package QA, whose Electron main process runs unsandboxed on macOS 26. |
+| Job                           | When                                                  | What                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TypeScript (os)`             | Pushes, nightly, dispatch, and affected pull requests | Installs the Rust toolchain from `rust-toolchain.toml`, Node 24.21.0 and npm 11.19.0 (asserted), then `npm ci` and the `just check` order: dependency check, native build, Prettier and rustfmt, ESLint and clippy, type check and tests, followed by `npm run build`.                                                                       |
+| `TypeScript integration (os)` | Nightly schedule and dispatch                         | Provisions Python, uv, Rust, Node 24.21.0 and Bun 1.4.2, builds the Rust interop example and the debug addon, then runs the integration tests (the fast tier runs in `TypeScript (os)` on the same schedule), the Bun smoke script, the release addon, `dist/` and the package QA, whose Electron main process runs unsandboxed on macOS 26. |
 
 Both jobs count toward `CI result`, which is the single required status check.
 CI runs the underlying commands directly, not through `just`, with the same

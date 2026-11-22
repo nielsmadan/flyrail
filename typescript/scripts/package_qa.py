@@ -133,9 +133,8 @@ def private_directory(path: Path) -> Path:
     return path
 
 
-def expect(failures: list[str], label: str, actual: object, wanted: object) -> None:
-    if actual != wanted:
-        failures.append(f"{label}: {actual!r} != {wanted!r}")
+def expect(label: str, actual: object, wanted: object) -> list[str]:
+    return [] if actual == wanted else [f"{label}: {actual!r} != {wanted!r}"]
 
 
 def package_version() -> str:
@@ -318,6 +317,32 @@ def raise_for_exit(label: str, command: list[str], stderr_path: Path, reason: st
     raise StepFailedError(f"{label}: {reason}\ncommand: {' '.join(command)}\n{stderr[-4000:]}")
 
 
+def abort_failures(abort: object, handshake: dict[str, object]) -> list[str]:
+    if not isinstance(abort, dict):
+        return [f"abort: {abort!r}"]
+    elapsed = abort.get("elapsedMs")
+    in_range = isinstance(elapsed, int) and 90 <= elapsed < ABORT_LIMIT_MS
+    return [
+        *expect("abort.lockName", abort.get("lockName"), handshake["lockName"]),
+        *expect("abort.firstSync", abort.get("firstSync"), "applied"),
+        *expect("abort.outcome", abort.get("outcome"), "reason"),
+        *expect("abort.error", abort.get("error"), None),
+        *expect("abort.afterRelease", abort.get("afterRelease"), "unchanged"),
+        *expect("abort.removed", abort.get("removed"), "applied"),
+        *expect("handshake.outcome", handshake.get("outcome"), "reason"),
+        *([] if in_range else [f"abort.elapsedMs: {elapsed!r} is not in [90, {ABORT_LIMIT_MS})"]),
+    ]
+
+
+def loaded_failures(loaded: object, native_dir: Path | None) -> list[str]:
+    if native_dir is None:
+        return []
+    wanted = os.path.realpath(native_dir / "flyrail.node")
+    if isinstance(loaded, str) and os.path.realpath(loaded) == wanted:
+        return []
+    return [f"loadedFrom: {loaded!r} is not {wanted}"]
+
+
 def check_report(
     report: dict[str, object],
     handshake: dict[str, object],
@@ -326,35 +351,19 @@ def check_report(
     native_dir: Path | None,
 ) -> None:
     manifest = json.loads((EXAMPLE_BUNDLE / "flyrail.json").read_text())
-    failures: list[str] = []
-    expect(failures, "runtime", report.get("runtime"), runtime)
-    expect(failures, "flyrailVersion", report.get("flyrailVersion"), version)
-    expect(failures, "bundleId", report.get("bundleId"), manifest["id"])
-    expect(failures, "bundleVersion", report.get("bundleVersion"), manifest["version"])
-    expect(failures, "install", report.get("install"), ["applied"])
-    expect(failures, "inspect", report.get("inspect"), [True])
-    expect(failures, "concurrent", report.get("concurrent"), ["applied"] * 8)
-    expect(failures, "uninstall", report.get("uninstall"), ["applied"])
-    expect(failures, "skillRemoved", report.get("skillRemoved"), True)
-    abort = report.get("abort")
-    if not isinstance(abort, dict):
-        failures.append(f"abort: {abort!r}")
-    else:
-        expect(failures, "abort.lockName", abort.get("lockName"), handshake["lockName"])
-        expect(failures, "abort.firstSync", abort.get("firstSync"), "applied")
-        expect(failures, "abort.outcome", abort.get("outcome"), "reason")
-        expect(failures, "abort.error", abort.get("error"), None)
-        expect(failures, "abort.afterRelease", abort.get("afterRelease"), "unchanged")
-        expect(failures, "abort.removed", abort.get("removed"), "applied")
-        expect(failures, "handshake.outcome", handshake.get("outcome"), "reason")
-        elapsed = abort.get("elapsedMs")
-        if not isinstance(elapsed, int) or not 90 <= elapsed < ABORT_LIMIT_MS:
-            failures.append(f"abort.elapsedMs: {elapsed!r} is not in [90, {ABORT_LIMIT_MS})")
-    loaded = report.get("loadedFrom")
-    if native_dir is not None:
-        wanted = os.path.realpath(native_dir / "flyrail.node")
-        if not isinstance(loaded, str) or os.path.realpath(loaded) != wanted:
-            failures.append(f"loadedFrom: {loaded!r} is not {wanted}")
+    failures = [
+        *expect("runtime", report.get("runtime"), runtime),
+        *expect("flyrailVersion", report.get("flyrailVersion"), version),
+        *expect("bundleId", report.get("bundleId"), manifest["id"]),
+        *expect("bundleVersion", report.get("bundleVersion"), manifest["version"]),
+        *expect("install", report.get("install"), ["applied"]),
+        *expect("inspect", report.get("inspect"), [True]),
+        *expect("concurrent", report.get("concurrent"), ["applied"] * 8),
+        *expect("uninstall", report.get("uninstall"), ["applied"]),
+        *expect("skillRemoved", report.get("skillRemoved"), True),
+        *abort_failures(report.get("abort"), handshake),
+        *loaded_failures(report.get("loadedFrom"), native_dir),
+    ]
     if failures:
         raise StepFailedError("; ".join(failures))
 
@@ -376,6 +385,23 @@ def node_step(run_dir: Path, packages: Packages, host: Host) -> str:
     return (
         f"node {report['versions']['node']}, abort settled after {report['abort']['elapsedMs']} ms"  # type: ignore[index]
     )
+
+
+def missing_addon_step(run_dir: Path, packages: Packages, _host: Host) -> str:
+    directory = private_directory(run_dir / "missing-addon-consumer")
+    (directory / "package.json").write_text(json.dumps({"type": "module", "private": True}) + "\n")
+    run(["npm", "install", str(packages.flyrail)], directory)
+    shutil.copyfile(CONSUMER / "missing-addon.mjs", directory / "missing-addon.mjs")
+    report = json.loads(run(["node", "missing-addon.mjs"], directory).splitlines()[-1])
+    failures = [
+        *expect("loaded", report.get("loaded"), False),
+        *expect("nativeLoadError", report.get("nativeLoadError"), True),
+        *expect("name", report.get("name"), "NativeLoadError"),
+        *expect("attempts", report.get("attempts"), 2),
+    ]
+    if failures:
+        raise StepFailedError("; ".join(failures))
+    return "flyrail/errors imports without the addon; import('flyrail') rejects with NativeLoadError"
 
 
 def bun_executable() -> str:
@@ -545,6 +571,7 @@ def steps(host: Host) -> list[tuple[str, Step | None]]:
     return [
         ("publint and attw", lint_step),
         ("node consumer", node_step),
+        ("missing addon", missing_addon_step),
         ("bun consumer", bun_step),
         *(electron_steps if host.os == "darwin" else [("electron", None)]),
     ]

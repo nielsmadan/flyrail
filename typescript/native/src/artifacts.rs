@@ -1,13 +1,13 @@
 use crate::authority::{NativeAuthority, read_claim, write_claim};
 use crate::content::{
     Captured, Wire, node, parse, read_boundaries, read_content, read_key, read_member,
-    read_placement, read_schema, read_selector, read_tree, status, unknown_kind, write_boundaries,
+    read_placement, read_schema, read_selector, read_tree, unknown_kind, write_boundaries,
     write_content, write_key, write_member, write_placement, write_schema, write_selector,
     write_tree,
 };
 use crate::convert::whole;
 use crate::editing::{read_editing_model, write_editing_model};
-use crate::errors::{BindingError, BindingResult, tagged};
+use crate::errors::{BindingError, BindingResult, status, tagged};
 use crate::guard::{guarded, on_large_stack};
 use flyrail::{
     Agent, Artifact, AssetRef, Audience, Claim, Command, CommandArgument, Content, Dependency,

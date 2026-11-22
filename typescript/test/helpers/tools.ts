@@ -1,7 +1,6 @@
 import { accessSync, constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fixturesRequired } from './fixtures.js';
 
 export type Tool = 'node' | 'bun' | 'python';
 
@@ -42,15 +41,4 @@ export function requireTool(name: Tool): string {
     throw new Error(`${name} is required but was not found`);
   }
   return path;
-}
-
-export function toolAvailable(name: Tool): boolean {
-  if (locateTool(name) !== null) {
-    return true;
-  }
-  if (fixturesRequired()) {
-    throw new Error(`${name} is required but was not found`);
-  }
-  console.warn(`skipping: ${name} is not available`);
-  return false;
 }

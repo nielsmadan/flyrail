@@ -1,31 +1,45 @@
-import { FlyrailError, ValueError } from '../errors.js';
+import { ValueError } from '../errors.js';
 import { native } from '../native/loader.js';
+import type { LockOptions } from '../options.js';
 import type { CancelToken as NativeCancelToken } from '../native/binding.js';
-import { NativeAborted, foreignNativeError } from './call.js';
+import { NativeAborted, asFlyrailError } from './call.js';
 
 export type { NativeCancelToken };
 
-export interface CallOptions {
-  readonly signal?: AbortSignal;
-}
-
-export interface LockOptions extends CallOptions {
-  readonly lockTimeoutMs?: number;
-}
-
 const begin = <T>(start: () => Promise<T>): Promise<T> => {
-  const wrap = (error: unknown): FlyrailError =>
-    error instanceof FlyrailError ? error : foreignNativeError(error);
   try {
     return start().catch((error: unknown) => {
-      throw wrap(error);
+      throw asFlyrailError(error);
     });
   } catch (error) {
-    return Promise.reject(wrap(error));
+    return Promise.reject(asFlyrailError(error));
   }
 };
 
 const abortedReason = (signal: AbortSignal): unknown => signal.reason;
+
+const settleOrAbort = <T>(
+  signal: AbortSignal,
+  pending: Promise<T>,
+  onAbort: (reject: (reason: unknown) => void) => void,
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const abort = (): void => {
+      signal.removeEventListener('abort', abort);
+      onAbort(reject);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', abort);
+        reject(error instanceof NativeAborted ? abortedReason(signal) : error);
+      },
+    );
+  });
 
 export function runMutation<T>(
   signal: AbortSignal | undefined,
@@ -38,17 +52,13 @@ export function runMutation<T>(
     return Promise.reject(abortedReason(signal));
   }
   const token = new native.CancelToken();
-  const onAbort = (): void => {
-    token.cancel();
-  };
-  signal.addEventListener('abort', onAbort, { once: true });
-  return begin(() => start(token))
-    .catch((error: unknown) => {
-      throw error instanceof NativeAborted ? abortedReason(signal) : error;
-    })
-    .finally(() => {
-      signal.removeEventListener('abort', onAbort);
-    });
+  return settleOrAbort(
+    signal,
+    begin(() => start(token)),
+    () => {
+      token.cancel();
+    },
+  );
 }
 
 export function runReadOnly<T>(
@@ -61,27 +71,8 @@ export function runReadOnly<T>(
   if (signal.aborted) {
     return Promise.reject(abortedReason(signal));
   }
-  const pending = begin(start);
-  return new Promise<T>((resolve, reject) => {
-    const settle = (): void => {
-      signal.removeEventListener('abort', onAbort);
-    };
-    const onAbort = (): void => {
-      settle();
-      pending.catch(() => undefined);
-      reject(abortedReason(signal));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    pending.then(
-      (value) => {
-        settle();
-        resolve(value);
-      },
-      (error: unknown) => {
-        settle();
-        reject(error instanceof NativeAborted ? abortedReason(signal) : error);
-      },
-    );
+  return settleOrAbort(signal, begin(start), (reject) => {
+    reject(abortedReason(signal));
   });
 }
 

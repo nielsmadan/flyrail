@@ -1,11 +1,14 @@
 import {
   AuthorityError,
+  type AuthorityErrorKind,
   BundleError,
+  type BundleErrorKind,
   FlyrailError,
   HookError,
   NativeError,
   NativePanicError,
   StoreError,
+  type StoreErrorKind,
   UnsupportedTranslationError,
   ValueError,
 } from '../errors.js';
@@ -52,14 +55,29 @@ export class NativeAborted extends FlyrailError {
   }
 }
 
+const BUNDLE_KINDS: readonly BundleErrorKind[] = ['invalid', 'io'];
+const AUTHORITY_KINDS: readonly AuthorityErrorKind[] = ['invalid', 'unsafe', 'io'];
+const STORE_KINDS: readonly StoreErrorKind[] = ['busy', 'invalid-key', 'io'];
+
+const knownKind = (kinds: readonly string[], kind: string): boolean => kinds.includes(kind);
+
+const unknownPayload = (payload: NativeErrorPayload): NativeError =>
+  new NativeError(`unknown native error payload: ${JSON.stringify(payload)}`);
+
 export function translateNativeError(payload: NativeErrorPayload): FlyrailError {
   switch (payload.type) {
     case 'value':
     case 'argument':
       return new ValueError(payload.message);
     case 'bundle':
+      if (!knownKind(BUNDLE_KINDS, payload.kind)) {
+        return unknownPayload(payload);
+      }
       return new BundleError(payload.kind, payload.message, payload.errno ?? null);
     case 'authority':
+      if (!knownKind(AUTHORITY_KINDS, payload.kind)) {
+        return unknownPayload(payload);
+      }
       return new AuthorityError(
         payload.kind,
         payload.message,
@@ -67,6 +85,9 @@ export function translateNativeError(payload: NativeErrorPayload): FlyrailError 
         payload.errno ?? null,
       );
     case 'store':
+      if (!knownKind(STORE_KINDS, payload.kind)) {
+        return unknownPayload(payload);
+      }
       return new StoreError(
         payload.kind,
         payload.message,
@@ -85,16 +106,16 @@ export function translateNativeError(payload: NativeErrorPayload): FlyrailError 
     case 'native':
       return new NativeError(payload.message);
     default:
-      return new NativeError(`unknown native error payload: ${JSON.stringify(payload)}`);
+      return unknownPayload(payload);
   }
 }
 
-export function foreignNativeError(error: unknown): NativeError {
+function foreignNativeError(error: unknown): NativeError {
   const message = error instanceof Error ? error.message : String(error);
   return new NativeError(message, { cause: error });
 }
 
-const asFlyrailError = (error: unknown): FlyrailError =>
+export const asFlyrailError = (error: unknown): FlyrailError =>
   error instanceof FlyrailError ? error : foreignNativeError(error);
 
 const isTagged = (result: unknown): result is NativeResult<unknown> =>

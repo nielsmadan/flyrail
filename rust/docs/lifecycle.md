@@ -44,10 +44,21 @@ and binds the observed file through publication.
 token. Cancellation is checked before each lock attempt, during lock waits, and
 once more after every transaction lock is held; it is ignored from the first
 durable write onward, so a scope that reached it returns its real result.
-`Err(Cancelled)` means no index, receipt, journal or preparation was written, no destination content was published or removed, and no recovery ran. Lock files, store/staging/destination parent directories and authority records may persist, the same footprint a busy timeout leaves. A target that ends `Unchanged` or fails preflight leaves later
-targets cancellable. The internal 10 s `DirectoryStore` mutation lock inside a
-single store write is not cancellable, so cancellation latency can reach that
-bound.
+`Err(Cancelled)` means no index, receipt, journal or preparation was written,
+no destination content was published or removed, and no recovery ran. Lock
+files, store/staging/destination parent directories and authority records may
+persist, the same footprint a busy timeout leaves. A target that ends
+`Unchanged` or fails preflight leaves later targets cancellable. The internal
+10 s `DirectoryStore` mutation lock inside a single store write is not
+cancellable, so cancellation latency can reach that bound.
+
+Lock waits under a token are sliced into 20 ms polls, so a cancellable waiter
+can lose fairness to a non-cancellable one in another process; the lock timeout
+still bounds the wait.
+
+That mutation lock is store-wide, has a fixed 10 s timeout independent of the
+caller's lock timeout, polls unfairly and is held across fsyncs. Under heavy
+concurrency a writer can be starved into a timeout.
 
 ## Global Loadout sources
 

@@ -1043,7 +1043,7 @@ fn cancelled_result(identifier: &str, target: &InstallationTarget) -> Installati
         target,
         TargetError::new(
             ErrorCode::Busy,
-            "operation cancelled before commit",
+            crate::cancellation::Cancelled.to_string(),
             None,
             None,
         ),

@@ -1,7 +1,7 @@
 use crate::artifacts::{Model, read_dependencies};
-use crate::content::{Captured, status};
+use crate::content::Captured;
 use crate::convert::absolute_path;
-use crate::errors::{BindingError, BindingResult, tagged};
+use crate::errors::{BindingError, BindingResult, status, tagged};
 use crate::guard::{guarded, on_large_stack};
 use crate::render::{
     NativeRenderContext, NativeRenderedBundle, wrap_rendered, write_notice, write_rendered_artifact,

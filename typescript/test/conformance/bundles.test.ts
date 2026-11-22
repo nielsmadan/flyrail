@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { Bundle, directoryEntry, fileEntry, type BundleEntry } from 'flyrail';
 import { fixture } from '../helpers/fixtures.js';
+import { fromHex } from '../helpers/bytes.js';
 
 interface FixtureEntry {
   readonly path: string;
@@ -18,11 +19,10 @@ interface BundleCase {
 }
 
 const document = fixture('bundles.json') as { readonly cases: readonly BundleCase[] } | undefined;
-const hex = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, 'hex'));
 
 const memoryEntries = (testCase: BundleCase): readonly BundleEntry[] => [
   ...testCase.directories.map((path) => directoryEntry(path)),
-  ...testCase.files.map((file) => fileEntry(file.path, hex(file.data_hex))),
+  ...testCase.files.map((file) => fileEntry(file.path, fromHex(file.data_hex))),
 ];
 
 describe.skipIf(document === undefined)('bundles.json', () => {

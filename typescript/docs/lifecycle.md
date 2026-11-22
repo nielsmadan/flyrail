@@ -93,17 +93,28 @@ native cancel token into the crate's `cancellable` scope. Lock waits end early
 once the token is cancelled, and the token is checked once more right after a
 transaction's locks are acquired.
 
-- Cancelled before the first durable write: the Promise rejects with the exact
-  `signal.reason`. `Err(Cancelled)` means no index, receipt, journal or
-  preparation was written, no destination content was published or removed,
-  and no recovery ran. Lock files, store/staging/destination parent
-  directories and authority records (which the transaction protocol retains
-  permanently anyway) may persist, the same footprint a busy timeout leaves.
-- Aborted after the first durable write began: the token is ignored, and the
-  Promise resolves with the real result.
+- Seen before dispatch, when a worker dequeues the job, during a lock wait or
+  at the post-lock check: the Promise rejects with the exact `signal.reason`.
+  No index, receipt, journal or preparation was written, no destination
+  content was published or removed, and no recovery ran. Lock files,
+  store/staging/destination parent directories and authority records (which
+  the transaction protocol retains permanently anyway) may persist, the same
+  footprint a busy timeout leaves.
+- Aborted once any target's first durable write has begun: the token is
+  ignored, and the Promise resolves with the real result, whether or not
+  anything is then written. In a multi-target `install`, `update` or
+  `uninstall`, an earlier target that ends `unchanged` or fails preflight
+  leaves later targets' checkpoints active, so an abort during a later
+  target's lock wait still rejects.
 
 The internal 10 s mutation lock inside a single `DirectoryStore` write is not
 cancellable, so cancellation latency can reach that bound.
+
+`DirectoryStore` serializes its writes with a store-wide mutation lock that has a
+fixed 10 s timeout, polls unfairly and is held across fsyncs. The caller's
+`lockTimeoutMs` does not apply to it, so under heavy load one of many concurrent
+writers on a store can fail with a `failed` result. The behaviour belongs to the
+shared engine and is the same in every implementation.
 
 Read-only calls (`preview`, `previewRemoval`, `inspectInstallation`, store
 `read` and `keys`, `DirectoryStore.open`) reject with `signal.reason` as soon as
@@ -169,6 +180,6 @@ mutation before calling `process.exit` or Electron's `app.exit`; exiting
 earlier abandons the operation wherever it is, which the next `sync`,
 `remove` or `recoverInstallation` then recovers. Blocking work runs on the
 addon's own worker pool, never on libuv's, so lock waits do not starve Node's
-filesystem work. Calling the package from `worker_threads` is supported: the
-design spike terminated a worker with a call in flight on Node, Bun and
-Electron without a crash or a hang.
+filesystem work. Calling the package from `worker_threads` is supported;
+terminating a worker with a call in flight is not covered by an automated
+check.
