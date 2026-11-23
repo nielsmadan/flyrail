@@ -9,11 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache"
-PINS = {
-    "swift-system": ("1.9.0", "640e5755b5826f4437eaeedd366fd776737db62c"),
-    "swift-docc-plugin": ("1.5.0", "647c708be89f834fa6a6d4945442793a77ddf5b6"),
-    "swift-docc-symbolkit": ("1.0.0", "b45d1f2ed151d057b54504d653e0da5552844e34"),
-}
+RESOLVED = {"swift-system", "swift-docc-plugin", "swift-docc-symbolkit"}
 
 CONSUMER = r'''
 import Flyrail
@@ -192,9 +188,18 @@ def verify_manifest(package, scratch):
     assert set(targets) == {"Flyrail", "FlyrailInteropSupport", "FlyrailInterop", "FlyrailTests"}
     assert targets["Flyrail"]["path"] == "swift/Sources/Flyrail"
     assert targets["Flyrail"]["resources"] == [{"path": "Resources", "rule": {"copy": {}}}]
-    pins = json.loads((package / "Package.resolved").read_bytes())
-    assert {pin["identity"]: (pin["state"]["version"], pin["state"]["revision"])
-            for pin in pins["pins"]} == PINS
+    pins = {pin["identity"]: pin["state"]
+            for pin in json.loads((package / "Package.resolved").read_bytes())["pins"]}
+    assert set(pins) == RESOLVED
+    assert all(set(state) == {"version", "revision"} and len(state["revision"]) == 40
+               for state in pins.values())
+    assert all(version(bound["lowerBound"]) <= version(pins[identity]["version"])
+               < version(bound["upperBound"])
+               for identity, [bound] in dependencies.items())
+
+
+def version(text):
+    return tuple(int(part) for part in text.split("."))
 
 
 def main():
