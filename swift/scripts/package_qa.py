@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache"
 PINS = {
-    "swift-system": ("1.8.1", "869129b7bf4ecc57b97d0193ad29690ca2134750"),
+    "swift-system": ("1.9.0", "640e5755b5826f4437eaeedd366fd776737db62c"),
     "swift-docc-plugin": ("1.5.0", "647c708be89f834fa6a6d4945442793a77ddf5b6"),
     "swift-docc-symbolkit": ("1.0.0", "b45d1f2ed151d057b54504d653e0da5552844e34"),
 }
