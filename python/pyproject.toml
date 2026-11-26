@@ -103,6 +103,7 @@ filterwarnings = ["error"]
 branch = true
 source = ["flyrail"]
 data_file = ".cache/coverage/.coverage"
+relative_files = true
 
 [tool.coverage.report]
 show_missing = true

@@ -82,7 +82,10 @@ In PowerShell, set `$env:UV_PYTHON = '3.14'` before running the command. Run
 interpreter checks sequentially because they share `python/.venv`.
 
 `check` fails on any failed command, no tests, or combined line/branch coverage
-below 95%. Platform-specific tests run on applicable hosts. Package checks verify
+below 95%. Platform-specific tests run on applicable hosts. In CI the integration
+jobs skip the per-host gate (`FLYRAIL_COMBINED_COVERAGE=1`) and upload their data;
+the Combined coverage job merges the macOS and Ubuntu runs with `check.py
+combine-coverage` and applies the 95% gate there. Package checks verify
 exact payloads, metadata, source-archive rebuilds, installed typing and actual
 example CLI behavior; see [examples](examples.md#what-check-package-verifies).
 
@@ -207,8 +210,9 @@ tag. Package QA runs again against the prepared version before the release commi
 is created.
 
 CI validates that the immutable tag belongs to `main` and matches the project
-version. A read-only job reruns all release gates, builds and installs the sdist
-and wheel, and saves one verified artifact bundle. A separate OIDC-only job
+version. A read-only job reruns all release gates, builds the sdist and then the
+wheel from it, runs `check-package` against those exact files
+(`FLYRAIL_PACKAGE_DIST`), and saves them as one verified artifact bundle. A separate OIDC-only job
 publishes the bundle to PyPI. Only after PyPI succeeds does a `contents: write`
 job create the GitHub Release and attach the same artifacts. Curtains prints the
 workflow and release locations; it does not require the GitHub CLI and does not

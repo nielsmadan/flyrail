@@ -14,8 +14,9 @@ COVERAGE = (
     "--cov-branch",
     "--cov-report=term-missing",
     "--cov-report=xml:.cache/coverage/coverage.xml",
-    "--cov-fail-under=95",
 )
+MINIMUM_COVERAGE = "95"
+PLATFORM_COVERAGE = ROOT / ".cache/coverage/platforms"
 
 
 def uv_executable() -> str | None:
@@ -53,6 +54,7 @@ def main() -> int:
         choices=(
             "check",
             "check-integration",
+            "combine-coverage",
             "format",
             "sync",
             "lock",
@@ -88,9 +90,23 @@ def main() -> int:
             [uv, "run", "--no-sync", "pytest", "-m", "not integration"],
         ]
     elif arguments.action == "check-integration":
+        gate = (
+            []
+            if os.environ.get("FLYRAIL_COMBINED_COVERAGE") == "1"
+            else [f"--cov-fail-under={MINIMUM_COVERAGE}"]
+        )
         commands += [
             [uv, "run", "--no-sync", "python", "scripts/runtime_check.py"],
-            [uv, "run", "--no-sync", "pytest", *COVERAGE],
+            [uv, "run", "--no-sync", "pytest", *COVERAGE, *gate],
+        ]
+    elif arguments.action == "combine-coverage":
+        platforms = sorted(map(str, PLATFORM_COVERAGE.glob("*/.coverage")))
+        if not platforms:
+            print(f"No coverage data under {PLATFORM_COVERAGE}.", file=sys.stderr)
+            return 1
+        commands += [
+            [uv, "run", "--no-sync", "coverage", "combine", "--keep", *platforms],
+            [uv, "run", "--no-sync", "coverage", "report", f"--fail-under={MINIMUM_COVERAGE}"],
         ]
     elif arguments.action == "audit-dependencies":
         commands = [
