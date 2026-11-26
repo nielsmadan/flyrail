@@ -64,7 +64,9 @@ package `flyrail`), `cargo add flyrail`, or a SwiftPM dependency on
 `go/vX.Y.Z` tag once released (`go get github.com/nielsmadan/flyrail/go/flyrail`);
 until the first release, `@main` resolves a pseudo-version. Each
 implementation is versioned and released separately with
-`just release <python|rust|swift|go>`.
+`just release <python|rust|swift|go>`. `just release-all` previews every implementation
+with unreleased changes, asks once, then releases them one after another, each with its own
+release commit and tag; `--dry-run` stops after the previews.
 
 Without just, run `python3 python/scripts/check.py check` from this directory.
 See [Python development](python/docs/development.md),

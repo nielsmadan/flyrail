@@ -15,7 +15,9 @@ ignored. Do not alter HOME, global tools, hooks or real agent installations.
 
 The root Justfile delegates to implemented languages. Each language releases
 independently from `<language>/scripts/release.json` through `just release
-<language>`. Release workflows validate tags and publish GitHub releases with `curtains ci`
+<language>`; `just release-all` previews them all, confirms once and runs each release with
+`--yes`, one commit and tag per language (GitHub starts no workflows when more than three tags
+are pushed at once). Release workflows validate tags and publish GitHub releases with `curtains ci`
 from the pinned `nielsmadan/curtaincall` action, selecting the language's policy with `--config`;
 `python/scripts/release_workflow.py` only checks project metadata. Run the affected language's
 checks and package verification after changes; test shared fixtures in each
