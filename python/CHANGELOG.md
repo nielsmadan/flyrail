@@ -3,6 +3,20 @@
 All notable user-facing changes to Flyrail for Python. Package versions are independent from
 configuration bundle labels and shared format schema versions.
 
+## [0.5.0] - 2026-11-26
+
+
+### Features
+
+- Add Rust and Swift release automation
+- Add the Go implementation
+- Add global loadout support
+
+
+### Bug Fixes
+
+- Gate ci coverage on combined macos and ubuntu data
+
 ## [0.4.0] - 2026-11-01
 
 
@@ -62,6 +76,7 @@ configuration bundle labels and shared format schema versions.
 - Correct Windows filesystem semantics
 - Ignore inherited git context in the release helper
 
+[0.5.0]: https://github.com/nielsmadan/flyrail/compare/python-v0.4.0..python-v0.5.0
 [0.4.0]: https://github.com/nielsmadan/flyrail/compare/python-v0.3.1..python-v0.4.0
 [0.3.0]: https://github.com/nielsmadan/flyrail/compare/python-v0.2.0..python-v0.3.0
 [0.2.0]: https://github.com/nielsmadan/flyrail/compare/python-v0.1.0..python-v0.2.0
