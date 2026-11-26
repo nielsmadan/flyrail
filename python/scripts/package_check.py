@@ -177,21 +177,25 @@ def main() -> int:
     consumer = work / "consumer"
     consumer.mkdir()
     build_environment = {**environment, "PATH": ""}
+    prebuilt = os.environ.get("FLYRAIL_PACKAGE_DIST")
     wheels: list[Path] = []
     for index, project in enumerate(
         [ROOT, ROOT / "examples/filesystem", ROOT / "examples/packaged"]
     ):
         output = work / f"build-{index}"
         build = [uv, "--no-config", "build", "--no-build-isolation", "--python", sys.executable]
-        run(
-            [*build, "--sdist", "--wheel", "--out-dir", str(output), str(project)],
-            consumer,
-            build_environment,
-        )
+        if project == ROOT and prebuilt:
+            output = Path(prebuilt).resolve()
+        else:
+            run(
+                [*build, "--sdist", "--wheel", "--out-dir", str(output), str(project)],
+                consumer,
+                build_environment,
+            )
         (wheel,) = output.glob("*.whl")
         (sdist,) = output.glob("*.tar.gz")
         verify_artifacts(project, wheel, sdist)
-        rebuilt = output / "rebuilt"
+        rebuilt = work / f"rebuilt-{index}"
         run([*build, "--wheel", "--out-dir", str(rebuilt), str(sdist)], consumer, build_environment)
         (rebuilt_wheel,) = rebuilt.glob("*.whl")
         require(

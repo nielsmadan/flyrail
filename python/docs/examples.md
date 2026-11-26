@@ -114,6 +114,10 @@ Runtime Flyrail depends only on pinned `tomlkit`, imported lazily for TOML editi
 The package check downloads that exact wheel, verifies its lockfile hash and
 metadata, and rejects unexpected transitive runtime dependencies.
 
+With `FLYRAIL_PACKAGE_DIST` set to a directory holding a Flyrail wheel and sdist,
+the gate checks those files instead of building the library, as the release
+workflow does for the distributions it publishes.
+
 Builds and byte-identical rebuilds run with an empty PATH, so they cannot use
 Node, npm, Bun or a JavaScript compiler. All three authored runtime modules ship
 as source assets.

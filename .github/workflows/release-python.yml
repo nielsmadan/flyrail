@@ -123,20 +123,12 @@ jobs:
           test -f "dist/pyflyrail-${VERSION}.tar.gz"
           test -f "dist/pyflyrail-${VERSION}-py3-none-any.whl"
 
-      - name: Verify isolated wheel and sdist installs
+      - name: Check the distributions that will be published
         working-directory: release-source
-        run: |
-          uv venv --python 3.11 .cache/release/wheel-env
-          uv pip install --python .cache/release/wheel-env/bin/python \
-            "python/dist/pyflyrail-${VERSION}-py3-none-any.whl"
-          .cache/release/wheel-env/bin/python -I -c \
-            "import importlib.metadata, flyrail; assert importlib.metadata.version('pyflyrail') == '${VERSION}'"
-          uv venv --python 3.11 .cache/release/sdist-env
-          uv pip install --no-cache --reinstall \
-            --python .cache/release/sdist-env/bin/python \
-            "python/dist/pyflyrail-${VERSION}.tar.gz"
-          .cache/release/sdist-env/bin/python -I -c \
-            "import importlib.metadata, flyrail; assert importlib.metadata.version('pyflyrail') == '${VERSION}'"
+        env:
+          UV_PYTHON: "3.11"
+          UV_MANAGED_PYTHON: "1"
+        run: FLYRAIL_PACKAGE_DIST="$PWD/python/dist" python python/scripts/check.py check-package
 
       - name: Assemble verified release bundle
         working-directory: release-source
