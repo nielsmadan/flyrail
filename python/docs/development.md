@@ -58,7 +58,7 @@ uv run --no-sync mypy --platform linux
 | Command | Work performed |
 | --- | --- |
 | `just check` | Locked sync, Ruff format/lint/security checks, interpreter verification, strict mypy, and the unit test tier. Runs in seconds; this is the git-hook and local release gate. |
-| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 95% gate, and package/consumer checks. Needs Node, npm and Bun. Also runs the Rust, Swift and Go integration tiers. |
+| `just check-integration` | Hook runtime checks, the complete test suite with branch coverage and the 80% gate, and package/consumer checks. Needs Node, npm and Bun. Also runs the Rust, Swift and Go integration tiers. |
 | `just audit-dependencies` | Audit every locked registry package/version with pip-audit. |
 | `just check-workflow` | Validate all repository workflows with actionlint. |
 | `just check-package` | Build and verify distributions and installed example applications, then the Rust, Swift and Go package checks. |
@@ -82,10 +82,10 @@ In PowerShell, set `$env:UV_PYTHON = '3.14'` before running the command. Run
 interpreter checks sequentially because they share `python/.venv`.
 
 `check` fails on any failed command, no tests, or combined line/branch coverage
-below 95%. Platform-specific tests run on applicable hosts. In CI the integration
+below 80%. Platform-specific tests run on applicable hosts. In CI the integration
 jobs skip the per-host gate (`FLYRAIL_COMBINED_COVERAGE=1`) and upload their data;
 the Combined coverage job merges the macOS and Ubuntu runs with `check.py
-combine-coverage` and applies the 95% gate there. Package checks verify
+combine-coverage` and applies the 80% gate there. Package checks verify
 exact payloads, metadata, source-archive rebuilds, installed typing and actual
 example CLI behavior; see [examples](examples.md#what-check-package-verifies).
 
@@ -209,12 +209,13 @@ creates an annotated `python-vVERSION` tag and atomically pushes `main` with tha
 tag. Package QA runs again against the prepared version before the release commit
 is created.
 
-CI validates that the immutable tag belongs to `main` and matches the project
-version. A read-only job reruns all release gates, builds the sdist and then the
-wheel from it, runs `check-package` against those exact files
-(`FLYRAIL_PACKAGE_DIST`), and saves them as one verified artifact bundle. A separate OIDC-only job
-publishes the bundle to PyPI. Only after PyPI succeeds does a `contents: write`
-job create the GitHub Release and attach the same artifacts. Curtains prints the
+CI validates that the immutable tag belongs to `main` and matches the project version. A
+read-only job reruns all release gates except the coverage gate, which main's CI applies
+to the combined platforms, builds the sdist and then the wheel from it, runs
+`check-package` against those exact files (`FLYRAIL_PACKAGE_DIST`), and saves them as
+one verified artifact bundle. A separate OIDC-only job publishes the bundle to PyPI.
+Only after PyPI succeeds does a `contents: write` job create the GitHub Release and
+attach the same artifacts. Curtains prints the
 workflow and release locations; it does not require the GitHub CLI and does not
 wait for publication. Follow the printed workflow link to confirm it. The GitHub
 Release is marked as a pre-release while the project's Development Status

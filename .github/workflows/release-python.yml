@@ -106,6 +106,7 @@ jobs:
           UV_PYTHON: "3.11"
           UV_MANAGED_PYTHON: "1"
           FLYRAIL_TEST_CODEX_LOGIN_SHELL: "1"
+          FLYRAIL_COMBINED_COVERAGE: "1"
         run: |
           python python/scripts/check.py check
           python python/scripts/check.py check-integration

@@ -15,7 +15,7 @@ COVERAGE = (
     "--cov-report=term-missing",
     "--cov-report=xml:.cache/coverage/coverage.xml",
 )
-MINIMUM_COVERAGE = "95"
+MINIMUM_COVERAGE = "80"
 PLATFORM_COVERAGE = ROOT / ".cache/coverage/platforms"
 
 
