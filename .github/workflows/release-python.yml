@@ -64,7 +64,7 @@ jobs:
           ref: ${{ steps.identity.outputs.release-commit }}
           path: release-source
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.12.13"
           enable-cache: false
@@ -188,7 +188,7 @@ jobs:
         with:
           python-version: "3.14"
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.12.13"
           enable-cache: false
@@ -219,7 +219,7 @@ jobs:
           name: python-release-bundle
           path: release-bundle
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.12.13"
           enable-cache: false
