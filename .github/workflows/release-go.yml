@@ -79,7 +79,7 @@ jobs:
           python ../python/scripts/release_workflow.py project-metadata \
             "$RELEASE_TAG" go/go.mod >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v7.0.0
+      - uses: actions/setup-go@v7.1.0
         with:
           go-version: "1.27.3"
           cache: false
@@ -88,7 +88,7 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: "0.12.13"
           enable-cache: false
